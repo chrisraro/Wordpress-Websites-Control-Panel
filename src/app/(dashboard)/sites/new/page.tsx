@@ -18,7 +18,6 @@ export default function NewSitePage() {
             name="name"
             required
             placeholder="El Nido Guide"
-            autoComplete="off"
             className="w-full rounded border px-3 py-2"
           />
         </div>
@@ -33,7 +32,7 @@ export default function NewSitePage() {
             type="url"
             required
             placeholder="https://example.com"
-            autoComplete="off"
+            autoComplete="url"
             className="w-full rounded border px-3 py-2"
           />
         </div>
@@ -46,7 +45,7 @@ export default function NewSitePage() {
             id="wpUsername"
             name="wpUsername"
             required
-            autoComplete="off"
+            autoComplete="username"
             className="w-full rounded border px-3 py-2"
           />
         </div>
@@ -75,7 +74,6 @@ export default function NewSitePage() {
           <input
             id="clientLabel"
             name="clientLabel"
-            autoComplete="off"
             className="w-full rounded border px-3 py-2"
           />
         </div>
