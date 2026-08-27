@@ -21,7 +21,14 @@ async function run(req: Request) {
     const res = await enqueueJob(jobs, "snapshot_refresh", site.id, {}, { dedupe: true });
     if (res) enqueued++;
   }
-  return NextResponse.json({ ok: true, sites: sites.length, enqueued });
+  let scans = 0;
+  for (const site of sites) {
+    if (site.status === "disabled") continue;
+    const res = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
+    if (res) scans++;
+  }
+  const feedJob = await enqueueJob(jobs, "vuln_feed_refresh", null, {}, { dedupe: true });
+  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, feed: Boolean(feedJob) });
 }
 
 export const POST = run;

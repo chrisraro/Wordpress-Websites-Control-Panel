@@ -27,6 +27,15 @@ select cron.schedule('wp-panel-enqueue', '0 2 * * *', $$
     headers := jsonb_build_object('x-cron-secret', 'CRON_SECRET')
   );
 $$);
+
+-- uptime + SSL checks every 5 minutes
+select cron.schedule('wp-panel-uptime', '*/5 * * * *', $$
+  select net.http_post(
+    url := 'APP_URL/api/cron/uptime',
+    headers := jsonb_build_object('x-cron-secret', 'CRON_SECRET'),
+    timeout_milliseconds := 60000
+  );
+$$);
 ```
 
 Inspect: `select * from cron.job;` — Unschedule: `select cron.unschedule('wp-panel-process');`
