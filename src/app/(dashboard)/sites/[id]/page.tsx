@@ -6,10 +6,11 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { runConnectionTest } from "./actions";
 import { SiteTabs } from "./tabs";
-import { ConfirmButton } from "./confirm-button";
+import { ManageForm, type ManageFormAction } from "./action-form";
 import { manageAction, refreshInventoryAction } from "./manage-actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export default async function SitePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -28,22 +29,20 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
     .limit(10);
 
   const testAction = runConnectionTest.bind(null, id) as unknown as (formData: FormData) => Promise<void>;
-  const refresh = refreshInventoryAction.bind(null, id) as unknown as () => Promise<void>;
-  const updateCore = manageAction.bind(null, id, { kind: "update_core" as const }) as unknown as () => Promise<void>;
-  const maintenanceOn = manageAction.bind(null, id, { kind: "maintenance" as const, enable: true }) as unknown as () => Promise<void>;
-  const maintenanceOff = manageAction.bind(null, id, { kind: "maintenance" as const, enable: false }) as unknown as () => Promise<void>;
-  const flushCache = manageAction.bind(null, id, { kind: "flush_cache" as const }) as unknown as () => Promise<void>;
-  const flushPermalinks = manageAction.bind(null, id, { kind: "flush_permalinks" as const }) as unknown as () => Promise<void>;
+  const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
+  const updateCore = manageAction.bind(null, id, { kind: "update_core" as const }) as unknown as ManageFormAction;
+  const maintenanceOn = manageAction.bind(null, id, { kind: "maintenance" as const, enable: true }) as unknown as ManageFormAction;
+  const maintenanceOff = manageAction.bind(null, id, { kind: "maintenance" as const, enable: false }) as unknown as ManageFormAction;
+  const flushCache = manageAction.bind(null, id, { kind: "flush_cache" as const }) as unknown as ManageFormAction;
+  const flushPermalinks = manageAction.bind(null, id, { kind: "flush_permalinks" as const }) as unknown as ManageFormAction;
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <h1 className="min-w-0 break-words text-2xl font-semibold">{site.name}</h1>
-        <div className="flex gap-2">
-          <form action={refresh}>
-            <ConfirmButton label="Refresh inventory" pendingLabel="Refreshing…"
-              confirmMessage="Fetch fresh inventory from the site now?" />
-          </form>
+        <div className="flex flex-wrap gap-2">
+          <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
+            confirmMessage="Fetch fresh inventory from the site now?" />
           <form action={testAction}>
             <button className="min-h-10 rounded border px-3 py-2 text-sm hover:bg-slate-100">
               Test connection
@@ -62,11 +61,9 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
       {inv?.core_update && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">
           <span>WordPress {inv.core_update} is available (current: {inv.wp_version}).</span>
-          <form action={updateCore}>
-            <ConfirmButton label="Update core" pendingLabel="Updating…"
-              confirmMessage={`Update WordPress core on ${site.name} to ${inv.core_update}? Back up first if unsure.`}
-              className="rounded bg-amber-600 px-3 py-2 text-sm text-white disabled:opacity-50" />
-          </form>
+          <ManageForm action={updateCore} label="Update core" pendingLabel="Updating…"
+            confirmMessage={`Update WordPress core on ${site.name} to ${inv.core_update}? Back up first if unsure.`}
+            buttonClassName="rounded bg-amber-600 px-3 py-2 text-sm text-white disabled:opacity-50" />
         </div>
       )}
 
@@ -116,22 +113,14 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         <section className="rounded-lg border bg-white p-4 shadow-sm">
           <h2 className="mb-3 font-medium">Tools</h2>
           <div className="flex flex-wrap gap-2 text-sm">
-            <form action={maintenanceOn}>
-              <ConfirmButton label="Maintenance on" pendingLabel="…"
-                confirmMessage={`Put ${site.name} into maintenance mode? Visitors will see a maintenance page.`} />
-            </form>
-            <form action={maintenanceOff}>
-              <ConfirmButton label="Maintenance off" pendingLabel="…"
-                confirmMessage={`Take ${site.name} out of maintenance mode?`} />
-            </form>
-            <form action={flushCache}>
-              <ConfirmButton label="Flush cache" pendingLabel="…"
-                confirmMessage={`Flush the object cache on ${site.name}?`} />
-            </form>
-            <form action={flushPermalinks}>
-              <ConfirmButton label="Flush permalinks" pendingLabel="…"
-                confirmMessage={`Flush rewrite rules on ${site.name}?`} />
-            </form>
+            <ManageForm action={maintenanceOn} label="Maintenance on" pendingLabel="…"
+              confirmMessage={`Put ${site.name} into maintenance mode? Visitors will see a maintenance page.`} />
+            <ManageForm action={maintenanceOff} label="Maintenance off" pendingLabel="…"
+              confirmMessage={`Take ${site.name} out of maintenance mode?`} />
+            <ManageForm action={flushCache} label="Flush cache" pendingLabel="…"
+              confirmMessage={`Flush the object cache on ${site.name}?`} />
+            <ManageForm action={flushPermalinks} label="Flush permalinks" pendingLabel="…"
+              confirmMessage={`Flush rewrite rules on ${site.name}?`} />
           </div>
         </section>
 

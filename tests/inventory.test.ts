@@ -1,88 +1,65 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { collectInventory, refreshSnapshot } from "@/services/inventory/service";
-import { pendingUpdates, type InventoryPayload } from "@/services/inventory/types";
-import { MockMcpClient } from "@/lib/mcp/mock";
 import { randomBytes } from "node:crypto";
-import { encryptSecret } from "@/lib/crypto/secrets";
-import type { SitesRepo } from "@/services/sites/repo";
+import { collectInventory, refreshSnapshot, INVENTORY_PHP } from "@/services/inventory/service";
+import { pendingUpdates, type InventoryPayload } from "@/services/inventory/types";
 import type { SnapshotsRepo } from "@/services/inventory/repo";
+import type { SitesRepo } from "@/services/sites/repo";
+import { MockMcpClient } from "@/lib/mcp/mock";
+import { encryptSecret } from "@/lib/crypto/secrets";
 
-const CLI_FIXTURES: Record<string, unknown> = {
-  "core version": "6.7.1",
-  "eval echo PHP_VERSION;": "8.2.20",
-  "plugin list --format=json --fields=name,title,version,status,update,update_version":
-    '[{"name":"akismet","title":"Akismet","version":"5.3","status":"active","update":"available","update_version":"5.4"},' +
-    '{"name":"hello","title":"Hello Dolly","version":"1.7","status":"inactive","update":"none","update_version":null}]',
-  "theme list --format=json --fields=name,title,version,status,update,update_version":
-    '[{"name":"generatepress","title":"GeneratePress","version":"3.4","status":"active","update":"none","update_version":null}]',
-  "core check-update --format=json":
-    '[{"version":"6.8","update_type":"major"}]',
-  "user list --role=administrator --format=json --fields=ID,user_login,user_email":
-    '[{"ID":1,"user_login":"admin","user_email":"a@b.co"}]',
+const RAW = {
+  wp_version: "6.7.1",
+  php_version: "8.2.20",
+  core_update: "6.8",
+  plugins: [
+    { file: "akismet/akismet.php", name: "akismet", title: "Akismet", version: "5.3", status: "active", update: "available", update_version: "5.4" },
+    { file: "hello.php", name: "hello", title: "Hello Dolly", version: "1.7", status: "inactive", update: "none", update_version: null },
+  ],
+  themes: [
+    { name: "generatepress", title: "GeneratePress", version: "3.4", status: "active", update: "none", update_version: null },
+  ],
+  admin_users: [{ ID: 1, user_login: "admin", user_email: "a@b.co" }],
 };
 
-function fixtureClient(overrides: Record<string, unknown> = {}) {
-  const table = { ...CLI_FIXTURES, ...overrides };
+function fixtureClient(raw: unknown = RAW) {
   return new MockMcpClient({
     handler: (name, args) => {
-      if (name !== "novamira/run-wp-cli") throw new Error(`unexpected ability ${name}`);
-      const cmd = (args as { args: string[] }).args.join(" ");
-      if (!(cmd in table)) throw new Error(`no fixture for command: ${cmd}`);
-      return { stdout: String(table[cmd]), exit_code: 0 };
+      if (name !== "novamira/execute-php") throw new Error(`unexpected ability ${name}`);
+      const code = (args as { code: string }).code;
+      if (!code.includes("get_plugins")) throw new Error("unexpected snippet");
+      return { success: true, data: { success: true, return_value: JSON.stringify(raw), output: "", errors: [] } };
     },
   });
 }
 
 describe("collectInventory", () => {
-  it("collects versions, plugins, themes, core update, and admins", async () => {
-    const inv = await collectInventory(fixtureClient());
+  it("collects the payload through a single execute-php call", async () => {
+    const client = fixtureClient();
+    const inv = await collectInventory(client);
     expect(inv.wp_version).toBe("6.7.1");
     expect(inv.php_version).toBe("8.2.20");
     expect(inv.core_update).toBe("6.8");
-    expect(inv.plugins).toHaveLength(2);
-    expect(inv.plugins[0]).toMatchObject({ name: "akismet", update: "available" });
+    expect(inv.plugins[0]).toMatchObject({ file: "akismet/akismet.php", name: "akismet", update: "available" });
     expect(inv.themes[0].name).toBe("generatepress");
     expect(inv.admin_users[0].user_login).toBe("admin");
     expect(inv.collected_at).toMatch(/^\d{4}-/);
+    expect(client.calls).toHaveLength(1);
   });
 
-  it("treats 'Success: latest version' as no core update", async () => {
-    const inv = await collectInventory(fixtureClient({
-      "core check-update --format=json": "Success: WordPress is at the latest version.",
-    }));
-    expect(inv.core_update).toBeNull();
-  });
-
-  it("tolerates hosts that block `wp eval`, falling back to php_version 'unknown'", async () => {
-    const mock = new MockMcpClient({
-      handler: (name, args) => {
-        if (name !== "novamira/run-wp-cli") throw new Error(`unexpected ability ${name}`);
-        const cmd = (args as { args: string[] }).args.join(" ");
-        if (cmd.startsWith("eval")) throw new Error("wp eval is disabled on this host");
-        if (!(cmd in CLI_FIXTURES)) throw new Error(`no fixture for command: ${cmd}`);
-        return { stdout: String(CLI_FIXTURES[cmd]), exit_code: 0 };
-      },
-    });
-    const inv = await collectInventory(mock);
-    expect(inv.php_version).toBe("unknown");
-    expect(inv.wp_version).toBe("6.7.1");
-    expect(inv.plugins).toHaveLength(2);
+  it("uses a snippet that refreshes update transients inside WordPress", () => {
+    for (const marker of ["wp_update_plugins()", "wp_update_themes()", "wp_version_check()", "return json_encode"]) {
+      expect(INVENTORY_PHP).toContain(marker);
+    }
   });
 });
 
 describe("pendingUpdates", () => {
-  it("counts plugin + theme + core updates", async () => {
-    const inv = await collectInventory(fixtureClient());
-    // 1 plugin update + 0 theme updates + 1 core update
-    expect(pendingUpdates(inv)).toBe(2);
+  const base: InventoryPayload = { ...RAW, collected_at: "2026-01-01T00:00:00Z" };
+  it("counts plugin + theme + core updates", () => {
+    expect(pendingUpdates(base)).toBe(2); // 1 plugin + 0 themes + core
   });
-  it("is zero when everything is current", async () => {
-    const inv = await collectInventory(fixtureClient({
-      "plugin list --format=json --fields=name,title,version,status,update,update_version": "[]",
-      "theme list --format=json --fields=name,title,version,status,update,update_version": "[]",
-      "core check-update --format=json": "Success: WordPress is at the latest version.",
-    }));
-    expect(pendingUpdates(inv)).toBe(0);
+  it("is zero when everything is current", () => {
+    expect(pendingUpdates({ ...base, core_update: null, plugins: [], themes: [] })).toBe(0);
   });
 });
 

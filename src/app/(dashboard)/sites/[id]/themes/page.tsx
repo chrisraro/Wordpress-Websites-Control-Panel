@@ -5,10 +5,11 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
-import { ConfirmButton } from "../confirm-button";
+import { ManageForm, type ManageFormAction } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export default async function ThemesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +19,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const themes = snapshot?.payload.themes ?? [];
 
-  const refresh = refreshInventoryAction.bind(null, id) as unknown as () => Promise<void>;
+  const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6">
@@ -32,10 +33,8 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
             ? `${themes.length} themes · inventory from ${new Date(snapshot.taken_at).toLocaleString()}`
             : "No inventory yet — refresh to load themes."}
         </p>
-        <form action={refresh}>
-          <ConfirmButton label="Refresh inventory" pendingLabel="Refreshing…"
-            confirmMessage="Fetch fresh inventory from the site now?" />
-        </form>
+        <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
+          confirmMessage="Fetch fresh inventory from the site now?" />
       </div>
 
       <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
@@ -55,7 +54,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
                 {snapshot ? "No themes found." : "Refresh inventory to see themes."}
               </td></tr>
             ) : themes.map((t) => {
-              const update = manageAction.bind(null, id, { kind: "update_theme" as const, slug: t.name }) as unknown as () => Promise<void>;
+              const update = manageAction.bind(null, id, { kind: "update_theme" as const, slug: t.name }) as unknown as ManageFormAction;
               return (
                 <tr key={t.name} className="border-b last:border-0">
                   <td className="px-4 py-2 font-medium">{t.title || t.name}</td>
@@ -73,13 +72,13 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
                         </span>
                       : <span className="text-xs text-slate-400">current</span>}
                   </td>
-                  <td className="px-4 py-2 text-right">
-                    {t.update === "available" && (
-                      <form action={update}>
-                        <ConfirmButton label="Update" pendingLabel="…"
+                  <td className="px-4 py-2">
+                    <div className="flex justify-end">
+                      {t.update === "available" && (
+                        <ManageForm action={update} label="Update" pendingLabel="…"
                           confirmMessage={`Update theme ${t.name} to ${t.update_version ?? "latest"}?`} />
-                      </form>
-                    )}
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

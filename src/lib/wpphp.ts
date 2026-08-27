@@ -1,0 +1,44 @@
+import type { SiteMcpClient } from "@/lib/mcp/client";
+import { unwrapAbility } from "@/lib/mcp/envelope";
+import { McpToolError } from "@/lib/mcp/errors";
+
+/**
+ * Embed an untrusted string into generated PHP without any injection surface:
+ * the value travels as base64 and is decoded at runtime.
+ */
+export function phpString(value: string): string {
+  return `base64_decode('${Buffer.from(value, "utf8").toString("base64")}')`;
+}
+
+interface ExecutePhpResult {
+  success?: boolean;
+  return_value?: unknown;
+  output?: string;
+  errors?: unknown[];
+}
+
+/**
+ * Run a PHP snippet inside WordPress via novamira/execute-php. The snippet
+ * must `return json_encode(...)`; the decoded value is returned.
+ */
+export async function runPhp<T = unknown>(
+  client: SiteMcpClient, code: string, timeoutMs = 60_000,
+): Promise<T> {
+  const raw = await client.executeAbility("novamira/execute-php", { code }, { timeoutMs });
+  const env = unwrapAbility(raw) as ExecutePhpResult | null;
+  if (!env || typeof env !== "object") {
+    throw new McpToolError(`execute-php returned an unexpected result: ${JSON.stringify(raw)}`);
+  }
+  if (env.success === false) {
+    const detail = env.errors?.length ? JSON.stringify(env.errors) : env.output || "unknown error";
+    throw new McpToolError(`PHP execution failed: ${detail}`);
+  }
+  if (typeof env.return_value !== "string") {
+    throw new McpToolError("PHP snippet did not return a JSON string");
+  }
+  try {
+    return JSON.parse(env.return_value) as T;
+  } catch {
+    throw new McpToolError(`PHP snippet returned invalid JSON: ${env.return_value.slice(0, 200)}`);
+  }
+}

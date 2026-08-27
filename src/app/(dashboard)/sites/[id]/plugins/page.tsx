@@ -5,10 +5,11 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
-import { ConfirmButton } from "../confirm-button";
+import { ManageForm, type ManageFormAction } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export default async function PluginsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,8 +20,8 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const plugins = snapshot?.payload.plugins ?? [];
   const updatable = plugins.filter((p) => p.update === "available");
 
-  const refresh = refreshInventoryAction.bind(null, id) as unknown as () => Promise<void>;
-  const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const }) as unknown as () => Promise<void>;
+  const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
+  const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const }) as unknown as ManageFormAction;
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6">
@@ -28,23 +29,19 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
       <p className="mb-4 text-sm text-slate-500">Plugins</p>
       <SiteTabs siteId={id} active="plugins" />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm text-slate-500">
           {snapshot
             ? `${plugins.length} plugins · ${updatable.length} updates · inventory from ${new Date(snapshot.taken_at).toLocaleString()}`
             : "No inventory yet — refresh to load plugins."}
         </p>
-        <div className="flex gap-2">
-          <form action={refresh}>
-            <ConfirmButton label="Refresh inventory" pendingLabel="Refreshing…"
-              confirmMessage="Fetch fresh inventory from the site now?" />
-          </form>
+        <div className="flex flex-wrap gap-2">
+          <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
+            confirmMessage="Fetch fresh inventory from the site now?" />
           {updatable.length > 0 && (
-            <form action={updateAll}>
-              <ConfirmButton label={`Update all (${updatable.length})`} pendingLabel="Updating…"
-                confirmMessage={`Update ${updatable.length} plugin(s) on ${site.name}?`}
-                className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
-            </form>
+            <ManageForm action={updateAll} label={`Update all (${updatable.length})`} pendingLabel="Updating…"
+              confirmMessage={`Update ${updatable.length} plugin(s) on ${site.name}?`}
+              buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
           )}
         </div>
       </div>
@@ -66,11 +63,11 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
                 {snapshot ? "No plugins found." : "Refresh inventory to see plugins."}
               </td></tr>
             ) : plugins.map((p) => {
-              const activate = manageAction.bind(null, id, { kind: "activate_plugin" as const, slug: p.name }) as unknown as () => Promise<void>;
-              const deactivate = manageAction.bind(null, id, { kind: "deactivate_plugin" as const, slug: p.name }) as unknown as () => Promise<void>;
-              const update = manageAction.bind(null, id, { kind: "update_plugin" as const, slug: p.name }) as unknown as () => Promise<void>;
+              const activate = manageAction.bind(null, id, { kind: "activate_plugin" as const, file: p.file }) as unknown as ManageFormAction;
+              const deactivate = manageAction.bind(null, id, { kind: "deactivate_plugin" as const, file: p.file }) as unknown as ManageFormAction;
+              const update = manageAction.bind(null, id, { kind: "update_plugin" as const, file: p.file }) as unknown as ManageFormAction;
               return (
-                <tr key={p.name} className="border-b last:border-0">
+                <tr key={p.file} className="border-b last:border-0">
                   <td className="px-4 py-2 font-medium">{p.title || p.name}</td>
                   <td className="px-4 py-2">{p.version}</td>
                   <td className="px-4 py-2">
@@ -87,23 +84,17 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
                       : <span className="text-xs text-slate-400">current</span>}
                   </td>
                   <td className="px-4 py-2">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
                       {p.update === "available" && (
-                        <form action={update}>
-                          <ConfirmButton label="Update" pendingLabel="…"
-                            confirmMessage={`Update ${p.name} to ${p.update_version ?? "latest"}?`} />
-                        </form>
+                        <ManageForm action={update} label="Update" pendingLabel="…"
+                          confirmMessage={`Update ${p.name} to ${p.update_version ?? "latest"}?`} />
                       )}
                       {p.status === "active" ? (
-                        <form action={deactivate}>
-                          <ConfirmButton label="Deactivate" pendingLabel="…"
-                            confirmMessage={`Deactivate ${p.name}? The site may lose functionality.`} />
-                        </form>
+                        <ManageForm action={deactivate} label="Deactivate" pendingLabel="…"
+                          confirmMessage={`Deactivate ${p.name}? The site may lose functionality.`} />
                       ) : (
-                        <form action={activate}>
-                          <ConfirmButton label="Activate" pendingLabel="…"
-                            confirmMessage={`Activate ${p.name}?`} />
-                        </form>
+                        <ManageForm action={activate} label="Activate" pendingLabel="…"
+                          confirmMessage={`Activate ${p.name}?`} />
                       )}
                     </div>
                   </td>
