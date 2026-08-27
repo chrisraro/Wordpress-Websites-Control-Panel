@@ -49,6 +49,12 @@ every site). **All WordPress operations therefore run via `novamira/execute-php`
   `wp_remote_get` + `md5_file` comparison.
 - The `mcp-adapter-execute-ability` response wraps ability output in a
   `{success, data}` envelope — always unwrap (`src/lib/mcp/envelope.ts`).
+- Phase 4 amendment: uploaded-plugin installs do NOT use `novamira/create-upload-link`.
+  ZIPs live in the private `plugins` Supabase Storage bucket; the job handler signs a
+  1h download URL at run time and `Plugin_Upgrader->install($url)` fetches it — one
+  uniform install path for wp.org and uploads. Already-installed wp.org plugins
+  short-circuit to success (activate if requested); uploads install with
+  `overwrite_package => true` (deliberate reinstall semantics).
 
 ## 4. Architecture
 
