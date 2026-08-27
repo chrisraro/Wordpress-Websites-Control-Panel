@@ -4,6 +4,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseSecurityRepo } from "@/services/security/repo";
 import { pendingUpdates } from "@/services/inventory/types";
 import type { SiteStatus } from "@/services/sites/types";
 
@@ -20,10 +21,14 @@ export default async function DashboardPage() {
   const db = createServiceSupabase();
   const sites = await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient });
   const snapshots = supabaseSnapshotsRepo(db);
+  const securityRepo = supabaseSecurityRepo(db);
   const updates = new Map<string, number>();
+  const grades = new Map<string, string>();
   await Promise.all(sites.map(async (s) => {
     const snap = await snapshots.latestSnapshot(s.id);
     if (snap) updates.set(s.id, pendingUpdates(snap.payload));
+    const g = await securityRepo.latestGrade(s.id);
+    if (g) grades.set(s.id, g.grade);
   }));
 
   return (
@@ -56,6 +61,14 @@ export default async function DashboardPage() {
                   {n !== undefined && (n > 0
                     ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">{n} updates</span>
                     : <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800">up to date</span>)}
+                  {grades.has(s.id) && (
+                    <span className={`rounded-full px-2 py-0.5 ${
+                      { A: "bg-green-100 text-green-800", B: "bg-lime-100 text-lime-800", C: "bg-amber-100 text-amber-800",
+                        D: "bg-orange-100 text-orange-800", F: "bg-red-100 text-red-800" }[grades.get(s.id)!]
+                    }`}>
+                      security {grades.get(s.id)}
+                    </span>
+                  )}
                 </p>
               </Link>
             );
