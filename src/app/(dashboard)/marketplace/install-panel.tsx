@@ -41,7 +41,7 @@ export function InstallPanel({ slug, sites }: { slug: string; sites: SiteOption[
           {sites.map((s) => (
             <label key={s.id} className="flex min-h-10 items-center gap-2">
               <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
-              <span className="truncate">{s.name}</span>
+              <span className="min-w-0 flex-1 truncate">{s.name}</span>
             </label>
           ))}
         </div>
