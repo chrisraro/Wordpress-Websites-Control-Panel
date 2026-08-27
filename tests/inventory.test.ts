@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { collectInventory } from "@/services/inventory/service";
+import { describe, it, expect, beforeAll } from "vitest";
+import { collectInventory, refreshSnapshot } from "@/services/inventory/service";
 import { pendingUpdates, type InventoryPayload } from "@/services/inventory/types";
 import { MockMcpClient } from "@/lib/mcp/mock";
+import { randomBytes } from "node:crypto";
+import { encryptSecret } from "@/lib/crypto/secrets";
+import type { SitesRepo } from "@/services/sites/repo";
+import type { SnapshotsRepo } from "@/services/inventory/repo";
 
 const CLI_FIXTURES: Record<string, unknown> = {
   "core version": "6.7.1",
@@ -63,5 +67,51 @@ describe("pendingUpdates", () => {
       "core check-update --format=json": "Success: WordPress is at the latest version.",
     }));
     expect(pendingUpdates(inv)).toBe(0);
+  });
+});
+
+describe("refreshSnapshot", () => {
+  beforeAll(() => {
+    process.env.APP_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+  });
+
+  function deps(mock: MockMcpClient, encrypted: string) {
+    const stored: Array<{ siteId: string; payload: InventoryPayload }> = [];
+    const sites = {
+      async getSiteCredentials(id: string) {
+        return id === "site-1"
+          ? { mcp_endpoint: "https://x/wp-json/mcp/novamira", wp_username: "admin", app_password_encrypted: encrypted }
+          : null;
+      },
+    } as unknown as SitesRepo;
+    const snapshots: SnapshotsRepo = {
+      async insertSnapshot(siteId, payload) { stored.push({ siteId, payload }); },
+      async latestSnapshot() { return null; },
+    };
+    return { deps: { sites, snapshots, mcp: async () => mock }, stored };
+  }
+
+  it("collects, stores, and closes the client", async () => {
+    const mock = fixtureClient();
+    const f = deps(mock, await encryptSecret("pass"));
+    const payload = await refreshSnapshot(f.deps, "site-1");
+    expect(payload.wp_version).toBe("6.7.1");
+    expect(f.stored[0]).toMatchObject({ siteId: "site-1" });
+    expect(mock.closed).toBe(true);
+  });
+
+  it("closes the client even when storing fails", async () => {
+    const mock = fixtureClient();
+    const f = deps(mock, await encryptSecret("pass"));
+    f.deps.snapshots.insertSnapshot = async () => { throw new Error("db down"); };
+    await expect(refreshSnapshot(f.deps, "site-1")).rejects.toThrow("db down");
+    expect(mock.closed).toBe(true);
+  });
+
+  it("throws for an unknown site without opening a client", async () => {
+    const mock = fixtureClient();
+    const f = deps(mock, await encryptSecret("pass"));
+    await expect(refreshSnapshot(f.deps, "nope")).rejects.toThrow(/not found/i);
+    expect(mock.closed).toBe(false);
   });
 });
