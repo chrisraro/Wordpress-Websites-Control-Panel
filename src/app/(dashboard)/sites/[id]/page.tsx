@@ -45,7 +45,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               confirmMessage="Fetch fresh inventory from the site now?" />
           </form>
           <form action={testAction}>
-            <button className="rounded border px-3 py-2 text-sm hover:bg-slate-100">
+            <button className="min-h-10 rounded border px-3 py-2 text-sm hover:bg-slate-100">
               Test connection
             </button>
           </form>
