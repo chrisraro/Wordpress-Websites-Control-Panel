@@ -36,6 +36,9 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
             : "No inventory yet — refresh to load plugins."}
         </p>
         <div className="flex flex-wrap gap-2">
+          <a href="/marketplace" className="min-h-10 rounded border px-3 py-2 text-sm hover:bg-slate-100">
+            Install new plugin
+          </a>
           <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
             confirmMessage="Fetch fresh inventory from the site now?" />
           {updatable.length > 0 && (

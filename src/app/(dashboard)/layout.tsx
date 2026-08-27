@@ -13,6 +13,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
           <Link href="/sites/new" className="py-2 text-sm text-slate-600 hover:text-slate-900">
             + Connect site
           </Link>
+          <Link href="/marketplace" className="py-2 text-sm text-slate-600 hover:text-slate-900">
+            Marketplace
+          </Link>
         </nav>
         <form action={logout} className="flex items-center gap-3 text-sm text-slate-600">
           <span className="hidden sm:inline">{user.email}</span>
