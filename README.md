@@ -33,6 +33,9 @@ see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
 
 ## Background jobs
 
-- Nightly: `/api/cron/enqueue` inserts a `snapshot_refresh` job per site.
+- Every 5 min: `/api/cron/uptime` checks HTTP + SSL expiry for all sites.
 - Every minute: `/api/cron/process` claims up to 3 due jobs and runs them.
+- Nightly: `/api/cron/enqueue` inserts `snapshot_refresh` per site, `security_scan`
+  per site, and one `vuln_feed_refresh` (requires `WORDFENCE_API_KEY` — free key from
+  wordfence.com/threat-intel; without it, vulnerability matching is skipped).
 - Manual: every "Refresh inventory" button runs the same code path inline.

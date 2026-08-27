@@ -37,6 +37,7 @@ function memoryRepo() {
       if (s) s.status = status;
     },
     async insertActivity(entry) { activity.push(entry); },
+    async recordScanResult() {},
   };
   return { repo, sites, activity };
 }
