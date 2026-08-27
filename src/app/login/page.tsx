@@ -13,7 +13,7 @@ export default function LoginPage() {
           <label htmlFor="email" className="text-sm font-medium">
             Email
           </label>
-          <input id="email" name="email" type="email" required placeholder="Email"
+          <input id="email" name="email" type="email" required
             autoComplete="email"
             className="w-full rounded border px-3 py-2" />
         </div>
@@ -21,15 +21,13 @@ export default function LoginPage() {
           <label htmlFor="password" className="text-sm font-medium">
             Password
           </label>
-          <input id="password" name="password" type="password" required placeholder="Password"
+          <input id="password" name="password" type="password" required
             autoComplete="current-password"
             className="w-full rounded border px-3 py-2" />
         </div>
-        {state?.error && (
-          <p className="text-sm text-red-600" aria-live="polite">
-            {state.error}
-          </p>
-        )}
+        <p className="min-h-5 text-sm text-red-600" aria-live="polite">
+          {state?.error}
+        </p>
         <button disabled={pending}
           className="w-full rounded bg-slate-900 px-3 py-2 text-white disabled:opacity-50">
           {pending ? "Signing in…" : "Sign in"}

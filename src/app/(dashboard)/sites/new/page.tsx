@@ -78,11 +78,9 @@ export default function NewSitePage() {
           />
         </div>
 
-        {state?.error && (
-          <p className="text-sm text-red-600" aria-live="polite">
-            {state.error}
-          </p>
-        )}
+        <p className="min-h-5 text-sm text-red-600" aria-live="polite">
+          {state?.error}
+        </p>
 
         <button
           disabled={pending}

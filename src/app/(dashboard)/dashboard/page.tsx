@@ -36,7 +36,7 @@ export default async function DashboardPage() {
                   <h2 className="font-medium">{s.name}</h2>
                   <p className="text-sm text-slate-500">{s.url.replace(/^https?:\/\//, "")}</p>
                 </div>
-                <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[s.status]}`}>
+                <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[s.status]}`}>
                   {s.status.replace("_", " ")}
                 </span>
               </div>
