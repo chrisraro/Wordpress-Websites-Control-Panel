@@ -11,7 +11,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   if (!auth.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
-  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return NextResponse.json({ error: "invalid batch id" }, { status: 400 });
   }
   const db = createServiceSupabase();
