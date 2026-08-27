@@ -4,13 +4,14 @@ import type { JobRow, JobType } from "./types";
 export interface JobsRepo {
   insert(job: {
     type: JobType; site_id?: string | null;
-    payload?: Record<string, unknown>; scheduled_for?: string;
+    payload?: Record<string, unknown>; scheduled_for?: string; batch_id?: string | null;
   }): Promise<{ id: string }>;
   pendingExists(type: JobType, siteId: string | null): Promise<boolean>;
   claim(batchSize: number): Promise<JobRow[]>;
   markDone(id: string): Promise<void>;
   retry(id: string, error: string, retryAtIso: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
+  batchJobs(batchId: string): Promise<JobRow[]>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -21,6 +22,7 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         site_id: job.site_id ?? null,
         payload: job.payload ?? {},
         ...(job.scheduled_for ? { scheduled_for: job.scheduled_for } : {}),
+        ...(job.batch_id ? { batch_id: job.batch_id } : {}),
       }).select("id").single();
       if (error) throw new Error(`jobs.insert failed: ${error.message}`, { cause: error });
       return { id: data.id };
@@ -53,6 +55,12 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .update({ status: "failed", last_error: err, finished_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
+    },
+    async batchJobs(batchId) {
+      const { data, error } = await db.from("jobs").select("*")
+        .eq("batch_id", batchId).order("scheduled_for");
+      if (error) throw new Error(`jobs.batchJobs failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
     },
   };
 }
