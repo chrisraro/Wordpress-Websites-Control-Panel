@@ -33,6 +33,23 @@ A Next.js + Supabase web app that manages the team's client WordPress websites t
   - **Marketplace:** WordPress.org APIs — `https://api.wordpress.org/plugins/info/1.2/` (`query_plugins` search/browse-popular, `plugin_information` detail) and `themes/info/1.2/` equivalent. No key; cache responses.
   - **GeoGrid:** primary provider is the team's **n8n instance** via webhook (see 6.7) — n8n owns the actual rank-lookup orchestration (whatever nodes/APIs it uses are invisible to this app). A direct DataForSEO adapter (`location_coordinate: "lat,lng,zoom"`, ~$0.60/1k queued SERPs) remains possible later behind the same interface.
 
+### 3.1 Amendment (2026-08-28): execute-php instead of WP-CLI
+
+Live testing showed WP-CLI is broken host-wide on the team's hosting (the `wp`
+binary runs under a `cgi-fcgi` PHP SAPI and refuses to execute, exit 255, on
+every site). **All WordPress operations therefore run via `novamira/execute-php`**
+— generated PHP snippets executed inside WordPress (`src/lib/wpphp.ts`:
+`runPhp`, base64-safe value embedding). Verified live: WP_Filesystem resolves
+`direct`, so Plugin/Theme/Core upgraders work headlessly. Consequences:
+- Inventory = one PHP round trip (transient refresh + get_plugins/wp_get_themes/get_users).
+- Manage actions = upgrader classes / activate_plugin / .maintenance file / wp_cache_flush / flush_rewrite_rules.
+- Any spec mention of WP-CLI commands (e.g. `wp core verify-checksums` in §6.2)
+  is implemented in PHP instead — checksums via the wordpress.org checksums API
+  (`https://api.wordpress.org/core/checksums/1.0/`) fetched server-side with
+  `wp_remote_get` + `md5_file` comparison.
+- The `mcp-adapter-execute-ability` response wraps ability output in a
+  `{success, data}` envelope — always unwrap (`src/lib/mcp/envelope.ts`).
+
 ## 4. Architecture
 
 ```
