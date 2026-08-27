@@ -27,5 +27,12 @@ server-side over MCP.
 
 ## Deploy (Vercel)
 
-Set the same env vars in Vercel. `vercel.json` crons and pg_cron schedules
-arrive in Phase 2 with the job system.
+Set the same env vars in Vercel (including `CRON_SECRET`). `vercel.json`
+registers a daily backstop cron; the real schedules run from Supabase —
+see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
+
+## Background jobs
+
+- Nightly: `/api/cron/enqueue` inserts a `snapshot_refresh` job per site.
+- Every minute: `/api/cron/process` claims up to 3 due jobs and runs them.
+- Manual: every "Refresh inventory" button runs the same code path inline.

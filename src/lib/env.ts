@@ -3,6 +3,7 @@ const NAMES = [
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "APP_ENCRYPTION_KEY",
+  "CRON_SECRET",
 ] as const;
 
 export type EnvName = (typeof NAMES)[number];

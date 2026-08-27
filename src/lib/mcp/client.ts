@@ -8,7 +8,7 @@ export interface DiscoveredAbilities { abilities: DiscoveredAbility[]; instructi
 export interface SiteMcpClient {
   listToolNames(): Promise<string[]>;
   discoverAbilities(): Promise<DiscoveredAbilities>;
-  executeAbility(name: string, args?: Record<string, unknown>): Promise<unknown>;
+  executeAbility(name: string, args?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -65,11 +65,12 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
         return { abilities: parsed.abilities ?? [], instructions: parsed.novamira_instructions };
       } catch (e) { throw mapConnectError(e); }
     },
-    async executeAbility(name, args = {}) {
+    async executeAbility(name, args = {}, callOpts = {}) {
+      const callTimeout = callOpts.timeoutMs ?? timeout;
       try {
         const res = await client.callTool(
           { name: "mcp-adapter-execute-ability", arguments: { ability_name: name, parameters: args } },
-          undefined, { timeout },
+          undefined, { timeout: callTimeout },
         );
         return parseToolResult(res);
       } catch (e) { throw mapConnectError(e); }

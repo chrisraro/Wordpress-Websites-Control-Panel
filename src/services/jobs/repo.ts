@@ -1,0 +1,58 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { JobRow, JobType } from "./types";
+
+export interface JobsRepo {
+  insert(job: {
+    type: JobType; site_id?: string | null;
+    payload?: Record<string, unknown>; scheduled_for?: string;
+  }): Promise<{ id: string }>;
+  pendingExists(type: JobType, siteId: string | null): Promise<boolean>;
+  claim(batchSize: number): Promise<JobRow[]>;
+  markDone(id: string): Promise<void>;
+  retry(id: string, error: string, retryAtIso: string): Promise<void>;
+  markFailed(id: string, error: string): Promise<void>;
+}
+
+export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
+  return {
+    async insert(job) {
+      const { data, error } = await db.from("jobs").insert({
+        type: job.type,
+        site_id: job.site_id ?? null,
+        payload: job.payload ?? {},
+        ...(job.scheduled_for ? { scheduled_for: job.scheduled_for } : {}),
+      }).select("id").single();
+      if (error) throw new Error(`jobs.insert failed: ${error.message}`, { cause: error });
+      return { id: data.id };
+    },
+    async pendingExists(type, siteId) {
+      let q = db.from("jobs").select("id", { head: true, count: "exact" })
+        .eq("type", type).eq("status", "pending");
+      q = siteId === null ? q.is("site_id", null) : q.eq("site_id", siteId);
+      const { count, error } = await q;
+      if (error) throw new Error(`jobs.pendingExists failed: ${error.message}`, { cause: error });
+      return (count ?? 0) > 0;
+    },
+    async claim(batchSize) {
+      const { data, error } = await db.rpc("claim_jobs", { batch_size: batchSize });
+      if (error) throw new Error(`claim_jobs failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
+    },
+    async markDone(id) {
+      const { error } = await db.from("jobs")
+        .update({ status: "done", finished_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw new Error(`jobs.markDone failed: ${error.message}`, { cause: error });
+    },
+    async retry(id, err, retryAtIso) {
+      const { error } = await db.from("jobs")
+        .update({ status: "pending", last_error: err, scheduled_for: retryAtIso }).eq("id", id);
+      if (error) throw new Error(`jobs.retry failed: ${error.message}`, { cause: error });
+    },
+    async markFailed(id, err) {
+      const { error } = await db.from("jobs")
+        .update({ status: "failed", last_error: err, finished_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
+    },
+  };
+}

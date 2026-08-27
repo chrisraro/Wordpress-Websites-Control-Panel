@@ -16,7 +16,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         </nav>
         <form action={logout} className="flex items-center gap-3 text-sm text-slate-600">
           <span className="hidden sm:inline">{user.email}</span>
-          <button className="rounded border px-3 py-2 hover:bg-slate-100">Sign out</button>
+          <button className="min-h-10 rounded border px-3 py-2 hover:bg-slate-100">Sign out</button>
         </form>
       </header>
       {children}
