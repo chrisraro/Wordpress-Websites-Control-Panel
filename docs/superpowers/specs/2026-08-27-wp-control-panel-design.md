@@ -120,6 +120,8 @@ Config per site: business, keywords, odd N×N grid (3–9), spacing (meters), ce
 
 Provider selection is per `geogrid_configs.provider` (`stub | n8n`), so sites can be tested with the stub while others use n8n.
 
+**Building the n8n workflow:** the team already runs n8n with its connector wired to Claude Desktop. When Phase 6 starts, the workflow (webhook trigger → rank lookups → HMAC-signed callback POST) will be created via the n8n MCP connector added to this Claude Code session, or via n8n's REST API (instance URL + API key) — whichever the team provides. This repo only owns the webhook/callback contract defined above.
+
 UI: Leaflet map, colored rank pins (1–3 green … 20+/absent red), keyword switcher, run-history comparison with rank deltas, and a run-status indicator (queued → sent to n8n → results received).
 
 ## 7. Job System & Scheduling
