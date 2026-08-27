@@ -23,9 +23,12 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
     .order("at", { ascending: false })
     .limit(10);
 
-  async function testAction() {
-    await runConnectionTest(id);
-  }
+  // runConnectionTest resolves to a result object (used by callers that want the
+  // outcome); the <form action> contract only needs void | Promise<void>, and React
+  // discards the resolved value for a plain (non-useActionState) form action.
+  const testAction = runConnectionTest.bind(null, id) as unknown as (
+    formData: FormData,
+  ) => Promise<void>;
 
   return (
     <main className="mx-auto max-w-5xl p-6">
@@ -66,14 +69,14 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             <div className="flex justify-between"><dt className="text-slate-500">WP user</dt>
               <dd>{site.wp_username}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Abilities</dt>
-              <dd>{site.capabilities.abilities.length}</dd></div>
+              <dd>{site.capabilities?.abilities?.length ?? 0}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Connected</dt>
               <dd>{new Date(site.created_at).toLocaleDateString()}</dd></div>
           </dl>
           <details className="mt-3 text-sm">
             <summary className="cursor-pointer text-slate-500">All abilities</summary>
             <ul className="mt-2 max-h-48 overflow-y-auto text-xs text-slate-600">
-              {site.capabilities.abilities.map((a) => <li key={a}>{a}</li>)}
+              {(site.capabilities?.abilities ?? []).map((a) => <li key={a}>{a}</li>)}
             </ul>
           </details>
         </section>

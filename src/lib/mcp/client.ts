@@ -42,7 +42,7 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
   });
   const client = new Client({ name: "wp-control-panel", version: "1.0.0" }, { capabilities: {} });
   try {
-    await client.connect(transport);
+    await client.connect(transport, { timeout });
   } catch (e) {
     throw mapConnectError(e);
   }

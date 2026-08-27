@@ -41,7 +41,7 @@ export default async function DashboardPage() {
                 </span>
               </div>
               <p className="mt-3 text-xs text-slate-500">
-                {s.capabilities.abilities.length} abilities
+                {s.capabilities?.abilities?.length ?? 0} abilities
                 {s.client_label ? ` · ${s.client_label}` : ""}
               </p>
             </Link>

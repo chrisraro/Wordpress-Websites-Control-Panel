@@ -14,7 +14,7 @@ create table sites (
   app_password_encrypted text not null,
   status site_status not null default 'connected',
   client_label text,
-  capabilities jsonb not null default '{}'::jsonb,
+  capabilities jsonb not null default '{"abilities": []}'::jsonb,
   consecutive_failures int not null default 0,
   created_by uuid not null,
   created_at timestamptz not null default now(),
