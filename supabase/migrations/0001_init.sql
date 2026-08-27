@@ -147,7 +147,8 @@ create table activity_log (
 create index on activity_log (site_id, at desc);
 
 -- updated_at trigger for sites
-create or replace function set_updated_at() returns trigger language plpgsql as $$
+create or replace function set_updated_at() returns trigger
+language plpgsql set search_path = public as $$
 begin new.updated_at = now(); return new; end $$;
 create trigger sites_updated_at before update on sites
   for each row execute function set_updated_at();
