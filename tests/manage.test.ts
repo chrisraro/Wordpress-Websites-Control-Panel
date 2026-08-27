@@ -26,7 +26,7 @@ describe("buildCommands", () => {
   });
 
   it("rejects slug injection attempts", () => {
-    for (const bad of ["a; rm -rf /", "a && b", "a b", "a`b`", "a$(x)", "", "a|b"]) {
+    for (const bad of ["a; rm -rf /", "a && b", "a b", "a`b`", "a$(x)", "", "a|b", "--allow-root", "-x", "a\nb"]) {
       expect(() => buildCommands({ kind: "update_plugin", slug: bad })).toThrow(/invalid slug/i);
     }
   });
@@ -83,5 +83,15 @@ describe("manageSite", () => {
     const res = await manageSite(f.deps, "nope", "user-1", { kind: "flush_cache" });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/not found/i);
+  });
+
+  it("logs rejected invalid-slug attempts", async () => {
+    const mock = new MockMcpClient();
+    const f = fakeDeps(mock);
+    f.setCreds(await encryptSecret("pass"));
+    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", slug: "--allow-root" });
+    expect(res.ok).toBe(false);
+    expect(f.activity[0]).toMatchObject({ action: "site.manage.update_plugin" });
+    expect(mock.calls).toHaveLength(0);
   });
 });

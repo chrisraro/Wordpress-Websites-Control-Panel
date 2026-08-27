@@ -6,7 +6,7 @@ import type { JobsRepo } from "@/services/jobs/repo";
 import { enqueueJob } from "@/services/jobs/service";
 import type { ManageAction } from "./types";
 
-export const SLUG_RE = /^[a-z0-9._-]+$/i;
+export const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 const ACTION_TIMEOUT_MS = 180_000;
 
 function slug(s: string): string {
@@ -37,7 +37,12 @@ export async function manageSite(
   try {
     commands = buildCommands(action);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    const error = e instanceof Error ? e.message : String(e);
+    await deps.sites.insertActivity({
+      actor: actorId, site_id: siteId, action: `site.manage.${action.kind}`,
+      detail: { action: { kind: action.kind }, ok: false, error, rejected: "invalid_slug" },
+    });
+    return { ok: false, error };
   }
 
   const creds = await deps.sites.getSiteCredentials(siteId);
