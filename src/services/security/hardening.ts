@@ -29,7 +29,7 @@ $add('inactive_plugins', $inactive === 0 ? 'pass' : 'warn', array('count' => $in
 $cfg = ABSPATH . 'wp-config.php';
 if (!file_exists($cfg)) { $cfg = dirname(ABSPATH) . '/wp-config.php'; }
 $perms = file_exists($cfg) ? (fileperms($cfg) & 0007) : null;
-$add('wp_config_permissions', ($perms === null) ? 'warn' : ($perms === 0 ? 'pass' : 'warn'), array('world_bits' => $perms));
+$add('wp_config_permissions', ($perms === null) ? 'warn' : (($perms & 0002) ? 'fail' : ($perms === 0 ? 'pass' : 'warn')), array('world_bits' => $perms));
 return json_encode($checks);
 `.trim();
 
