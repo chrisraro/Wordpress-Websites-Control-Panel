@@ -70,4 +70,9 @@ describe("fetchWordfenceFeed", () => {
     const fetchImpl = (async () => new Response("{}", { status: 401 })) as typeof fetch;
     await expect(fetchWordfenceFeed("bad", fetchImpl)).rejects.toThrow(/401/);
   });
+
+  it("throws when a 200 response parses to zero entries (shape drift guard)", async () => {
+    const fetchImpl = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+    await expect(fetchWordfenceFeed("k", fetchImpl)).rejects.toThrow(/0 entries/);
+  });
 });

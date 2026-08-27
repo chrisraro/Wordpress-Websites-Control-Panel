@@ -15,6 +15,9 @@ async function run(req: Request) {
   const db = createServiceSupabase();
   const sites = await supabaseSitesRepo(db).listSites();
   const jobs = supabaseJobsRepo(db);
+  // Feed refresh first: claim_jobs processes by scheduled_for (insertion order),
+  // so scans enqueued after it grade against tonight's feed, not yesterday's.
+  const feedJob = await enqueueJob(jobs, "vuln_feed_refresh", null, {}, { dedupe: true });
   let enqueued = 0;
   for (const site of sites) {
     if (site.status === "disabled") continue;
@@ -27,7 +30,6 @@ async function run(req: Request) {
     const res = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
     if (res) scans++;
   }
-  const feedJob = await enqueueJob(jobs, "vuln_feed_refresh", null, {}, { dedupe: true });
   return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, feed: Boolean(feedJob) });
 }
 

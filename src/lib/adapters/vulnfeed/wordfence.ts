@@ -68,5 +68,11 @@ export async function fetchWordfenceFeed(
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) throw new Error(`Wordfence feed request failed: HTTP ${res.status}`);
-  return parseWordfenceFeed(await res.json());
+  const entries = parseWordfenceFeed(await res.json());
+  if (entries.length === 0) {
+    // The scanner feed is never legitimately empty — a zero-entry parse means
+    // the response shape changed. Fail loudly so it lands in jobs.last_error.
+    throw new Error("Wordfence feed parsed to 0 entries — response shape changed?");
+  }
+  return entries;
 }
