@@ -32,6 +32,24 @@ describe("buildInstallPhp", () => {
     expect(code).toContain(`base64_decode('${b64(url)}')`);
     expect(code).not.toContain("token=t'"); // never raw
   });
+  it("short-circuits already-installed wp.org plugins instead of failing on folder_exists", () => {
+    const withActivate = buildInstallPhp({ kind: "wporg", slug: "akismet" }, true);
+    expect(withActivate).toContain("Already installed");
+    expect(withActivate).toContain("is_plugin_active($existing)");
+    const without = buildInstallPhp({ kind: "wporg", slug: "akismet" }, false);
+    expect(without).toContain("Already installed");
+    expect(without).not.toContain("is_plugin_active");
+  });
+  it("uses overwrite_package for URL installs (deliberate reinstalls) but not wp.org", () => {
+    expect(buildInstallPhp({ kind: "url", url: "https://x/y.zip" }, false))
+      .toContain("'overwrite_package' => true");
+    expect(buildInstallPhp({ kind: "wporg", slug: "akismet" }, false))
+      .not.toContain("overwrite_package' => true");
+  });
+  it("strips query strings from upgrader skin messages before surfacing errors", () => {
+    const code = buildInstallPhp({ kind: "url", url: "https://x/y.zip" }, false);
+    expect(code).toContain("preg_replace('/\\?\\S*/'");
+  });
   it("rejects bad slugs and non-https URLs", () => {
     expect(() => buildInstallPhp({ kind: "wporg", slug: "a;b" }, false)).toThrow(/invalid slug/i);
     expect(() => buildInstallPhp({ kind: "wporg", slug: "--flag" }, false)).toThrow(/invalid slug/i);

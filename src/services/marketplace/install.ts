@@ -19,13 +19,37 @@ require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 `;
 
 export function buildInstallPhp(source: InstallSource, activate: boolean): string {
-  let urlExpr: string;
+  let sourcePhp: string;
   if (source.kind === "wporg") {
     if (!SLUG_RE.test(source.slug)) throw new Error(`Invalid slug: ${JSON.stringify(source.slug)}`);
-    urlExpr = `'https://downloads.wordpress.org/plugin/' . rawurlencode(${phpString(source.slug)}) . '.latest-stable.zip'`;
+    // A plugin directory that already exists makes Plugin_Upgrader->install()
+    // fail with folder_exists — deterministic, so short-circuit instead:
+    // already installed => success (activating if requested).
+    const existingPhp = activate
+      ? `
+if (is_plugin_active($existing)) { return json_encode(array('ok' => true, 'message' => 'Already installed and active')); }
+$e = activate_plugin($existing);
+if (is_wp_error($e)) { return json_encode(array('ok' => false, 'error' => 'Already installed; activation failed: ' . $e->get_error_message())); }
+return json_encode(array('ok' => true, 'message' => 'Already installed — activated', 'file' => $existing));`
+      : `
+return json_encode(array('ok' => true, 'message' => 'Already installed', 'file' => $existing));`;
+    sourcePhp = `
+$slug = ${phpString(source.slug)};
+$existing = null;
+foreach (array_keys(get_plugins()) as $f) {
+  if (dirname($f) === $slug || $f === $slug . '.php') { $existing = $f; break; }
+}
+if ($existing) {${existingPhp}
+}
+$url = 'https://downloads.wordpress.org/plugin/' . rawurlencode($slug) . '.latest-stable.zip';
+$installArgs = array();`;
   } else {
     if (!/^https:\/\//.test(source.url)) throw new Error("Install URL must be https");
-    urlExpr = phpString(source.url);
+    // Uploads are deliberate (re)installs — e.g. a premium plugin update — so
+    // overwriting an existing directory is the intended semantic.
+    sourcePhp = `
+$url = ${phpString(source.url)};
+$installArgs = array('overwrite_package' => true);`;
   }
   const activatePhp = activate
     ? `
@@ -39,12 +63,12 @@ $file = $up->plugin_info();
 return json_encode(array('ok' => true, 'message' => 'Installed', 'file' => $file));`;
 
   return `${PRELUDE}
-$url = ${urlExpr};
+${sourcePhp.trim()}
 $up = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
-$r = $up->install($url);
+$r = $up->install($url, $installArgs);
 if (is_wp_error($r)) { return json_encode(array('ok' => false, 'error' => $r->get_error_message())); }
 if ($r === false || $r === null) {
-  $msgs = $up->skin->get_upgrade_messages();
+  $msgs = array_map(function ($m) { return preg_replace('/\\?\\S*/', '', (string) $m); }, (array) $up->skin->get_upgrade_messages());
   return json_encode(array('ok' => false, 'error' => 'Install failed: ' . (empty($msgs) ? 'download or filesystem error' : implode(' | ', array_slice($msgs, -3)))));
 }
 ${activatePhp.trim()}`.trim();
