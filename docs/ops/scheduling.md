@@ -10,10 +10,13 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
 -- process due jobs every minute
+-- (timeout raised above pg_net's 5s default: the route may run for minutes;
+--  pg_net only tracks the request, the route keeps running server-side anyway)
 select cron.schedule('wp-panel-process', '* * * * *', $$
   select net.http_post(
     url := 'APP_URL/api/cron/process',
-    headers := jsonb_build_object('x-cron-secret', 'CRON_SECRET')
+    headers := jsonb_build_object('x-cron-secret', 'CRON_SECRET'),
+    timeout_milliseconds := 300000
   );
 $$);
 
@@ -31,3 +34,8 @@ Inspect: `select * from cron.job;` — Unschedule: `select cron.unschedule('wp-p
 Local dev has no scheduler: hit the routes manually, e.g.
 `curl -H "x-cron-secret: <secret>" http://localhost:3000/api/cron/enqueue`
 then `.../api/cron/process`.
+
+Note: `/api/cron/process` declares `maxDuration = 300`, which needs Vercel Pro
+(or Fluid Compute). On the Hobby plan the function is capped lower — jobs still
+complete because each run claims at most 3 and unfinished jobs retry, but keep
+individual site jobs fast.
