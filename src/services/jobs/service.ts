@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { JobsRepo } from "./repo";
 import type { JobRow, JobType } from "./types";
 
@@ -48,4 +49,15 @@ export async function processJobs(
     }
   }
   return result;
+}
+
+export async function enqueueBatch(
+  repo: JobsRepo, type: JobType, siteIds: string[], payload: Record<string, unknown>,
+): Promise<{ batchId: string; count: number }> {
+  if (siteIds.length === 0) throw new Error("Select at least one site");
+  const batchId = randomUUID();
+  for (const siteId of siteIds) {
+    await repo.insert({ type, site_id: siteId, payload, batch_id: batchId });
+  }
+  return { batchId, count: siteIds.length };
 }

@@ -39,3 +39,11 @@ see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
   per site, and one `vuln_feed_refresh` (requires `WORDFENCE_API_KEY` — free key from
   wordfence.com/threat-intel; without it, vulnerability matching is skipped).
 - Manual: every "Refresh inventory" button runs the same code path inline.
+
+## Marketplace
+
+`/marketplace` searches wordpress.org, installs plugins on one or many sites
+(bulk installs run as a job batch with a live progress page), and accepts
+uploaded plugin ZIPs (stored in the private `plugins` Supabase Storage bucket —
+created by migration 0003). The Themes tab can generate a child theme of the
+active theme.

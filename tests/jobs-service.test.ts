@@ -35,6 +35,9 @@ function memoryJobsRepo() {
       const r = rows.find((x) => x.id === id)!;
       r.status = "failed"; r.last_error = error;
     },
+    async batchJobs(batchId) {
+      return rows.filter((r) => r.batch_id === batchId);
+    },
   };
   return { repo, rows };
 }

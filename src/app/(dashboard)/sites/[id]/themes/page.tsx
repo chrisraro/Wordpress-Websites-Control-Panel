@@ -7,6 +7,7 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm, type ManageFormAction } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
+import { createChildThemeAction } from "../child-theme-actions";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -20,6 +21,8 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   const themes = snapshot?.payload.themes ?? [];
 
   const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
+  const createChild = createChildThemeAction.bind(null, id, false) as unknown as ManageFormAction;
+  const createAndActivate = createChildThemeAction.bind(null, id, true) as unknown as ManageFormAction;
 
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6">
@@ -86,6 +89,22 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           </tbody>
         </table>
       </div>
+
+      <section className="mt-6 rounded-lg border bg-white p-4 shadow-sm">
+        <h2 className="mb-1 font-medium">Child theme</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          Generate a child theme of the active theme (style.css + functions.php with the parent
+          stylesheet enqueued). Safe to run: refuses if the active theme is already a child.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <ManageForm action={createChild} label="Create child theme" pendingLabel="Creating…"
+            confirmMessage={`Create a child theme of the active theme on ${site.name}?`} />
+          <ManageForm action={createAndActivate} label="Create + activate" pendingLabel="Creating…"
+            confirmMessage={`Create AND ACTIVATE a child theme on ${site.name}? The site will switch themes.`}
+            buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
+        </div>
+      </section>
     </main>
   );
 }
+
