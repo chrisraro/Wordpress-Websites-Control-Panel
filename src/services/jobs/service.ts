@@ -1,0 +1,51 @@
+import type { JobsRepo } from "./repo";
+import type { JobRow, JobType } from "./types";
+
+export interface JobContext { job: JobRow }
+export type JobHandler = (ctx: JobContext) => Promise<void>;
+export type JobHandlers = Partial<Record<JobType, JobHandler>>;
+
+export function computeRetryDelayMs(attemptsAfterClaim: number): number | null {
+  if (attemptsAfterClaim <= 1) return 60_000;
+  if (attemptsAfterClaim === 2) return 300_000;
+  return null;
+}
+
+export async function enqueueJob(
+  repo: JobsRepo, type: JobType, siteId: string | null,
+  payload: Record<string, unknown> = {}, opts: { dedupe?: boolean } = {},
+): Promise<{ id: string } | null> {
+  if (opts.dedupe && (await repo.pendingExists(type, siteId))) return null;
+  return repo.insert({ type, site_id: siteId, payload });
+}
+
+export async function processJobs(
+  repo: JobsRepo, handlers: JobHandlers, opts: { max?: number } = {},
+): Promise<{ claimed: number; done: number; failed: number; retried: number }> {
+  const jobs = await repo.claim(opts.max ?? 3);
+  const result = { claimed: jobs.length, done: 0, failed: 0, retried: 0 };
+  for (const job of jobs) {
+    const handler = handlers[job.type];
+    if (!handler) {
+      await repo.markFailed(job.id, `no handler registered for job type "${job.type}"`);
+      result.failed++;
+      continue;
+    }
+    try {
+      await handler({ job });
+      await repo.markDone(job.id);
+      result.done++;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const delay = computeRetryDelayMs(job.attempts);
+      if (delay === null) {
+        await repo.markFailed(job.id, msg);
+        result.failed++;
+      } else {
+        await repo.retry(job.id, msg, new Date(Date.now() + delay).toISOString());
+        result.retried++;
+      }
+    }
+  }
+  return result;
+}
