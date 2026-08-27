@@ -31,11 +31,9 @@ export function ManageForm({
         }}>
         {pending ? (pendingLabel ?? "Working…") : label}
       </button>
-      {state && !state.ok && (
-        <p role="alert" className="mt-1 max-w-64 text-xs text-red-600">
-          {state.error ?? "Action failed"}
-        </p>
-      )}
+      <p aria-live="polite" className="mt-1 max-w-64 text-xs text-red-600">
+        {state && !state.ok ? (state.error ?? "Action failed") : null}
+      </p>
     </form>
   );
 }

@@ -12,7 +12,10 @@ export const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 export const PLUGIN_FILE_RE = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)?\.php$/i;
 
 const ACTION_TIMEOUT_MS = 180_000;
-const HEAVY_TIMEOUT_MS = 300_000; // update-all / core update download + unpack
+// update-all / core update download + unpack. Kept below the pages'
+// maxDuration (300s) so the friendly error path runs before the platform
+// kills the function.
+const HEAVY_TIMEOUT_MS = 270_000;
 
 function pluginFile(f: string): string {
   if (!PLUGIN_FILE_RE.test(f)) throw new Error(`Invalid plugin file: ${JSON.stringify(f)}`);
@@ -32,6 +35,7 @@ require_once ABSPATH . 'wp-admin/includes/template.php';
 require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 `;
 
+// Literal ASCII messages only — anything dynamic must go through phpString().
 const OK = (msg: string) => `return json_encode(array('ok' => true, 'message' => '${msg}'));`;
 
 /** Generate the PHP snippet for an action. Untrusted values travel as base64. */
@@ -71,6 +75,7 @@ $files = (is_object($pu) && !empty($pu->response)) ? array_keys((array) $pu->res
 if (!$files) { return json_encode(array('ok' => true, 'message' => 'Nothing to update')); }
 $up = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
 $res = $up->bulk_upgrade($files);
+if (!is_array($res)) { return json_encode(array('ok' => false, 'error' => 'Bulk upgrade could not start (filesystem access?)')); }
 $failed = array();
 foreach ((array) $res as $file => $r) { if ($r === false || $r === null || is_wp_error($r)) { $failed[] = $file; } }
 if ($failed) { return json_encode(array('ok' => false, 'error' => 'Failed: ' . implode(', ', $failed))); }
@@ -97,7 +102,10 @@ if (!$update) { return json_encode(array('ok' => true, 'message' => 'Core alread
 $up = new Core_Upgrader(new Automatic_Upgrader_Skin());
 $r = $up->upgrade($update);
 if (is_wp_error($r)) { return json_encode(array('ok' => false, 'error' => $r->get_error_message())); }
-return json_encode(array('ok' => true, 'message' => 'Core updated to ' . $update->version));`.trim();
+if ($r === false || $r === null) { return json_encode(array('ok' => false, 'error' => 'Core update failed (filesystem error)')); }
+require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+wp_upgrade();
+return json_encode(array('ok' => true, 'message' => 'Core updated to ' . $update->version . ' (DB upgraded)'));`.trim();
 
     case "maintenance":
       return action.enable
