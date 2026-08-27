@@ -9,7 +9,7 @@ import type { SnapshotsRepo } from "@/services/inventory/repo";
 
 const CLI_FIXTURES: Record<string, unknown> = {
   "core version": "6.7.1",
-  "eval 'echo PHP_VERSION;'": "8.2.20",
+  "eval echo PHP_VERSION;": "8.2.20",
   "plugin list --format=json --fields=name,title,version,status,update,update_version":
     '[{"name":"akismet","title":"Akismet","version":"5.3","status":"active","update":"available","update_version":"5.4"},' +
     '{"name":"hello","title":"Hello Dolly","version":"1.7","status":"inactive","update":"none","update_version":null}]',
@@ -26,7 +26,7 @@ function fixtureClient(overrides: Record<string, unknown> = {}) {
   return new MockMcpClient({
     handler: (name, args) => {
       if (name !== "novamira/run-wp-cli") throw new Error(`unexpected ability ${name}`);
-      const cmd = (args as { command: string }).command;
+      const cmd = (args as { args: string[] }).args.join(" ");
       if (!(cmd in table)) throw new Error(`no fixture for command: ${cmd}`);
       return { stdout: String(table[cmd]), exit_code: 0 };
     },
@@ -51,6 +51,22 @@ describe("collectInventory", () => {
       "core check-update --format=json": "Success: WordPress is at the latest version.",
     }));
     expect(inv.core_update).toBeNull();
+  });
+
+  it("tolerates hosts that block `wp eval`, falling back to php_version 'unknown'", async () => {
+    const mock = new MockMcpClient({
+      handler: (name, args) => {
+        if (name !== "novamira/run-wp-cli") throw new Error(`unexpected ability ${name}`);
+        const cmd = (args as { args: string[] }).args.join(" ");
+        if (cmd.startsWith("eval")) throw new Error("wp eval is disabled on this host");
+        if (!(cmd in CLI_FIXTURES)) throw new Error(`no fixture for command: ${cmd}`);
+        return { stdout: String(CLI_FIXTURES[cmd]), exit_code: 0 };
+      },
+    });
+    const inv = await collectInventory(mock);
+    expect(inv.php_version).toBe("unknown");
+    expect(inv.wp_version).toBe("6.7.1");
+    expect(inv.plugins).toHaveLength(2);
   });
 });
 

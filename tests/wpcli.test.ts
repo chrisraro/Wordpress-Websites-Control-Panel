@@ -33,14 +33,15 @@ describe("parseJsonArray", () => {
 });
 
 describe("runWpCli", () => {
-  it("invokes novamira/run-wp-cli with the command and returns parsed stdout", async () => {
+  it("invokes novamira/run-wp-cli with an args array and returns parsed stdout", async () => {
     const mock = new MockMcpClient({
       handler: (name, args) => {
         expect(name).toBe("novamira/run-wp-cli");
-        return { stdout: `ran:${(args as { command: string }).command}`, exit_code: 0 };
+        expect((args as { args: string[] }).args).toEqual(["core", "version"]);
+        return { stdout: `ran:${(args as { args: string[] }).args.join(" ")}`, exit_code: 0 };
       },
     });
-    expect(await runWpCli(mock, "core version")).toBe("ran:core version");
-    expect(mock.calls[0]).toMatchObject({ name: "novamira/run-wp-cli", args: { command: "core version" } });
+    expect(await runWpCli(mock, ["core", "version"])).toBe("ran:core version");
+    expect(mock.calls[0]).toMatchObject({ name: "novamira/run-wp-cli", args: { args: ["core", "version"] } });
   });
 });

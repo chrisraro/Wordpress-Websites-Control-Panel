@@ -14,17 +14,17 @@ function slug(s: string): string {
   return s;
 }
 
-export function buildCommands(action: ManageAction): string[] {
+export function buildCommands(action: ManageAction): string[][] {
   switch (action.kind) {
-    case "update_core": return ["core update", "core update-db"];
-    case "update_plugin": return [`plugin update ${slug(action.slug)}`];
-    case "update_all_plugins": return ["plugin update --all"];
-    case "update_theme": return [`theme update ${slug(action.slug)}`];
-    case "activate_plugin": return [`plugin activate ${slug(action.slug)}`];
-    case "deactivate_plugin": return [`plugin deactivate ${slug(action.slug)}`];
-    case "maintenance": return [action.enable ? "maintenance-mode activate" : "maintenance-mode deactivate"];
-    case "flush_cache": return ["cache flush"];
-    case "flush_permalinks": return ["rewrite flush --hard"];
+    case "update_core": return [["core", "update"], ["core", "update-db"]];
+    case "update_plugin": return [["plugin", "update", slug(action.slug)]];
+    case "update_all_plugins": return [["plugin", "update", "--all"]];
+    case "update_theme": return [["theme", "update", slug(action.slug)]];
+    case "activate_plugin": return [["plugin", "activate", slug(action.slug)]];
+    case "deactivate_plugin": return [["plugin", "deactivate", slug(action.slug)]];
+    case "maintenance": return [action.enable ? ["maintenance-mode", "activate"] : ["maintenance-mode", "deactivate"]];
+    case "flush_cache": return [["cache", "flush"]];
+    case "flush_permalinks": return [["rewrite", "flush", "--hard"]];
   }
 }
 
@@ -33,7 +33,7 @@ export interface ManageDeps { sites: SitesRepo; jobs: JobsRepo; mcp: McpFactory 
 export async function manageSite(
   deps: ManageDeps, siteId: string, actorId: string, action: ManageAction,
 ): Promise<{ ok: boolean; output?: string; error?: string }> {
-  let commands: string[];
+  let commands: string[][];
   try {
     commands = buildCommands(action);
   } catch (e) {
@@ -57,8 +57,8 @@ export async function manageSite(
       appPassword: await decryptSecret(creds.app_password_encrypted),
     });
     try {
-      for (const cmd of commands) {
-        output = await runWpCli(client, cmd, ACTION_TIMEOUT_MS);
+      for (const argv of commands) {
+        output = await runWpCli(client, argv, ACTION_TIMEOUT_MS);
       }
     } finally {
       await client.close();

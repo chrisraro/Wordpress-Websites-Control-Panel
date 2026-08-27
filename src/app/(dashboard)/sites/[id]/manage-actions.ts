@@ -21,12 +21,17 @@ export async function manageAction(
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const db = createServiceSupabase();
-  const result = await manageSite(
-    { sites: supabaseSitesRepo(db), jobs: supabaseJobsRepo(db), mcp: createSiteMcpClient },
-    siteId, user.id, action,
-  );
-  revalidateSite(siteId);
-  return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+  try {
+    const result = await manageSite(
+      { sites: supabaseSitesRepo(db), jobs: supabaseJobsRepo(db), mcp: createSiteMcpClient },
+      siteId, user.id, action,
+    );
+    revalidateSite(siteId);
+    return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+  } catch (e) {
+    revalidateSite(siteId);
+    return { ok: false, error: e instanceof Error ? e.message : "Action failed" };
+  }
 }
 
 export async function refreshInventoryAction(

@@ -30,8 +30,8 @@ export function parseJsonArray<T>(text: string): T[] {
 }
 
 export async function runWpCli(
-  client: SiteMcpClient, command: string, timeoutMs = 60_000,
+  client: SiteMcpClient, args: string[], timeoutMs = 60_000,
 ): Promise<string> {
-  const result = await client.executeAbility("novamira/run-wp-cli", { command }, { timeoutMs });
+  const result = await client.executeAbility("novamira/run-wp-cli", { args }, { timeoutMs });
   return parseWpCliResult(result);
 }

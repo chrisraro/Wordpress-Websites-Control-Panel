@@ -12,17 +12,17 @@ beforeAll(() => {
 });
 
 describe("buildCommands", () => {
-  it("maps every action kind to WP-CLI commands", () => {
-    expect(buildCommands({ kind: "update_core" })).toEqual(["core update", "core update-db"]);
-    expect(buildCommands({ kind: "update_plugin", slug: "akismet" })).toEqual(["plugin update akismet"]);
-    expect(buildCommands({ kind: "update_all_plugins" })).toEqual(["plugin update --all"]);
-    expect(buildCommands({ kind: "update_theme", slug: "generatepress" })).toEqual(["theme update generatepress"]);
-    expect(buildCommands({ kind: "activate_plugin", slug: "akismet" })).toEqual(["plugin activate akismet"]);
-    expect(buildCommands({ kind: "deactivate_plugin", slug: "akismet" })).toEqual(["plugin deactivate akismet"]);
-    expect(buildCommands({ kind: "maintenance", enable: true })).toEqual(["maintenance-mode activate"]);
-    expect(buildCommands({ kind: "maintenance", enable: false })).toEqual(["maintenance-mode deactivate"]);
-    expect(buildCommands({ kind: "flush_cache" })).toEqual(["cache flush"]);
-    expect(buildCommands({ kind: "flush_permalinks" })).toEqual(["rewrite flush --hard"]);
+  it("maps every action kind to WP-CLI argv arrays", () => {
+    expect(buildCommands({ kind: "update_core" })).toEqual([["core", "update"], ["core", "update-db"]]);
+    expect(buildCommands({ kind: "update_plugin", slug: "akismet" })).toEqual([["plugin", "update", "akismet"]]);
+    expect(buildCommands({ kind: "update_all_plugins" })).toEqual([["plugin", "update", "--all"]]);
+    expect(buildCommands({ kind: "update_theme", slug: "generatepress" })).toEqual([["theme", "update", "generatepress"]]);
+    expect(buildCommands({ kind: "activate_plugin", slug: "akismet" })).toEqual([["plugin", "activate", "akismet"]]);
+    expect(buildCommands({ kind: "deactivate_plugin", slug: "akismet" })).toEqual([["plugin", "deactivate", "akismet"]]);
+    expect(buildCommands({ kind: "maintenance", enable: true })).toEqual([["maintenance-mode", "activate"]]);
+    expect(buildCommands({ kind: "maintenance", enable: false })).toEqual([["maintenance-mode", "deactivate"]]);
+    expect(buildCommands({ kind: "flush_cache" })).toEqual([["cache", "flush"]]);
+    expect(buildCommands({ kind: "flush_permalinks" })).toEqual([["rewrite", "flush", "--hard"]]);
   });
 
   it("rejects slug injection attempts", () => {
@@ -60,7 +60,7 @@ describe("manageSite", () => {
     const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", slug: "akismet" });
     expect(res.ok).toBe(true);
     expect(res.output).toMatch(/Success/);
-    expect(mock.calls[0].args).toMatchObject({ command: "plugin update akismet" });
+    expect(mock.calls[0].args).toMatchObject({ args: ["plugin", "update", "akismet"] });
     expect(mock.closed).toBe(true);
     expect(f.activity[0]).toMatchObject({ actor: "user-1", site_id: "site-1", action: "site.manage.update_plugin" });
     expect(f.enqueued[0]).toMatchObject({ type: "snapshot_refresh", site_id: "site-1" });

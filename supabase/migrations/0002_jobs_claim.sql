@@ -10,7 +10,8 @@ as $$
   set status = 'running', started_at = now(), attempts = attempts + 1
   where id in (
     select id from jobs
-    where status = 'pending' and scheduled_for <= now()
+    where (status = 'pending' and scheduled_for <= now())
+       or (status = 'running' and started_at < now() - interval '15 minutes')
     order by scheduled_for
     limit batch_size
     for update skip locked
