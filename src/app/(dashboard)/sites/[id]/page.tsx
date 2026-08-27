@@ -4,10 +4,9 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { runConnectionTest } from "./actions";
+import { SiteTabs } from "./tabs";
 
 export const dynamic = "force-dynamic";
-
-const TABS = ["Overview", "Plugins", "Themes", "Security", "SEO", "GeoGrid", "Reports"] as const;
 
 export default async function SitePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -31,7 +30,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   ) => Promise<void>;
 
   return (
-    <main className="mx-auto max-w-5xl p-6">
+    <main className="mx-auto max-w-5xl p-4 sm:p-6">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
         <h1 className="min-w-0 break-words text-2xl font-semibold">{site.name}</h1>
         <form action={testAction}>
@@ -45,20 +44,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         {" · "}status: {site.status.replace("_", " ")}
       </p>
 
-      <nav className="mb-6 flex gap-1 overflow-x-auto border-b">
-        {TABS.map((t, i) => (
-          <span key={t}
-            className={`shrink-0 whitespace-nowrap px-3 py-2 text-sm ${i === 0
-              ? "border-b-2 border-slate-900 font-medium"
-              : "cursor-not-allowed text-slate-400"}`}
-            title={i === 0 ? undefined : "Coming in a later phase"}
-            {...(i === 0 && { "aria-current": "page" })}
-            {...(i !== 0 && { "aria-disabled": "true" })}>
-            {t}
-            {i !== 0 && <span className="sr-only"> (coming in a later phase)</span>}
-          </span>
-        ))}
-      </nav>
+      <SiteTabs siteId={id} active="overview" />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <section className="rounded-lg border bg-white p-4 shadow-sm">
