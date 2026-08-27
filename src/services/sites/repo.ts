@@ -16,6 +16,7 @@ export interface SitesRepo {
   insertActivity(entry: {
     actor: string; site_id?: string; action: string; detail?: unknown;
   }): Promise<void>;
+  recordScanResult(id: string, success: boolean): Promise<void>;
 }
 
 const SITE_COLUMNS =
@@ -59,6 +60,24 @@ export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
         detail: entry.detail ?? null,
       });
       if (error) throw new Error(`insertActivity failed: ${error.message}`);
+    },
+    async recordScanResult(id, success) {
+      const { data, error } = await db.from("sites")
+        .select("consecutive_failures,status").eq("id", id).maybeSingle();
+      if (error) throw new Error(`recordScanResult read failed: ${error.message}`, { cause: error });
+      if (!data) return;
+      if (success) {
+        const patch: Record<string, unknown> = { consecutive_failures: 0 };
+        if (data.status === "degraded") patch.status = "connected";
+        const { error: e2 } = await db.from("sites").update(patch).eq("id", id);
+        if (e2) throw new Error(`recordScanResult failed: ${e2.message}`, { cause: e2 });
+      } else {
+        const failures = (data.consecutive_failures ?? 0) + 1;
+        const patch: Record<string, unknown> = { consecutive_failures: failures };
+        if (failures >= 3 && data.status === "connected") patch.status = "degraded";
+        const { error: e2 } = await db.from("sites").update(patch).eq("id", id);
+        if (e2) throw new Error(`recordScanResult failed: ${e2.message}`, { cause: e2 });
+      }
     },
   };
 }
