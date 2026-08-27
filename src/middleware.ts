@@ -1,10 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/login", "/r/", "/api/cron/", "/api/webhooks/"];
+const PUBLIC_EXACT = ["/login"];
+const PUBLIC_PREFIXES = ["/r/", "/api/cron/", "/api/webhooks/"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const isPublic = PUBLIC_EXACT.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+
+  if (isPublic && pathname !== "/login") {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -23,13 +30,16 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data } = await supabase.auth.getUser();
-  const isPublic = PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
 
   if (!data.user && !isPublic) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const redirect = NextResponse.redirect(new URL("/login", request.url));
+    response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    return redirect;
   }
   if (data.user && pathname === "/login") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
+    response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+    return redirect;
   }
   return response;
 }
