@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { randomBytes } from "node:crypto";
-import { buildCommands, manageSite } from "@/services/manage/service";
+import { buildPhp, manageSite, PLUGIN_FILE_RE, SLUG_RE } from "@/services/manage/service";
 import type { ManageDeps } from "@/services/manage/service";
 import { MockMcpClient } from "@/lib/mcp/mock";
 import { encryptSecret } from "@/lib/crypto/secrets";
@@ -11,26 +11,58 @@ beforeAll(() => {
   process.env.APP_ENCRYPTION_KEY = randomBytes(32).toString("base64");
 });
 
-describe("buildCommands", () => {
-  it("maps every action kind to WP-CLI argv arrays", () => {
-    expect(buildCommands({ kind: "update_core" })).toEqual([["core", "update"], ["core", "update-db"]]);
-    expect(buildCommands({ kind: "update_plugin", slug: "akismet" })).toEqual([["plugin", "update", "akismet"]]);
-    expect(buildCommands({ kind: "update_all_plugins" })).toEqual([["plugin", "update", "--all"]]);
-    expect(buildCommands({ kind: "update_theme", slug: "generatepress" })).toEqual([["theme", "update", "generatepress"]]);
-    expect(buildCommands({ kind: "activate_plugin", slug: "akismet" })).toEqual([["plugin", "activate", "akismet"]]);
-    expect(buildCommands({ kind: "deactivate_plugin", slug: "akismet" })).toEqual([["plugin", "deactivate", "akismet"]]);
-    expect(buildCommands({ kind: "maintenance", enable: true })).toEqual([["maintenance-mode", "activate"]]);
-    expect(buildCommands({ kind: "maintenance", enable: false })).toEqual([["maintenance-mode", "deactivate"]]);
-    expect(buildCommands({ kind: "flush_cache" })).toEqual([["cache", "flush"]]);
-    expect(buildCommands({ kind: "flush_permalinks" })).toEqual([["rewrite", "flush", "--hard"]]);
-  });
+const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 
-  it("rejects slug injection attempts", () => {
-    for (const bad of ["a; rm -rf /", "a && b", "a b", "a`b`", "a$(x)", "", "a|b", "--allow-root", "-x", "a\nb"]) {
-      expect(() => buildCommands({ kind: "update_plugin", slug: bad })).toThrow(/invalid slug/i);
+describe("validation patterns", () => {
+  it("accepts normal plugin files and theme slugs", () => {
+    for (const f of ["akismet/akismet.php", "hello.php", "woo-checkout/checkout-form-designer.php"]) {
+      expect(PLUGIN_FILE_RE.test(f)).toBe(true);
+    }
+    for (const s of ["generatepress", "twentytwentyfive", "gp-child_2"]) {
+      expect(SLUG_RE.test(s)).toBe(true);
+    }
+  });
+  it("rejects injection-shaped values", () => {
+    for (const f of ["--allow-root", "-x.php", "a b.php", "../evil.php", "a;b.php", "akismet", "a'.php", "a/b/c.php"]) {
+      expect(PLUGIN_FILE_RE.test(f)).toBe(false);
+    }
+    for (const s of ["--flag", "a b", "a'b", ""]) {
+      expect(SLUG_RE.test(s)).toBe(false);
     }
   });
 });
+
+describe("buildPhp", () => {
+  it("embeds untrusted values only as base64", () => {
+    const code = buildPhp({ kind: "update_plugin", file: "akismet/akismet.php" });
+    expect(code).toContain(`base64_decode('${b64("akismet/akismet.php")}')`);
+    expect(code).not.toContain("akismet/akismet.php'");
+    expect(code).toContain("Plugin_Upgrader");
+    expect(code).toContain("return json_encode");
+  });
+
+  it("generates the right WordPress calls per action", () => {
+    expect(buildPhp({ kind: "activate_plugin", file: "hello.php" })).toContain("activate_plugin(");
+    expect(buildPhp({ kind: "deactivate_plugin", file: "hello.php" })).toContain("deactivate_plugins(");
+    expect(buildPhp({ kind: "update_all_plugins" })).toContain("bulk_upgrade($files)");
+    expect(buildPhp({ kind: "update_theme", slug: "generatepress" })).toContain("Theme_Upgrader");
+    expect(buildPhp({ kind: "update_core" })).toContain("Core_Upgrader");
+    expect(buildPhp({ kind: "maintenance", enable: true })).toContain(".maintenance");
+    expect(buildPhp({ kind: "maintenance", enable: false })).toContain("unlink");
+    expect(buildPhp({ kind: "flush_cache" })).toContain("wp_cache_flush()");
+    expect(buildPhp({ kind: "flush_permalinks" })).toContain("flush_rewrite_rules(true)");
+  });
+
+  it("throws on invalid plugin files and slugs", () => {
+    expect(() => buildPhp({ kind: "update_plugin", file: "--allow-root" })).toThrow(/invalid plugin file/i);
+    expect(() => buildPhp({ kind: "activate_plugin", file: "a;b.php" })).toThrow(/invalid plugin file/i);
+    expect(() => buildPhp({ kind: "update_theme", slug: "a b" })).toThrow(/invalid slug/i);
+  });
+});
+
+function phpResult(payload: unknown) {
+  return { success: true, data: { success: true, return_value: JSON.stringify(payload), output: "", errors: [] } };
+}
 
 function fakeDeps(mock: MockMcpClient) {
   const activity: Array<Record<string, unknown>> = [];
@@ -53,29 +85,43 @@ function fakeDeps(mock: MockMcpClient) {
 }
 
 describe("manageSite", () => {
-  it("runs the command, logs activity, enqueues snapshot refresh", async () => {
-    const mock = new MockMcpClient({ handler: () => ({ stdout: "Success: Updated 1 of 1 plugins.", exit_code: 0 }) });
+  it("runs the PHP action, logs activity, enqueues snapshot refresh", async () => {
+    const mock = new MockMcpClient({
+      handler: (name, args) => {
+        expect(name).toBe("novamira/execute-php");
+        expect((args as { code: string }).code).toContain("activate_plugin(");
+        return phpResult({ ok: true, message: "Plugin activated" });
+      },
+    });
     const f = fakeDeps(mock);
     f.setCreds(await encryptSecret("pass"));
-    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", slug: "akismet" });
-    expect(res.ok).toBe(true);
-    expect(res.output).toMatch(/Success/);
-    expect(mock.calls[0].args).toMatchObject({ args: ["plugin", "update", "akismet"] });
+    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "activate_plugin", file: "akismet/akismet.php" });
+    expect(res).toMatchObject({ ok: true, output: "Plugin activated" });
     expect(mock.closed).toBe(true);
-    expect(f.activity[0]).toMatchObject({ actor: "user-1", site_id: "site-1", action: "site.manage.update_plugin" });
+    expect(f.activity[0]).toMatchObject({ actor: "user-1", site_id: "site-1", action: "site.manage.activate_plugin" });
     expect(f.enqueued[0]).toMatchObject({ type: "snapshot_refresh", site_id: "site-1" });
   });
 
-  it("returns ok:false with the error, logs the failure, does not enqueue refresh", async () => {
-    const mock = new MockMcpClient({ handler: () => ({ stdout: "", stderr: "Error: plugin not found", exit_code: 1 }) });
+  it("surfaces PHP-level failures, logs them, does not enqueue refresh", async () => {
+    const mock = new MockMcpClient({ handler: () => phpResult({ ok: false, error: "Plugin not found." }) });
     const f = fakeDeps(mock);
     f.setCreds(await encryptSecret("pass"));
-    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", slug: "ghost" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/plugin not found/);
+    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", file: "ghost/ghost.php" });
+    expect(res).toMatchObject({ ok: false, error: "Plugin not found." });
     expect(mock.closed).toBe(true);
     expect(f.activity[0]).toMatchObject({ action: "site.manage.update_plugin" });
     expect(f.enqueued).toHaveLength(0);
+  });
+
+  it("logs rejected invalid targets without opening a client", async () => {
+    const mock = new MockMcpClient();
+    const f = fakeDeps(mock);
+    f.setCreds(await encryptSecret("pass"));
+    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", file: "--allow-root" });
+    expect(res.ok).toBe(false);
+    expect(f.activity[0]).toMatchObject({ action: "site.manage.update_plugin" });
+    expect((f.activity[0].detail as { rejected?: string }).rejected).toBe("invalid_target");
+    expect(mock.calls).toHaveLength(0);
   });
 
   it("fails cleanly for an unknown site", async () => {
@@ -83,15 +129,5 @@ describe("manageSite", () => {
     const res = await manageSite(f.deps, "nope", "user-1", { kind: "flush_cache" });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/not found/i);
-  });
-
-  it("logs rejected invalid-slug attempts", async () => {
-    const mock = new MockMcpClient();
-    const f = fakeDeps(mock);
-    f.setCreds(await encryptSecret("pass"));
-    const res = await manageSite(f.deps, "site-1", "user-1", { kind: "update_plugin", slug: "--allow-root" });
-    expect(res.ok).toBe(false);
-    expect(f.activity[0]).toMatchObject({ action: "site.manage.update_plugin" });
-    expect(mock.calls).toHaveLength(0);
   });
 });

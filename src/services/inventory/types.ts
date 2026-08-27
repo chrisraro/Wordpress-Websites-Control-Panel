@@ -1,10 +1,22 @@
 export interface PluginInfo {
-  name: string; title?: string; version: string; status: string;
-  update: string; update_version?: string | null;
+  /** Plugin basename, e.g. "akismet/akismet.php" — the identifier WP APIs use */
+  file: string;
+  /** Directory slug, e.g. "akismet" — for display and wp.org lookups */
+  name: string;
+  title?: string;
+  version: string;
+  status: string;
+  update: string;
+  update_version?: string | null;
 }
 export interface ThemeInfo {
-  name: string; title?: string; version: string; status: string;
-  update: string; update_version?: string | null;
+  /** Stylesheet slug, e.g. "generatepress" */
+  name: string;
+  title?: string;
+  version: string;
+  status: string;
+  update: string;
+  update_version?: string | null;
 }
 export interface AdminUser { ID: number; user_login: string; user_email: string }
 
