@@ -23,7 +23,9 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
     .order("at", { ascending: false })
     .limit(10);
 
-  const testAction = runConnectionTest.bind(null, id);
+  async function testAction() {
+    await runConnectionTest(id);
+  }
 
   return (
     <main className="mx-auto max-w-5xl p-6">
@@ -46,8 +48,11 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             className={`px-3 py-2 text-sm ${i === 0
               ? "border-b-2 border-slate-900 font-medium"
               : "cursor-not-allowed text-slate-400"}`}
-            title={i === 0 ? undefined : "Coming in a later phase"}>
+            title={i === 0 ? undefined : "Coming in a later phase"}
+            {...(i === 0 && { "aria-current": "page" })}
+            {...(i !== 0 && { "aria-disabled": "true" })}>
             {t}
+            {i !== 0 && <span className="sr-only"> (coming in a later phase)</span>}
           </span>
         ))}
       </nav>
