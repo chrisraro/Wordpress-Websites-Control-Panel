@@ -9,6 +9,7 @@ export class MockMcpClient implements SiteMcpClient {
       abilities?: DiscoveredAbility[];
       failWith?: Error;
       results?: Record<string, unknown>;
+      handler?: (name: string, args: Record<string, unknown>) => unknown | Promise<unknown>;
     } = {},
   ) {}
 
@@ -26,9 +27,10 @@ export class MockMcpClient implements SiteMcpClient {
     return { abilities: this.config.abilities ?? [], instructions: undefined };
   }
 
-  async executeAbility(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  async executeAbility(name: string, args: Record<string, unknown> = {}, callOpts?: { timeoutMs?: number }): Promise<unknown> {
     this.failIfConfigured();
     this.calls.push({ name, args });
+    if (this.config.handler) return this.config.handler(name, args);
     return this.config.results?.[name] ?? null;
   }
 
