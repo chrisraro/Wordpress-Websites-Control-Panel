@@ -19,6 +19,8 @@
 - Public (unauthenticated) routes: `/login`, `/r/*`, `/api/cron/*`, `/api/webhooks/*`. Everything else requires a Supabase session.
 - shadcn/ui and Playwright are deferred to Phase 2+; Phase 1 UI is plain Tailwind, tests are Vitest only.
 - Node 20+. Package name: `wp-control-panel`.
+- **Responsive design is mandatory** on every UI: mobile-first Tailwind (`sm:`/`md:`/`lg:` breakpoints), no fixed widths, wide content (tables, ability lists) scrolls in its own `overflow-x-auto` container, tap targets ≥ 40px. Verify each screen at 375px, 768px, and desktop.
+- **After each UI task completes** (Tasks 5, 7, 8), the orchestrator runs an `impeccable` skill audit on the finished screens and applies fixes before the task is considered done.
 - Commit after every task (steps say when). Windows/PowerShell environment — commands are PowerShell-safe (no `&&`).
 
 ## File Structure (end state of Phase 1)
