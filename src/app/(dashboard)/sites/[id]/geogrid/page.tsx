@@ -8,6 +8,7 @@ import { averageRank, coverage } from "@/services/geogrid/types";
 import { SiteTabs } from "../tabs";
 import { ManageForm, type ManageFormAction } from "../action-form";
 import { runGeoGridAction } from "../geogrid-actions";
+import { processQueueNowAction } from "../../../queue-actions";
 import { GeoGridConfigForm } from "./config-form";
 import { GridMap } from "./grid-map";
 
@@ -43,6 +44,7 @@ export default async function GeoGridPage({
   const failedRuns = (runJobs ?? []).filter((j) => j.status === "failed");
 
   const run = runGeoGridAction.bind(null, id) as unknown as ManageFormAction;
+  const drainQueue = processQueueNowAction.bind(null, `/sites/${id}/geogrid`) as unknown as ManageFormAction;
   const avg = current ? averageRank(current.points) : null;
   const cov = current ? coverage(current.points) : 0;
   const previous = history[1];
@@ -75,13 +77,17 @@ export default async function GeoGridPage({
           </div>
 
           {openRuns.length > 0 && (
-            <p className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm" aria-live="polite">
-              {openRuns.length} run(s) in progress
-              {openRuns.some((j) => j.status === "awaiting_callback")
-                ? " — waiting on results from n8n."
-                : " — queued; the job queue processes every minute."}
-              {" Reload this page to check again."}
-            </p>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm"
+              aria-live="polite">
+              <p>
+                {openRuns.length} run(s) in progress
+                {openRuns.some((j) => j.status === "awaiting_callback")
+                  ? " — waiting on results from n8n."
+                  : " — queued. The scheduled queue runs on your deployment; locally, run it yourself."}
+              </p>
+              <ManageForm action={drainQueue} label="Process queue now" pendingLabel="Processing…"
+                confirmMessage="Run the queued jobs now?" />
+            </div>
           )}
           {failedRuns.length > 0 && (
             <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm">
@@ -117,8 +123,8 @@ export default async function GeoGridPage({
             )}
             {!current && config.keywords.length > 0 && (
               <p className="mt-2 text-xs text-slate-500">
-                No results stored for this keyword yet. Runs are queued as jobs — the queue processes
-                every minute, or use “Process queue now” on a batch page.
+                No results stored for this keyword yet. “Run scan” queues a job per keyword; use
+                “Process queue now” above to run them immediately.
               </p>
             )}
           </div>
