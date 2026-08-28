@@ -38,6 +38,9 @@ function memoryJobsRepo() {
     async batchJobs(batchId) {
       return rows.filter((r) => r.batch_id === batchId);
     },
+    async markAwaiting(id) { rows.find((r) => r.id === id)!.status = "awaiting_callback"; },
+    async getJob(id) { return rows.find((r) => r.id === id) ?? null; },
+    async failStaleAwaiting() { return 0; },
   };
   return { repo, rows };
 }

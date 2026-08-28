@@ -3,7 +3,7 @@ import type { JobsRepo } from "./repo";
 import type { JobRow, JobType } from "./types";
 
 export interface JobContext { job: JobRow }
-export type JobHandler = (ctx: JobContext) => Promise<void>;
+export type JobHandler = (ctx: JobContext) => Promise<void | { awaitingCallback: true }>;
 export type JobHandlers = Partial<Record<JobType, JobHandler>>;
 
 export function computeRetryDelayMs(attemptsAfterClaim: number): number | null {
@@ -22,9 +22,9 @@ export async function enqueueJob(
 
 export async function processJobs(
   repo: JobsRepo, handlers: JobHandlers, opts: { max?: number } = {},
-): Promise<{ claimed: number; done: number; failed: number; retried: number }> {
+): Promise<{ claimed: number; done: number; failed: number; retried: number; awaiting: number }> {
   const jobs = await repo.claim(opts.max ?? 3);
-  const result = { claimed: jobs.length, done: 0, failed: 0, retried: 0 };
+  const result = { claimed: jobs.length, done: 0, failed: 0, retried: 0, awaiting: 0 };
   for (const job of jobs) {
     const handler = handlers[job.type];
     if (!handler) {
@@ -33,9 +33,14 @@ export async function processJobs(
       continue;
     }
     try {
-      await handler({ job });
-      await repo.markDone(job.id);
-      result.done++;
+      const outcome = await handler({ job });
+      if (outcome && typeof outcome === "object" && outcome.awaitingCallback) {
+        await repo.markAwaiting(job.id);
+        result.awaiting++;
+      } else {
+        await repo.markDone(job.id);
+        result.done++;
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const delay = computeRetryDelayMs(job.attempts);
