@@ -27,11 +27,13 @@ async function run(req: Request) {
   const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
 
   const perSite = await Promise.all(active.map(async (site) => {
-    const [snapshot, scan, lastSeoRun] = await Promise.all([
+    // snapshot_refresh must be inserted before security_scan: claim_jobs runs in
+    // scheduled_for order, so the scan grades tonight's inventory, not yesterday's.
+    const [snapshot, lastSeoRun] = await Promise.all([
       enqueueJob(jobs, "snapshot_refresh", site.id, {}, { dedupe: true }),
-      enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true }),
       seo.lastRunAt(site.id),
     ]);
+    const scan = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
     const seoDue = !lastSeoRun || new Date(lastSeoRun).getTime() <= weekAgo;
     const seoJob = seoDue
       ? await enqueueJob(jobs, "seo_scan", site.id, {}, { dedupe: true })

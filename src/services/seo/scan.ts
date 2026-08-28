@@ -51,7 +51,15 @@ export async function seoScan(
   });
   let results: SourceResult[];
   try {
-    results = await collectRankMath(client, site.capabilities?.abilities ?? []);
+    // Discover abilities live: the stored capability map is written at connect
+    // time, so a site that gained Rank Math afterwards would otherwise report
+    // every source as "skipped" forever. Fall back to the stored list.
+    let abilities = site.capabilities?.abilities ?? [];
+    try {
+      const discovered = await client.discoverAbilities();
+      if (discovered.abilities.length > 0) abilities = discovered.abilities.map((a) => a.name);
+    } catch { /* keep the stored capability list */ }
+    results = await collectRankMath(client, abilities);
   } finally {
     await client.close();
   }

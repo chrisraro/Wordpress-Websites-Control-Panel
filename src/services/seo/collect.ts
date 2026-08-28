@@ -47,7 +47,9 @@ function normalizeAudit(raw: unknown): AuditPayload {
         title: str(x.title, str(x.test_id, "Finding")),
         description: typeof x.description === "string" ? x.description : undefined,
         fix_text: typeof x.fix_text === "string" ? x.fix_text : undefined,
-        kb_link: typeof x.kb_link === "string" ? x.kb_link : undefined,
+        // Remote data becomes an href in the UI — only http(s) may through.
+        kb_link: typeof x.kb_link === "string" && /^https?:\/\//i.test(x.kb_link)
+          ? x.kb_link : undefined,
       };
     }),
   };

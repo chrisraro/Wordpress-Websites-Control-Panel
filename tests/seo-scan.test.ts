@@ -32,10 +32,11 @@ const PSI_RAW = {
   },
 };
 
-function fakes(opts: { abilities?: string[]; psiFails?: boolean } = {}) {
+function fakes(opts: { abilities?: string[]; psiFails?: boolean; discovered?: string[] } = {}) {
   const inserted: Array<{ takenAt: string; results: SourceResult[] }> = [];
   let creds = "";
   const client = new MockMcpClient({
+    abilities: (opts.discovered ?? []).map((name) => ({ name })),
     handler: (ability) => ({ success: true, data: RM_RESPONSES[ability] ?? null }),
   });
   const sites = {
@@ -99,5 +100,14 @@ describe("seoScan", () => {
   it("throws for an unknown site", async () => {
     const f = fakes();
     await expect(seoScan(f.deps, "nope")).rejects.toThrow(/not found/i);
+  });
+
+  it("prefers live-discovered abilities over a stale stored capability map", async () => {
+    // Stored map predates the Rank Math install; discovery sees it now.
+    const f = fakes({ abilities: [], discovered: ABILITIES });
+    f.setCreds(await encryptSecret("pass"));
+    const res = await seoScan(f.deps, "site-1");
+    expect(res.results.filter((r) => r.status === "skipped")).toHaveLength(0);
+    expect(res.results.filter((r) => r.status === "ok")).toHaveLength(6);
   });
 });
