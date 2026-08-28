@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { mapConnectError, McpToolError } from "./errors";
+import { mapConnectError, McpConnectionError, McpToolError } from "./errors";
 
 export interface DiscoveredAbility { name: string; label?: string; description?: string }
 export interface DiscoveredAbilities { abilities: DiscoveredAbility[]; instructions?: string }
@@ -37,14 +37,31 @@ function parseToolResult(result: {
 export const createSiteMcpClient: McpFactory = async (opts) => {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT;
   const basic = Buffer.from(`${opts.username}:${opts.appPassword}`).toString("base64");
-  const transport = new StreamableHTTPClientTransport(new URL(opts.endpoint), {
-    requestInit: { headers: { Authorization: `Basic ${basic}` } },
-  });
-  const client = new Client({ name: "wp-control-panel", version: "1.0.0" }, { capabilities: {} });
+
+  const connectOnce = async () => {
+    const transport = new StreamableHTTPClientTransport(new URL(opts.endpoint), {
+      requestInit: { headers: { Authorization: `Basic ${basic}` } },
+    });
+    const c = new Client({ name: "wp-control-panel", version: "1.0.0" }, { capabilities: {} });
+    await c.connect(transport, { timeout });
+    return c;
+  };
+
+  let client: Client;
   try {
-    await client.connect(transport, { timeout });
+    client = await connectOnce();
   } catch (e) {
-    throw mapConnectError(e);
+    const mapped = mapConnectError(e);
+    // The fleet's shared hosting drops connections transiently ("fetch failed",
+    // resets). One retry after a short pause absorbs the blip; auth errors and
+    // anything non-network rethrow immediately.
+    if (!(mapped instanceof McpConnectionError)) throw mapped;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      client = await connectOnce();
+    } catch (e2) {
+      throw mapConnectError(e2);
+    }
   }
 
   return {
