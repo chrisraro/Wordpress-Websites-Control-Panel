@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { processQueueNowAction } from "../../actions";
+import { processQueueNowAction } from "../../../queue-actions";
 
 interface BatchJob {
   id: string; site_id: string | null; site_name: string;

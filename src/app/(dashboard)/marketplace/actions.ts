@@ -1,9 +1,8 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { enqueueBatch, processJobs } from "@/services/jobs/service";
+import { enqueueBatch } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
-import { buildJobHandlers } from "@/services/jobs/handlers";
 import { SLUG_RE } from "@/services/manage/service";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 
@@ -46,17 +45,4 @@ export async function prepareUploadAction(
     return { ok: false, error: `Could not prepare upload: ${error?.message ?? "unknown"}` };
   }
   return { ok: true, path, token: data.token };
-}
-
-export async function processQueueNowAction(): Promise<{
-  ok: boolean; done?: number; failed?: number; error?: string;
-}> {
-  await requireUser();
-  const db = createServiceSupabase();
-  try {
-    const res = await processJobs(supabaseJobsRepo(db), buildJobHandlers(db), { max: 3 });
-    return { ok: true, done: res.done, failed: res.failed };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Queue processing failed" };
-  }
 }
