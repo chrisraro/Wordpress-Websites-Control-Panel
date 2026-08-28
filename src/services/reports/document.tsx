@@ -1,5 +1,5 @@
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, type DocumentProps } from "@react-pdf/renderer";
 import type { ReportData } from "./types";
 
 const c = {
@@ -67,7 +67,9 @@ function Bullets({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
-export function ReportDocument(data: ReportData): React.ReactElement {
+// The element type must be ReactElement<DocumentProps>: renderToBuffer only
+// accepts a <Document>, and a bare ReactElement fails to type-check at the call site.
+export function ReportDocument(data: ReportData): React.ReactElement<DocumentProps> {
   const { meta, security, seo, geogrid, inventory } = data;
   return (
     <Document
