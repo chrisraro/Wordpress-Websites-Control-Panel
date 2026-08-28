@@ -3,6 +3,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { enqueueJob } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseSeoRepo } from "@/services/seo/repo";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -18,19 +19,32 @@ async function run(req: Request) {
   // Feed refresh first: claim_jobs processes by scheduled_for (insertion order),
   // so scans enqueued after it grade against tonight's feed, not yesterday's.
   const feedJob = await enqueueJob(jobs, "vuln_feed_refresh", null, {}, { dedupe: true });
-  let enqueued = 0;
-  for (const site of sites) {
-    if (site.status === "disabled") continue;
-    const res = await enqueueJob(jobs, "snapshot_refresh", site.id, {}, { dedupe: true });
-    if (res) enqueued++;
-  }
-  let scans = 0;
-  for (const site of sites) {
-    if (site.status === "disabled") continue;
-    const res = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
-    if (res) scans++;
-  }
-  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, feed: Boolean(feedJob) });
+
+  // Per-site work runs concurrently: each site needs 2-3 Supabase round trips and
+  // this route has a 60s budget, so sequential loops would not scale with the fleet.
+  const active = sites.filter((s) => s.status !== "disabled");
+  const seo = supabaseSeoRepo(db);
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+
+  const perSite = await Promise.all(active.map(async (site) => {
+    // snapshot_refresh must be inserted before security_scan: claim_jobs runs in
+    // scheduled_for order, so the scan grades tonight's inventory, not yesterday's.
+    const [snapshot, lastSeoRun] = await Promise.all([
+      enqueueJob(jobs, "snapshot_refresh", site.id, {}, { dedupe: true }),
+      seo.lastRunAt(site.id),
+    ]);
+    const scan = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
+    const seoDue = !lastSeoRun || new Date(lastSeoRun).getTime() <= weekAgo;
+    const seoJob = seoDue
+      ? await enqueueJob(jobs, "seo_scan", site.id, {}, { dedupe: true })
+      : null;
+    return { snapshot: Boolean(snapshot), scan: Boolean(scan), seo: Boolean(seoJob) };
+  }));
+
+  const enqueued = perSite.filter((r) => r.snapshot).length;
+  const scans = perSite.filter((r) => r.scan).length;
+  const seoScans = perSite.filter((r) => r.seo).length;
+  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, seo: seoScans, feed: Boolean(feedJob) });
 }
 
 export const POST = run;

@@ -38,6 +38,9 @@ select cron.schedule('wp-panel-uptime', '*/5 * * * *', $$
 $$);
 ```
 
+The nightly enqueue also queues one `seo_scan` per site whose last SEO run is
+older than 7 days, so SEO data refreshes weekly without a separate schedule.
+
 Inspect: `select * from cron.job;` — Unschedule: `select cron.unschedule('wp-panel-process');`
 
 Local dev has no scheduler: hit the routes manually, e.g.

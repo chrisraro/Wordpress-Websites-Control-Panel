@@ -5,6 +5,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
+import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates } from "@/services/inventory/types";
 import type { SiteStatus } from "@/services/sites/types";
 
@@ -29,6 +30,13 @@ export default async function DashboardPage() {
     if (snap) updates.set(s.id, pendingUpdates(snap.payload));
     const g = await securityRepo.latestGrade(s.id);
     if (g) grades.set(s.id, g.grade);
+  }));
+
+  const seoRepo = supabaseSeoRepo(db);
+  const seoScores = new Map<string, number>();
+  await Promise.all(sites.map(async (s) => {
+    const score = await seoRepo.latestAuditScore(s.id);
+    if (score !== null) seoScores.set(s.id, score);
   }));
 
   return (
@@ -67,6 +75,14 @@ export default async function DashboardPage() {
                         D: "bg-orange-100 text-orange-800", F: "bg-red-100 text-red-800" }[grades.get(s.id)!]
                     }`}>
                       security {grades.get(s.id)}
+                    </span>
+                  )}
+                  {seoScores.has(s.id) && (
+                    <span className={`rounded-full px-2 py-0.5 ${
+                      seoScores.get(s.id)! >= 80 ? "bg-green-100 text-green-800"
+                        : seoScores.get(s.id)! >= 50 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"
+                    }`}>
+                      SEO {seoScores.get(s.id)}
                     </span>
                   )}
                 </p>

@@ -38,6 +38,9 @@ see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
 - Nightly: `/api/cron/enqueue` inserts `snapshot_refresh` per site, `security_scan`
   per site, and one `vuln_feed_refresh` (requires `WORDFENCE_API_KEY` — free key from
   wordfence.com/threat-intel; without it, vulnerability matching is skipped).
+- Weekly per site: `seo_scan` (Rank Math audit, page scores, links, Search Console
+  keywords, AI Visibility) plus PageSpeed Insights for mobile and desktop. Set
+  `GOOGLE_PSI_API_KEY` (optional) to raise PageSpeed rate limits.
 - Manual: every "Refresh inventory" button runs the same code path inline.
 
 ## Marketplace
@@ -47,3 +50,12 @@ see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
 uploaded plugin ZIPs (stored in the private `plugins` Supabase Storage bucket —
 created by migration 0003). The Themes tab can generate a child theme of the
 active theme.
+
+## SEO & AEO
+
+The SEO tab shows the Rank Math site-audit score with a trend sparkline, failing
+audit findings with fix links, the lowest-scoring pages, Search Console keywords,
+PageSpeed Insights scores, and the AI Visibility (AEO) brand panel. Sites without
+Rank Math still get PageSpeed data — each source is collected independently, and a
+source that is unavailable or fails is labelled on the page rather than failing
+the scan.
