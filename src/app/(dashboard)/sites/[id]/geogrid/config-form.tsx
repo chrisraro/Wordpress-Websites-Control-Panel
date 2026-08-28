@@ -9,9 +9,9 @@ const field = "min-h-10 w-full rounded border px-3 py-2";
 export function GeoGridConfigForm({
   siteId, config,
 }: { siteId: string; config: GeoGridConfig | null }) {
-  const action = saveGeoGridConfigAction.bind(null, siteId) as unknown as (
-    prev: { ok: boolean; error?: string } | null, formData: FormData,
-  ) => Promise<{ ok: boolean; error?: string }>;
+  // No cast: the bound action's signature already matches what useActionState
+  // passes, (prevState, formData) — a mismatch here is a runtime crash.
+  const action = saveGeoGridConfigAction.bind(null, siteId);
   const [state, formAction, pending] = useActionState(action, null);
 
   return (
