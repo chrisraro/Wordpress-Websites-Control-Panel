@@ -34,7 +34,11 @@ export async function POST(req: Request) {
   const db = createServiceSupabase();
   const jobs = supabaseJobsRepo(db);
   const job = await jobs.getJob(runId);
-  if (!job || job.type !== "geogrid_run" || job.status !== "awaiting_callback") {
+  // "running" is accepted too: n8n acks instantly and can call back before the
+  // job has been parked. markAwaiting is guarded on status="running", so a
+  // callback that wins the race is not overwritten.
+  const open = job?.status === "awaiting_callback" || job?.status === "running";
+  if (!job || job.type !== "geogrid_run" || !open) {
     return NextResponse.json({ ok: false, error: "no run awaiting this id" }, { status: 404 });
   }
 

@@ -20,6 +20,28 @@ export async function enqueueJob(
   return repo.insert({ type, site_id: siteId, payload });
 }
 
+/**
+ * Jobs parked on a callback that never arrived go back through the normal
+ * retry ladder, and only exhaust to `failed` like any other failure.
+ */
+export async function recoverStaleAwaiting(
+  repo: JobsRepo, olderThanMs: number,
+): Promise<{ retried: number; failed: number }> {
+  const stale = await repo.listStaleAwaiting(olderThanMs);
+  const out = { retried: 0, failed: 0 };
+  for (const job of stale) {
+    const delay = computeRetryDelayMs(job.attempts);
+    if (delay === null) {
+      await repo.markFailed(job.id, "Callback never arrived");
+      out.failed++;
+    } else {
+      await repo.retry(job.id, "Callback never arrived", new Date(Date.now() + delay).toISOString());
+      out.retried++;
+    }
+  }
+  return out;
+}
+
 export async function processJobs(
   repo: JobsRepo, handlers: JobHandlers, opts: { max?: number } = {},
 ): Promise<{ claimed: number; done: number; failed: number; retried: number; awaiting: number }> {

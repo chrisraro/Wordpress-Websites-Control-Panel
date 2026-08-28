@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  computeRetryDelayMs, enqueueJob, processJobs,
+  computeRetryDelayMs, enqueueJob, processJobs, recoverStaleAwaiting,
 } from "@/services/jobs/service";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { JobRow, JobType } from "@/services/jobs/types";
@@ -40,7 +40,7 @@ function memoryJobsRepo() {
     },
     async markAwaiting(id) { rows.find((r) => r.id === id)!.status = "awaiting_callback"; },
     async getJob(id) { return rows.find((r) => r.id === id) ?? null; },
-    async failStaleAwaiting() { return 0; },
+    async listStaleAwaiting() { return rows.filter((r) => r.status === "awaiting_callback"); },
   };
   return { repo, rows };
 }
@@ -109,5 +109,41 @@ describe("processJobs", () => {
     expect(res.failed).toBe(1);
     expect(rows[0].status).toBe("failed");
     expect(rows[0].last_error).toMatch(/no handler/i);
+  });
+
+  it("parks a job when the handler reports it is awaiting a callback", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "geogrid_run", "site-1");
+    const res = await processJobs(repo, {
+      geogrid_run: async () => ({ awaitingCallback: true as const }),
+    });
+    expect(res).toMatchObject({ awaiting: 1, done: 0, failed: 0 });
+    expect(rows[0].status).toBe("awaiting_callback");
+  });
+});
+
+describe("recoverStaleAwaiting", () => {
+  it("retries a stale parked job instead of failing it outright", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "geogrid_run", "site-1");
+    await processJobs(repo, { geogrid_run: async () => ({ awaitingCallback: true as const }) });
+    expect(rows[0].status).toBe("awaiting_callback");
+
+    const res = await recoverStaleAwaiting(repo, 0);
+    expect(res).toEqual({ retried: 1, failed: 0 });
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].last_error).toMatch(/callback never arrived/i);
+    // rescheduled into the future, not immediately reclaimable
+    expect(new Date(rows[0].scheduled_for).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("fails a parked job once its attempts are exhausted", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "geogrid_run", "site-1");
+    rows[0].status = "awaiting_callback";
+    rows[0].attempts = 3;
+    const res = await recoverStaleAwaiting(repo, 0);
+    expect(res).toEqual({ retried: 0, failed: 1 });
+    expect(rows[0].status).toBe("failed");
   });
 });

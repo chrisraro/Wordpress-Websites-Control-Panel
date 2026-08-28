@@ -17,6 +17,12 @@ export async function runGeoGrid(
   const provider = deps.providers[config.provider];
   if (!provider) throw new Error(`Unknown GeoGrid provider: ${config.provider}`);
 
+  // A callback URL pointing at localhost silently strands every n8n run, so
+  // refuse up front with a message that names the fix.
+  if (config.provider === "n8n" && /^https?:\/\/localhost(:|\/|$)/i.test(deps.appUrl)) {
+    throw new Error("Set APP_URL to this app's public origin to use the n8n provider");
+  }
+
   const points = buildGrid(config.center_lat, config.center_lng, config.grid_size, config.spacing_m);
   const outcome = await provider.run({
     runId: jobId,

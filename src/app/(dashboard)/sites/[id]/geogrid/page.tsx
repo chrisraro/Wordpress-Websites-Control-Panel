@@ -29,6 +29,19 @@ export default async function GeoGridPage({
   const current = keyword ? latest[keyword] : undefined;
   const history = config && keyword ? await geogrid.historyForKeyword(config.id, keyword, 10) : [];
 
+  // Surface in-flight and failed runs: without this a stuck n8n callback looks
+  // identical to "never scanned".
+  const { data: runJobs } = await db
+    .from("jobs")
+    .select("status,attempts,last_error,payload,scheduled_for")
+    .eq("site_id", id).eq("type", "geogrid_run")
+    .order("scheduled_for", { ascending: false })
+    .limit(20);
+  const openRuns = (runJobs ?? []).filter(
+    (j) => j.status === "pending" || j.status === "running" || j.status === "awaiting_callback",
+  );
+  const failedRuns = (runJobs ?? []).filter((j) => j.status === "failed");
+
   const run = runGeoGridAction.bind(null, id) as unknown as ManageFormAction;
   const avg = current ? averageRank(current.points) : null;
   const cov = current ? coverage(current.points) : 0;
@@ -60,6 +73,24 @@ export default async function GeoGridPage({
               confirmMessage={`Queue a GeoGrid scan for ${config.keywords.length} keyword(s) using the ${config.provider} provider?`}
               buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
           </div>
+
+          {openRuns.length > 0 && (
+            <p className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm" aria-live="polite">
+              {openRuns.length} run(s) in progress
+              {openRuns.some((j) => j.status === "awaiting_callback")
+                ? " — waiting on results from n8n."
+                : " — queued; the job queue processes every minute."}
+              {" Reload this page to check again."}
+            </p>
+          )}
+          {failedRuns.length > 0 && (
+            <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm">
+              <p className="font-medium">{failedRuns.length} recent run(s) failed</p>
+              <p className="mt-1 break-words text-xs text-red-700">
+                {failedRuns[0].last_error ?? "No error recorded"}
+              </p>
+            </div>
+          )}
 
           <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[

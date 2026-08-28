@@ -14,7 +14,7 @@ export interface JobsRepo {
   batchJobs(batchId: string): Promise<JobRow[]>;
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
-  failStaleAwaiting(olderThanMs: number): Promise<number>;
+  listStaleAwaiting(olderThanMs: number): Promise<JobRow[]>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -66,7 +66,10 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       return (data ?? []) as JobRow[];
     },
     async markAwaiting(id) {
-      const { error } = await db.from("jobs").update({ status: "awaiting_callback" }).eq("id", id);
+      // Only park a job that is still running: a fast callback may already have
+      // completed it, and parking would resurrect a finished job.
+      const { error } = await db.from("jobs").update({ status: "awaiting_callback" })
+        .eq("id", id).eq("status", "running");
       if (error) throw new Error(`jobs.markAwaiting failed: ${error.message}`, { cause: error });
     },
     async getJob(id) {
@@ -74,13 +77,12 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       if (error) throw new Error(`jobs.getJob failed: ${error.message}`, { cause: error });
       return (data as JobRow) ?? null;
     },
-    async failStaleAwaiting(olderThanMs) {
+    async listStaleAwaiting(olderThanMs) {
       const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-      const { data, error } = await db.from("jobs")
-        .update({ status: "failed", last_error: "Callback never arrived", finished_at: new Date().toISOString() })
-        .eq("status", "awaiting_callback").lt("started_at", cutoff).select("id");
-      if (error) throw new Error(`jobs.failStaleAwaiting failed: ${error.message}`, { cause: error });
-      return (data ?? []).length;
+      const { data, error } = await db.from("jobs").select("*")
+        .eq("status", "awaiting_callback").lt("started_at", cutoff);
+      if (error) throw new Error(`jobs.listStaleAwaiting failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
     },
   };
 }
