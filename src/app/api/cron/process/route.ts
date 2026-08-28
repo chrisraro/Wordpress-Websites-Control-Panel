@@ -13,8 +13,12 @@ async function run(req: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   const db = createServiceSupabase();
-  const result = await processJobs(supabaseJobsRepo(db), buildJobHandlers(db), { max: 3 });
-  return NextResponse.json({ ok: true, ...result });
+  const jobsRepo = supabaseJobsRepo(db);
+  // Runs parked waiting on an n8n callback that never arrived are failed so
+  // their normal retry/backoff can take over.
+  const stale = await jobsRepo.failStaleAwaiting(30 * 60 * 1000);
+  const result = await processJobs(jobsRepo, buildJobHandlers(db), { max: 3 });
+  return NextResponse.json({ ok: true, stale, ...result });
 }
 
 export const POST = run;
