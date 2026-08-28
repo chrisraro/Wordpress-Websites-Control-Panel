@@ -1,0 +1,137 @@
+{
+  "name": "WP Control Panel \u00e2\u20ac\u201d GeoGrid",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wp-panel-geogrid",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "GeoGrid request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.points",
+        "options": {}
+      },
+      "id": "split",
+      "name": "One item per grid point",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Replace this node with a real rank lookup (DataForSEO, SerpApi, ...).\n// It must output { idx, rank } per item; rank is 1-20 or null.\nreturn $input.all().map((item) => ({\n  json: { idx: item.json.idx, rank: null },\n}));"
+      },
+      "id": "lookup",
+      "name": "Rank lookup (replace me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Collect every per-point result into a single ranks array.\nreturn [{ json: { data: $input.all().map((i) => ({ idx: i.json.idx, rank: i.json.rank ?? null })) } }];"
+      },
+      "id": "aggregate",
+      "name": "Collect ranks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('GeoGrid request').first().json.body.callback_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.WP_PANEL_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $('GeoGrid request').first().json.body.run_id, ranks: $json.data }) }}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Post ranks back",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "GeoGrid request": {
+      "main": [
+        [
+          {
+            "node": "One item per grid point",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per grid point": {
+      "main": [
+        [
+          {
+            "node": "Rank lookup (replace me)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank lookup (replace me)": {
+      "main": [
+        [
+          {
+            "node": "Collect ranks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect ranks": {
+      "main": [
+        [
+          {
+            "node": "Post ranks back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

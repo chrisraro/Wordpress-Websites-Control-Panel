@@ -59,3 +59,10 @@ PageSpeed Insights scores, and the AI Visibility (AEO) brand panel. Sites withou
 Rank Math still get PageSpeed data — each source is collected independently, and a
 source that is unavailable or fails is labelled on the page rather than failing
 the scan.
+
+## GeoGrid
+
+The GeoGrid tab tracks local-pack rank across an N×N grid of coordinates around a
+business, plotted on a map with per-point ranks and run-over-run comparison. Ranks
+come from a provider: the built-in **stub** (sample data, no setup) or your **n8n**
+workflow for live results — see `docs/ops/geogrid.md`.

@@ -12,6 +12,9 @@ export interface JobsRepo {
   retry(id: string, error: string, retryAtIso: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   batchJobs(batchId: string): Promise<JobRow[]>;
+  markAwaiting(id: string): Promise<void>;
+  getJob(id: string): Promise<JobRow | null>;
+  listStaleAwaiting(olderThanMs: number): Promise<JobRow[]>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -60,6 +63,25 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       const { data, error } = await db.from("jobs").select("*")
         .eq("batch_id", batchId).order("scheduled_for");
       if (error) throw new Error(`jobs.batchJobs failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
+    },
+    async markAwaiting(id) {
+      // Only park a job that is still running: a fast callback may already have
+      // completed it, and parking would resurrect a finished job.
+      const { error } = await db.from("jobs").update({ status: "awaiting_callback" })
+        .eq("id", id).eq("status", "running");
+      if (error) throw new Error(`jobs.markAwaiting failed: ${error.message}`, { cause: error });
+    },
+    async getJob(id) {
+      const { data, error } = await db.from("jobs").select("*").eq("id", id).maybeSingle();
+      if (error) throw new Error(`jobs.getJob failed: ${error.message}`, { cause: error });
+      return (data as JobRow) ?? null;
+    },
+    async listStaleAwaiting(olderThanMs) {
+      const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+      const { data, error } = await db.from("jobs").select("*")
+        .eq("status", "awaiting_callback").lt("started_at", cutoff);
+      if (error) throw new Error(`jobs.listStaleAwaiting failed: ${error.message}`, { cause: error });
       return (data ?? []) as JobRow[];
     },
   };

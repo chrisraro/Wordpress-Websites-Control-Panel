@@ -10,6 +10,11 @@ import { installPlugin, type InstallSource } from "@/services/marketplace/instal
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { seoScan } from "@/services/seo/scan";
 import { supabaseSeoRepo } from "@/services/seo/repo";
+import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
+import { runGeoGrid } from "@/services/geogrid/run";
+import { stubProvider } from "@/services/geogrid/providers/stub";
+import { createN8nProvider } from "@/services/geogrid/providers/n8n";
+import { getOptionalEnv } from "@/lib/env";
 
 interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
@@ -58,6 +63,19 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
       );
       if (!result.ok) throw new Error(result.error ?? "Install failed");
+    },
+    geogrid_run: async ({ job }) => {
+      const p = job.payload as { config_id?: string; keyword?: string };
+      if (!p?.config_id || !p?.keyword) throw new Error("geogrid_run payload malformed");
+      const { awaiting } = await runGeoGrid(
+        {
+          geogrid: supabaseGeoGridRepo(db),
+          providers: { stub: stubProvider, n8n: createN8nProvider() },
+          appUrl: getOptionalEnv("APP_URL") ?? "http://localhost:3000",
+        },
+        job.id, p.config_id, p.keyword,
+      );
+      if (awaiting) return { awaitingCallback: true };
     },
   };
 }
