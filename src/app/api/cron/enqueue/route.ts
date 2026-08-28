@@ -3,6 +3,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { enqueueJob } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseSeoRepo } from "@/services/seo/repo";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,17 @@ async function run(req: Request) {
     const res = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
     if (res) scans++;
   }
-  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, feed: Boolean(feedJob) });
+  const seo = supabaseSeoRepo(db);
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  let seoScans = 0;
+  for (const site of sites) {
+    if (site.status === "disabled") continue;
+    const last = await seo.lastRunAt(site.id);
+    if (last && new Date(last).getTime() > weekAgo) continue;
+    const res = await enqueueJob(jobs, "seo_scan", site.id, {}, { dedupe: true });
+    if (res) seoScans++;
+  }
+  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, seo: seoScans, feed: Boolean(feedJob) });
 }
 
 export const POST = run;

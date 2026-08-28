@@ -1,4 +1,5 @@
-export type JobType = "snapshot_refresh" | "security_scan" | "vuln_feed_refresh" | "plugin_install";
+export type JobType =
+  | "snapshot_refresh" | "security_scan" | "vuln_feed_refresh" | "plugin_install" | "seo_scan";
 export type JobStatus = "pending" | "running" | "awaiting_callback" | "done" | "failed";
 
 export interface JobRow {
