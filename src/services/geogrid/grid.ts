@@ -16,6 +16,9 @@ export function buildGrid(
   if (!Number.isFinite(spacingM) || spacingM <= 0) {
     throw new Error(`Invalid spacing: ${spacingM} (expected metres greater than zero)`);
   }
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLng)) {
+    throw new Error(`Invalid centre coordinate: ${centerLat}, ${centerLng}`);
+  }
   const half = (size - 1) / 2;
   const dLat = spacingM / METRES_PER_DEGREE_LAT;
   const cos = Math.cos((centerLat * Math.PI) / 180);

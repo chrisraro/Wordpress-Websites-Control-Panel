@@ -23,10 +23,20 @@ describe("buildGrid", () => {
   it("spaces points by the requested metres", () => {
     const spacing = 1000;
     const pts = buildGrid(0, 0, 3, spacing);          // at the equator cos(0)=1
-    const dLat = pts[1 * 3].lat - pts[0 * 3 + 3].lat; // adjacent rows
-    expect(Math.abs(pts[0].lat - pts[3].lat)).toBeCloseTo(spacing / 111_320, 6);
-    expect(Math.abs(pts[0].lng - pts[1].lng)).toBeCloseTo(spacing / 111_320, 6);
-    expect(dLat).toBeCloseTo(0, 9);
+    const expected = spacing / 111_320;
+    // adjacent rows, same column (idx 0 -> 3 -> 6) step by one spacing each
+    expect(Math.abs(pts[0].lat - pts[3].lat)).toBeCloseTo(expected, 6);
+    expect(Math.abs(pts[3].lat - pts[6].lat)).toBeCloseTo(expected, 6);
+    // adjacent columns, same row
+    expect(Math.abs(pts[0].lng - pts[1].lng)).toBeCloseTo(expected, 6);
+    expect(Math.abs(pts[1].lng - pts[2].lng)).toBeCloseTo(expected, 6);
+    // every point in a row shares one latitude
+    expect(pts[3].lat).toBeCloseTo(pts[5].lat, 9);
+  });
+
+  it("rejects non-finite coordinates", () => {
+    expect(() => buildGrid(Number.NaN, 0, 3, 1000)).toThrow(/coordinate/i);
+    expect(() => buildGrid(0, Number.POSITIVE_INFINITY, 3, 1000)).toThrow(/coordinate/i);
   });
 
   it("widens longitude spacing away from the equator", () => {
