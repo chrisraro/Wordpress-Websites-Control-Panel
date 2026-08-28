@@ -30,6 +30,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
       "content-type": "application/pdf",
       "content-disposition": `inline; filename="${filename}"`,
       "cache-control": "private, no-store",
+      "x-robots-tag": "noindex, nofollow",
     },
   });
 }

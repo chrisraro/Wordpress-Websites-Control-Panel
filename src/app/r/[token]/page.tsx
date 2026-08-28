@@ -5,6 +5,9 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 
 export const dynamic = "force-dynamic";
 
+// Shared reports are confidential: never let a pasted link get indexed.
+export const metadata = { robots: { index: false, follow: false } };
+
 const TOKEN_RE = /^[0-9a-f]{32}$/;
 
 const SECTION_LABELS: Record<string, string> = {
