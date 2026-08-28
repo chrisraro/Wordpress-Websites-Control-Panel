@@ -19,7 +19,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   try {
     pdf = await supabaseReportStorage(db).download(report.storage_path);
   } catch {
-    return new Response("Report file unavailable", { status: 404 });
+    // Same response as every other failure: this public surface exposes no
+    // distinguishable states (malformed / unknown / revoked / missing file).
+    return new Response("Not found", { status: 404 });
   }
 
   const filename = `report-${report.generated_at.slice(0, 10)}.pdf`;
