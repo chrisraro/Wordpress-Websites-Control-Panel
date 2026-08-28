@@ -24,7 +24,9 @@ export const stubProvider: GeoGridProvider = {
       const col = p.idx % size;
       const ring = Math.max(Math.abs(row - half), Math.abs(col - half));
       const jitter = hash(`${req.keyword}|${p.idx}`) % 3;
-      const rank = 1 + jitter + ring * 3;
+      // Step 5 per ring so the outer ring of a 9x9 grid falls out of the top 20 —
+      // sample data then exercises the "not ranked" state too.
+      const rank = 1 + jitter + ring * 5;
       return { ...p, rank: rank > 20 ? null : rank };
     });
     return { kind: "ranks", ranks };

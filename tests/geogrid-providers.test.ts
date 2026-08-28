@@ -47,6 +47,13 @@ describe("stubProvider", () => {
     expect(a.ranks).not.toEqual(b.ranks);
   });
 
+  it("drops the outer ring of a 9x9 grid out of the top 20", async () => {
+    const r = await stubProvider.run(req({ points: buildGrid(14.6, 120.98, 9, 1000) }));
+    if (r.kind !== "ranks") throw new Error("unreachable");
+    expect(r.ranks.filter((p) => p.rank === null).length).toBeGreaterThan(0);
+    expect(r.ranks[40].rank).not.toBeNull();   // centre still ranks
+  });
+
   it("ranks the centre at least as well as the corners", async () => {
     const r = await stubProvider.run(req({ points: buildGrid(14.6, 120.98, 5, 1000) }));
     if (r.kind !== "ranks") throw new Error("unreachable");
