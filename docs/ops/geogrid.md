@@ -65,3 +65,24 @@ Only `idx` and `rank` are read from the callback — coordinates always come fro
 panel's stored configuration, so a bad payload cannot move the grid. Runs that never
 call back are failed automatically after 30 minutes and retried per the normal job
 backoff.
+
+## Constraints that are easy to miss
+
+These are the details a near-miss integration gets wrong. A near-miss does not
+error — it produces a uniformly unranked grid that reads as a real business
+result — so check them explicitly when adapting an existing workflow.
+
+- **Ack immediately.** The panel aborts its POST to your webhook after 30
+  seconds and fails the job. Reply on receipt (`responseMode: onReceived`) and
+  do the SERP lookups afterwards; do not hold the request open.
+- **A non-2xx ack fails the run outright**, before any lookup happens.
+- **Post back to the `callback_url` in the request body**, never a hardcoded
+  URL. It changes with the deployment.
+- **Field names are exact**: `{ run_id, ranks: [{ idx, rank }] }`. An entry
+  whose `idx` is not a number is skipped. A `rank` that is not a number in
+  1–20 becomes `null` silently — that includes `"3"` as a string.
+- **`run_id` must be echoed unchanged.** A wrong or stale id gets
+  `404 no run awaiting this id`, which is the clearest signal you have that the
+  callback shape is wrong — check for it when testing.
+- **Deadline is 30 minutes**; runs that never call back fail and retry on the
+  normal job backoff.
