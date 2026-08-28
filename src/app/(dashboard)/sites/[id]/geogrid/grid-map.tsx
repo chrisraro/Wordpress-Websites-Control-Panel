@@ -3,6 +3,17 @@
 import { useEffect, useRef } from "react";
 import type { RankPoint } from "@/services/geogrid/types";
 
+/** Popup content as real DOM so untrusted text can never become markup. */
+function popupNode(businessName: string, label: string): HTMLElement {
+  const wrap = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = businessName;
+  const rank = document.createElement("div");
+  rank.textContent = `Rank: ${label}`;
+  wrap.append(name, rank);
+  return wrap;
+}
+
 function colourFor(rank: number | null): string {
   if (rank === null) return "#dc2626";      // not found
   if (rank <= 3) return "#16a34a";
@@ -43,7 +54,11 @@ export function GridMap({
             iconSize: [28, 28],
             iconAnchor: [14, 14],
           }),
-        }).addTo(map).bindPopup(`${businessName}<br>Rank: ${label}`);
+        })
+          .addTo(map)
+          // Built as DOM, not an HTML string: Leaflet assigns string popup
+          // content via innerHTML, and the business name is user-entered.
+          .bindPopup(popupNode(businessName, label));
       }
 
       L.circleMarker([center.lat, center.lng], {
