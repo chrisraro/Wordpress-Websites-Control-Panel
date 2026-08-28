@@ -15,6 +15,9 @@ import { runGeoGrid } from "@/services/geogrid/run";
 import { stubProvider } from "@/services/geogrid/providers/stub";
 import { createN8nProvider } from "@/services/geogrid/providers/n8n";
 import { getOptionalEnv } from "@/lib/env";
+import { generateReport } from "@/services/reports/generate";
+import { supabaseReportsRepo, supabaseReportStorage } from "@/services/reports/repo";
+import { parseSections, REPORT_SECTIONS } from "@/services/reports/types";
 
 interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
@@ -76,6 +79,23 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         job.id, p.config_id, p.keyword,
       );
       if (awaiting) return { awaitingCallback: true };
+    },
+    report_generate: async ({ job }) => {
+      if (!job.site_id) throw new Error("report_generate requires site_id");
+      const p = job.payload as { sections?: unknown; period_days?: unknown };
+      const sections = parseSections(p.sections);
+      await generateReport(
+        {
+          sites, snapshots, security, seo,
+          geogrid: supabaseGeoGridRepo(db),
+          reports: supabaseReportsRepo(db),
+          storage: supabaseReportStorage(db),
+        },
+        job.site_id,
+        sections.length > 0 ? sections : REPORT_SECTIONS,
+        Number(p.period_days) > 0 ? Number(p.period_days) : 30,
+        true,
+      );
     },
   };
 }

@@ -7,8 +7,9 @@ const LIVE = [
   { key: "security", label: "Security", href: (id: string) => `/sites/${id}/security` },
   { key: "seo", label: "SEO", href: (id: string) => `/sites/${id}/seo` },
   { key: "geogrid", label: "GeoGrid", href: (id: string) => `/sites/${id}/geogrid` },
+  { key: "reports", label: "Reports", href: (id: string) => `/sites/${id}/reports` },
 ] as const;
-const COMING = ["Reports"];
+const COMING: string[] = [];
 
 export type SiteTabKey = (typeof LIVE)[number]["key"];
 
