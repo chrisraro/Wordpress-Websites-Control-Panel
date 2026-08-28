@@ -4,6 +4,8 @@ import { enqueueJob } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
+import { supabaseReportsRepo } from "@/services/reports/repo";
+import { REPORT_SECTIONS } from "@/services/reports/types";
 import { createServiceSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +40,28 @@ async function run(req: Request) {
     const seoJob = seoDue
       ? await enqueueJob(jobs, "seo_scan", site.id, {}, { dedupe: true })
       : null;
-    return { snapshot: Boolean(snapshot), scan: Boolean(scan), seo: Boolean(seoJob) };
+
+    // Monthly client report: only on the 1st, and only once per calendar month.
+    let reportJob: { id: string } | null = null;
+    const today = new Date();
+    if (today.getUTCDate() === 1) {
+      const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString();
+      const already = await supabaseReportsRepo(db).autoExistsSince(site.id, monthStart);
+      if (!already) {
+        reportJob = await enqueueJob(jobs, "report_generate", site.id,
+          { sections: REPORT_SECTIONS, period_days: 30 }, { dedupe: true });
+      }
+    }
+    return { snapshot: Boolean(snapshot), scan: Boolean(scan), seo: Boolean(seoJob), report: Boolean(reportJob) };
   }));
 
   const enqueued = perSite.filter((r) => r.snapshot).length;
   const scans = perSite.filter((r) => r.scan).length;
   const seoScans = perSite.filter((r) => r.seo).length;
-  return NextResponse.json({ ok: true, sites: sites.length, enqueued, scans, seo: seoScans, feed: Boolean(feedJob) });
+  const reports = perSite.filter((r) => r.report).length;
+  return NextResponse.json({
+    ok: true, sites: sites.length, enqueued, scans, seo: seoScans, reports, feed: Boolean(feedJob),
+  });
 }
 
 export const POST = run;

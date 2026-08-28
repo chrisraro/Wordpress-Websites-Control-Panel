@@ -41,6 +41,7 @@ see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
 - Weekly per site: `seo_scan` (Rank Math audit, page scores, links, Search Console
   keywords, AI Visibility) plus PageSpeed Insights for mobile and desktop. Set
   `GOOGLE_PSI_API_KEY` (optional) to raise PageSpeed rate limits.
+- Monthly (1st): `report_generate` per site — a full PDF report, stored with a share link.
 - Manual: every "Refresh inventory" button runs the same code path inline.
 
 ## Marketplace
@@ -66,3 +67,18 @@ The GeoGrid tab tracks local-pack rank across an N×N grid of coordinates around
 business, plotted on a map with per-point ranks and run-over-run comparison. Ranks
 come from a provider: the built-in **stub** (sample data, no setup) or your **n8n**
 workflow for live results — see `docs/ops/geogrid.md`.
+
+## Reports
+
+The Reports tab builds a branded PDF from data already collected by scans —
+security grade and vulnerabilities, SEO/AEO scores and issues, GeoGrid rankings,
+and site inventory. Generating a report never contacts the website.
+
+Each report gets a revocable share link (`/r/<token>`) you can send to a client:
+the page shows what the report covers and serves the PDF through a token-checked
+route, so the storage bucket itself stays private. Revoking a link makes both the
+page and the file 404 immediately.
+
+On the 1st of each month the nightly enqueue queues one report per site
+automatically (marked "Monthly" in the table). Requires migration
+`0004_storage_reports.sql` for the private `reports` bucket.
