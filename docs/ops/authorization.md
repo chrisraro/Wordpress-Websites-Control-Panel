@@ -16,11 +16,12 @@ permissions, RLS) and `docs/superpowers/specs/2026-08-29-phase9b-user-management
 | `0011_site_admin_users.sql` | **Pending** | Moves WordPress admin identities to a staff-only table. Apply **before** deploying this branch. |
 | `0012_revoke_site_credential_columns.sql` | **Pending** | Revokes `mcp_endpoint`/`wp_username`/`app_password_encrypted` from `authenticated`. Apply **after** deploying this branch. |
 | `0013_snapshot_no_admin_users.sql` | **Pending** | Permanent check-constraint backstop for `0011`. Apply **after** deploying this branch. |
+| `0014_require_one_admin.sql` | **Pending** | Row-level `AFTER UPDATE OR DELETE` trigger backstop against the last-admin race two concurrent demotions can cause (see its header). No ordering dependency on `0010`–`0013` or this branch's deploy — safe to apply any time. |
 
 **As of this writing, only `0006`–`0009` are applied to the live database.**
-`0010`, `0011`, `0012` and `0013` are all still pending. Do not read any
-narrower claim elsewhere in this repo's history as still true — this table is
-the current state.
+`0010`, `0011`, `0012`, `0013` and `0014` are all still pending. Do not read
+any narrower claim elsewhere in this repo's history as still true — this
+table is the current state.
 
 `0009` corrects a gap in `0008`'s write policies (see "Read vs. manage" below).
 `0010` fixes one permission mapping in `0009`: `site_vulnerabilities` writes
@@ -99,6 +100,31 @@ broken:
    those gap rows are never touched by `0011`'s own strip and would
    otherwise abort `0013`'s `add constraint` on the very database it is
    written for.
+
+   **Rollback of `0013`**, mirroring `0012`'s rollback above, is:
+
+   ```sql
+   alter table site_snapshots drop constraint site_snapshots_no_admin_users;
+   ```
+
+   Reverting the code half of this deploy (the `collectInventory` change that
+   stops writing `admin_users` into the payload) while `0013` stays applied
+   makes every `refreshInventoryAction`, every `snapshot_refresh` job, and
+   every cold-site `security_scan` fail with a check-constraint violation —
+   the old collector still writes `payload.admin_users` and the constraint
+   rejects it outright. That failure is the intended, desirable behaviour
+   (see "Known exposures" §1 below: it fails loudly at write time instead of
+   silently re-publishing admin logins), **not a bug to route around** —
+   dropping the constraint is an incident-recovery measure to restore write
+   availability during an emergency code rollback, not a fix. Running the
+   statement above re-opens exactly the exposure `0011`/`0013` closed: any
+   client with a grant on a site can once again read that site's WordPress
+   administrator logins and emails out of `site_snapshots.payload` over
+   PostgREST, for every new row written while the constraint stays dropped.
+   Re-apply the `add constraint` statement from `0013` the moment the
+   reverted code (or a fixed forward deploy) stops writing `admin_users`
+   again, and treat the constraint-dropped window as a reportable exposure,
+   not a resolved incident.
 
 5. **Run `npm run verify:rls`.** See the section below — it is the only
    check that proves any of this against the live database rather than
@@ -232,6 +258,20 @@ shows it once, to the administrator who just created the account
 control, and it is never stored or logged anywhere in this codebase. Treat it
 exactly like a password reset link: send it somewhere only the recipient can
 read.
+
+**`APP_URL` is a required prerequisite for a usable invite in any deployed
+environment**, not merely an n8n/GeoGrid setting (see `.env.example`).
+`inviteUserAction` builds `redirectTo` as `` `${APP_URL}/login` ``, falling
+back to `http://localhost:3000` when `APP_URL` is unset. Deploy without
+setting it and every invite link `generateLink` returns points at
+localhost — the invite dialog shows a link, the administrator sends it, and
+it is unusable by the recipient, with nothing failing loudly anywhere in
+this flow to surface the mistake. Separately, `redirectTo` must also appear
+in Supabase Auth's redirect URL allow-list (Authentication > URL
+Configuration in the Supabase dashboard) — `generateLink` rejects a
+`redirectTo` that is not on that list regardless of what `APP_URL` is set
+to, so both the environment variable and the dashboard setting have to be
+correct together.
 
 **A `client` must be granted at least one site at invite time.** A client
 with no grants has an empty dashboard and can do nothing, so creating one

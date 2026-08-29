@@ -22,7 +22,7 @@ import { join } from "node:path";
 // naive string match on `repo.setRole(` would pass right through
 // `users.setRole(...)`, which is exactly the unguarded call this test exists
 // to catch. Matching the method name regardless of receiver closes that gap;
-// it does allowlist any particular receiver name.
+// it does not allowlist any particular receiver name.
 const ACTIONS_FILE = join(__dirname, "..", "src", "app", "(dashboard)", "users", "actions.ts");
 const UNGUARDED_METHODS = ["setRole", "deleteUser", "setRolePermission"];
 

@@ -50,11 +50,21 @@ describe("0014_require_one_admin.sql", () => {
     expect(createIndex).toBeGreaterThan(dropIndex);
   });
 
-  it("fires once per statement, not once per row", () => {
+  it("is row-level, not statement-level -- statement-level never fires for repo.setRole's upsert", () => {
+    // repo.setRole (src/services/users/repo.ts) writes every role change via
+    // `.upsert(..., { onConflict: "user_id" })`, i.e.
+    // `insert ... on conflict (user_id) do update ...`. Postgres classifies a
+    // statement-level trigger's firing by the literal command keyword, not by
+    // which branch a given row took, so a statement-level AFTER UPDATE
+    // trigger never fires for that statement at all -- missing the
+    // application's only demotion path entirely. Row-level AFTER UPDATE
+    // triggers fire for exactly the rows that took the DO UPDATE branch,
+    // which is documented Postgres behaviour for ON CONFLICT DO UPDATE and
+    // closes that gap.
     const m = SQL.match(/create trigger user_roles_require_one_admin[\s\S]*?;/);
     expect(m).not.toBeNull();
-    expect(m![0]).toMatch(/for each statement/);
-    expect(m![0]).not.toMatch(/for each row/);
+    expect(m![0]).toMatch(/for each row/);
+    expect(m![0]).not.toMatch(/for each statement/);
   });
 
   it("fires on UPDATE and DELETE, but never on INSERT", () => {

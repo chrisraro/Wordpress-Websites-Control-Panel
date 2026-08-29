@@ -57,7 +57,13 @@ set local search_path = public;
 -- insert a fresh admin_users-carrying row between them, and the constraint's
 -- validation scan aborts the transaction. This lock blocks concurrent
 -- INSERT/UPDATE on site_snapshots for the few milliseconds the two statements
--- take, so the table cannot change underneath them. It does not block reads.
+-- take, so the table cannot change underneath them. SHARE ROW EXCLUSIVE
+-- itself does not block reads -- but the `add constraint` two statements
+-- below takes its own, much stronger ACCESS EXCLUSIVE lock for the
+-- duration of its validation scan over the whole table (no `not valid`
+-- clause defers that scan), and ACCESS EXCLUSIVE does block reads. On a
+-- large site_snapshots this is a brief read outage on that table, not a
+-- side-effect-free operation -- plan the migration window accordingly.
 lock table site_snapshots in share row exclusive mode;
 
 update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';

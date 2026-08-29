@@ -45,31 +45,41 @@
 -- from auth.users that deleteManagedUser's auth.admin.deleteUser call
 -- triggers) -- is in this trigger's scope.
 --
--- Statement-level (`for each statement`, not `for each row`): the
--- invariant is about the state of the whole table once the statement has
--- finished, not about any one changed row in isolation, so the whole-table
--- admin count only needs checking once per statement, not re-run once per
--- affected row.
+-- ROW-level (`for each row`), not statement-level -- this supersedes an
+-- earlier version of this migration that used `for each statement`. That
+-- version never fired on this application's only demotion path:
+-- repo.setRole (src/services/users/repo.ts) writes every role change via
+-- `.upsert(..., { onConflict: "user_id" })`, which PostgREST executes as
+-- `insert ... on conflict (user_id) do update ...`, and Postgres classifies
+-- a statement-level trigger's firing by the literal command keyword used,
+-- not by whether any row actually took the insert or the conflict-update
+-- branch -- so a statement-level AFTER UPDATE trigger does not fire for
+-- that upsert at all, even for a row genuinely updated by it. A backstop
+-- that silently misses the application's only write path to the invariant
+-- it exists to protect is worse than none: it is the thing people stop
+-- worrying about. A row-level AFTER UPDATE OR DELETE trigger does not have
+-- this gap: Postgres's documented behaviour for `INSERT ... ON CONFLICT DO
+-- UPDATE` is that row-level AFTER UPDATE triggers fire for exactly the rows
+-- that took the DO UPDATE branch, the same as any other UPDATE. user_roles
+-- holds one row per account, so the per-row cost of row-level firing over
+-- statement-level is irrelevant here -- there is never more than one row
+-- to fire for per account touched.
 --
--- Known limitation, disclosed rather than silently shipped: repo.setRole
--- (src/services/users/repo.ts) writes every role change, including a
--- demotion, via `.upsert(..., { onConflict: "user_id" })`, which PostgREST
--- executes as `insert ... on conflict (user_id) do update ...`. Postgres
--- classifies a statement-level trigger's firing by the literal command
--- keyword used, not by whether any given row actually took the insert or
--- the conflict-update branch -- so a statement-level AFTER UPDATE trigger,
--- as this one is, does not fire for that upsert, even for a row that was
--- genuinely updated by it. It does fire for a plain `update` or `delete`
--- issued directly against this table (e.g. by an operator at a SQL
--- console, or by any future code path that stops upserting), and the
--- DELETE half fires for deleteManagedUser's cascade from auth.users today.
--- The application-level guards above remain the only enforcement of this
--- invariant on the upsert-based role-change path in the app's current
--- code; this migration's UPDATE half is a backstop for direct SQL against
--- this table, not (today) for that specific call. Flagged here rather than
--- silently narrowed to DELETE-only, so a future reader deciding whether
--- this is sufficient has the actual facts rather than an implied guarantee
--- this file does not keep.
+-- Multi-row statements still behave correctly under FOR EACH ROW: a single
+-- `delete from user_roles where role = 'admin'` deletes every admin row in
+-- one statement, and the row-level trigger fires once per deleted row, in
+-- some order, within that statement's transaction. Postgres re-evaluates
+-- `exists (select 1 from public.user_roles where role = 'admin')` fresh
+-- each time the function runs, and DELETE has already removed the row
+-- being processed (and every row processed before it) from the table by
+-- the time its AFTER trigger fires. So the first n-1 admin deletions in
+-- the statement see the remaining admins and pass; the final one sees zero
+-- admins, raises, and that exception aborts the whole statement --
+-- including the deletions that already "passed" -- because all of it runs
+-- inside one transaction. The invariant is enforced on the statement as a
+-- whole, not merely on each row in isolation, exactly as the
+-- statement-level version intended, just without that version's blind
+-- spot on upsert.
 --
 -- security definer with set search_path = '' and every reference
 -- schema-qualified, matching 0007_rbac_functions.sql's convention exactly
@@ -98,7 +108,7 @@ begin
         || 'are restoring from a backup or otherwise repairing a broken state, insert or update '
         || 'a user_roles row to admin in the same statement, or in a prior one.';
   end if;
-  return null; -- ignored on an AFTER statement-level trigger
+  return null; -- ignored on an AFTER row-level trigger
 end;
 $$;
 
@@ -106,5 +116,5 @@ drop trigger if exists user_roles_require_one_admin on public.user_roles;
 
 create trigger user_roles_require_one_admin
   after update or delete on public.user_roles
-  for each statement
+  for each row
   execute function public.require_one_admin();

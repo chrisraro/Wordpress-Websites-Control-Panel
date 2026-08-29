@@ -78,11 +78,11 @@ export async function collectInventory(client: SiteMcpClient): Promise<Collected
   // one administrator, and PHP's json_encode(array()) serialises an empty
   // list as `[]` -- present, not absent -- so a missing admin_users key
   // means the response is malformed, never "this site has no
-  // administrators". Defaulting it away would let insertSnapshot's
-  // onConflict: site_id upsert replace a previously-good row wholesale,
-  // stamp a fresh collected_at, report success, and then show the operator
-  // "No administrator data collected yet -- refresh the inventory", which
-  // would be false twice over.
+  // administrators". Defaulting it away would let insertSnapshot -- a plain
+  // insert into insert-only history, not an upsert; it is upsertAdminUsers
+  // that upserts on site_id -- stamp a fresh collected_at, report success,
+  // and then show the operator "No administrator data collected yet --
+  // refresh the inventory", which would be false twice over.
   const { admin_users, ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
   if (!Array.isArray(admin_users)) {
     throw new Error("collectInventory: WordPress response is missing admin_users");

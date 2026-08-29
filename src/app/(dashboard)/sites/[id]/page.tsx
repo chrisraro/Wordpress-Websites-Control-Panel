@@ -33,8 +33,12 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
   const isClient = viewer.role === "client";
   const canTestConnection = can(viewer, "sites.manage");
-  const canRefresh = canAccessSite(viewer, id, "manage");
-  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
+  // refreshInventoryAction (manage-actions.ts) checks both wp_toolkit.manage
+  // and a "manage" site grant -- a `manage` grant alone (the level a
+  // client's own dashboard offers) is not enough. canRefresh has to mirror
+  // both checks, or the button renders for a viewer the action then refuses.
+  const canRefresh = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
+  const canManageToolkit = canRefresh;
 
   // site_admin_users' RLS policy (0011_site_admin_users.sql), the sites
   // table's credential-adjacent columns (spec §5.2), and activity_log's RLS
