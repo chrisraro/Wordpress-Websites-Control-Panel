@@ -11,8 +11,8 @@ import { IconAlert, IconSpinner } from "@/components/ui/icons";
 export interface SiteOption { id: string; name: string }
 
 export function InstallPanel({
-  slug, name, sites,
-}: { slug: string; name: string; sites: SiteOption[] }) {
+  slug, name, sites, target = "plugin",
+}: { slug: string; name: string; sites: SiteOption[]; target?: "plugin" | "theme" }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activate, setActivate] = useState(true);
@@ -32,7 +32,7 @@ export function InstallPanel({
     setError(null);
     startTransition(async () => {
       const res = await createInstallBatchAction({
-        source: { kind: "wporg", slug }, siteIds: [...selected], activate,
+        source: { kind: "wporg", slug }, siteIds: [...selected], activate, target,
       });
       if (res.ok && res.batchId) {
         toast({

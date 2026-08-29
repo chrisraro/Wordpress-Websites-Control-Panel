@@ -5,6 +5,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { InstallPanel } from "./install-panel";
 import { UploadCard } from "./upload-card";
+import { MarketplaceTabs } from "./marketplace-tabs";
 import { Card, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { buttonClass, cardClass, inputClass, labelClass } from "@/components/ui/styles";
 import { IconAlert, IconSearch, IconStar } from "@/components/ui/icons";
@@ -40,6 +41,8 @@ export default async function MarketplacePage({
         title="Marketplace"
         subtitle="Search wordpress.org, or upload your own plugin, and install across sites in one pass."
       />
+
+      <MarketplaceTabs active="plugins" />
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <form action="/marketplace" method="get" className={`${cardClass} p-5 lg:col-span-2`}>

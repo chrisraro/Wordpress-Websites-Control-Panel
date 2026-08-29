@@ -7,6 +7,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { securityScan, refreshVulnFeed } from "@/services/security/scan";
 import { installPlugin, type InstallSource } from "@/services/marketplace/install";
+import { installTheme } from "@/services/themes/install";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { seoScan } from "@/services/seo/scan";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -26,6 +27,15 @@ interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
   activate: boolean;
   actor: string;
+  /**
+   * Multi-site theme installs fan out through this same job type — themes
+   * and plugins both install "on N sites at once" the same way, so a second
+   * job type would just duplicate the batching logic. This field is the only
+   * thing that tells the handler which wordpress.org API and which upgrader
+   * (`Plugin_Upgrader` vs `Theme_Upgrader`) to use. Omitted = plugin, so jobs
+   * already queued before this field existed keep behaving as plugin installs.
+   */
+  target?: "plugin" | "theme";
 }
 
 /**
@@ -65,19 +75,25 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("plugin_install requires site_id");
       const p = job.payload as unknown as PluginInstallPayload;
       if (!p?.source || typeof p.actor !== "string") throw new Error("plugin_install payload malformed");
+      const isTheme = p.target === "theme";
       let source: InstallSource;
       if (p.source.kind === "upload") {
-        const { data, error } = await db.storage.from("plugins").createSignedUrl(p.source.path, 3600);
+        const bucket = isTheme ? "themes" : "plugins";
+        const { data, error } = await db.storage.from(bucket).createSignedUrl(p.source.path, 3600);
         if (error || !data?.signedUrl) {
-          throw new Error(`Could not sign uploaded plugin URL: ${error?.message ?? "unknown"}`);
+          throw new Error(`Could not sign uploaded ${isTheme ? "theme" : "plugin"} URL: ${error?.message ?? "unknown"}`);
         }
         source = { kind: "url", url: data.signedUrl };
       } else {
         source = p.source;
       }
-      const result = await installPlugin(
-        { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
-      );
+      const result = isTheme
+        ? await installTheme(
+            { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
+          )
+        : await installPlugin(
+            { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
+          );
       if (!result.ok) throw new Error(result.error ?? "Install failed");
     },
     geogrid_run: async ({ job }) => {

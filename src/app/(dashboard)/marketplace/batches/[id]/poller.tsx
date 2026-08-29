@@ -8,7 +8,7 @@ import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/co
 import { IconSpinner } from "@/components/ui/icons";
 
 interface BatchJob {
-  id: string; site_id: string | null; site_name: string;
+  id: string; site_id: string | null; site_name: string; label: string;
   status: string; attempts: number; last_error: string | null;
 }
 
@@ -140,7 +140,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
           <table className="w-full min-w-[560px] text-body">
             <thead>
               <tr className={tableHeadClass}>
-                <th className="px-5 py-3 font-medium">Site</th>
+                <th className="px-5 py-3 font-medium">Item</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Attempts</th>
                 <th className="px-5 py-3 font-medium">Error</th>
@@ -149,7 +149,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
             <tbody>
               {jobs.map((j) => (
                 <tr key={j.id} className={tableRowClass}>
-                  <td className={`${tableCellClass} font-medium text-ink`}>{j.site_name}</td>
+                  <td className={`${tableCellClass} font-medium text-ink`}>{j.label}</td>
                   <td className={tableCellClass}>
                     <StatusBadge tone={STATUS_TONE[j.status] ?? "idle"}>
                       {j.status.replace("_", " ")}
