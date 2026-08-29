@@ -50,7 +50,7 @@ const PERMISSION_LABEL: Record<AppPermission, string> = {
 const PERMISSION_DESCRIPTION: Record<AppPermission, string> = {
   "sites.view_all": "See every site rather than only granted ones.",
   "sites.manage": "Connect, edit, or disable a site; touches credentials.",
-  "wp_toolkit.manage": "Plugins, themes, core, maintenance, child themes, bulk actions.",
+  "wp_toolkit.manage": "Plugins, themes, core, maintenance, child themes, bulk.",
   "security.run": "Run a security scan.",
   "seo.run": "Run an SEO/AEO scan.",
   "geogrid.manage": "Configure and run GeoGrid.",
@@ -104,29 +104,47 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
     setPendingKeys((prev) => new Set(prev).add(key));
 
     startTransition(async () => {
-      const result = await setRolePermissionAction(role, permission, next);
-      setPendingKeys((prev) => {
-        const copy = new Set(prev);
-        copy.delete(key);
-        return copy;
-      });
-      if (result.ok) {
-        toast({
-          tone: "success",
-          title: next ? "Permission granted" : "Permission removed",
-          description: `${PERMISSION_LABEL[permission]} for ${ROLE_LABEL[role]}.`,
-        });
-        router.refresh();
-      } else {
-        // The database refused (or the write failed) -- the checkbox must
-        // never keep showing a state that was never actually persisted.
+      try {
+        const result = await setRolePermissionAction(role, permission, next);
+        if (result.ok) {
+          toast({
+            tone: "success",
+            title: next ? "Permission granted" : "Permission removed",
+            description: `${PERMISSION_LABEL[permission]} for ${ROLE_LABEL[role]}.`,
+          });
+          router.refresh();
+        } else {
+          // The database refused (or the write failed) -- the checkbox must
+          // never keep showing a state that was never actually persisted.
+          setEnabled((prev) => {
+            const copy = new Set(prev);
+            if (wasEnabled) copy.add(key);
+            else copy.delete(key);
+            return copy;
+          });
+          toast({ tone: "error", title: "Could not update the permission", description: result.error });
+        }
+      } catch {
+        // setRolePermissionAction rejected before it could even report
+        // {ok:false} (e.g. a transport/auth failure) -- treat it exactly
+        // like a denial so the checkbox never disagrees with the database.
         setEnabled((prev) => {
           const copy = new Set(prev);
           if (wasEnabled) copy.add(key);
           else copy.delete(key);
           return copy;
         });
-        toast({ tone: "error", title: "Could not update the permission", description: result.error });
+        toast({
+          tone: "error",
+          title: "Could not update the permission",
+          description: "Something went wrong. Please try again.",
+        });
+      } finally {
+        setPendingKeys((prev) => {
+          const copy = new Set(prev);
+          copy.delete(key);
+          return copy;
+        });
       }
     });
   }
