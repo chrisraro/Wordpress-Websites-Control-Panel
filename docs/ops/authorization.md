@@ -12,16 +12,33 @@ permissions, RLS) and `docs/superpowers/specs/2026-08-29-phase9b-user-management
 | `0007_rbac_functions.sql` | Applied | `authorize()`, `authorize_for_user()`, `has_site_access()`. |
 | `0008_rls_scoped.sql` | Applied | Row-level security for the client-scoped read path. |
 | `0009_rbac_write_scope.sql` | Applied | Closes the write-policy gap `0008` left (see below). |
-| `0010_vuln_write_permission.sql` | **Pending** | Corrects one permission mapping in `0009`. |
-| `0011_site_admin_users.sql` | **Pending** | Moves WordPress admin identities to a staff-only table. Apply **before** deploying this branch. |
-| `0012_revoke_site_credential_columns.sql` | **Pending** | Revokes `mcp_endpoint`/`wp_username`/`app_password_encrypted` from `authenticated`. Apply **after** deploying this branch. |
-| `0013_snapshot_no_admin_users.sql` | **Pending** | Permanent check-constraint backstop for `0011`. Apply **after** deploying this branch. |
-| `0014_require_one_admin.sql` | **Pending** | Row-level `AFTER UPDATE OR DELETE` trigger backstop against the last-admin race two concurrent demotions can cause (see its header). No ordering dependency on `0010`–`0013` or this branch's deploy — safe to apply any time. |
+| `0010_vuln_write_permission.sql` | Applied | Corrects one permission mapping in `0009`. |
+| `0011_site_admin_users.sql` | Applied | Moves WordPress admin identities to a staff-only table. Apply **before** deploying this branch. |
+| `0012_revoke_site_credential_columns.sql` | Applied | Revokes `mcp_endpoint`/`wp_username`/`app_password_encrypted` from `authenticated`. Apply **after** deploying this branch. |
+| `0013_snapshot_no_admin_users.sql` | Applied | Permanent check-constraint backstop for `0011`. Apply **after** deploying this branch. |
+| `0014_require_one_admin.sql` | Applied | Row-level `AFTER UPDATE OR DELETE` trigger backstop against the last-admin race two concurrent demotions can cause (see its header). No ordering dependency on `0010`–`0013` or this branch's deploy — safe to apply any time. |
 
-**As of this writing, only `0006`–`0009` are applied to the live database.**
-`0010`, `0011`, `0012`, `0013` and `0014` are all still pending. Do not read
-any narrower claim elsewhere in this repo's history as still true — this
-table is the current state.
+**`0006`–`0014` are all applied to the live database, and the code that
+depends on them is deployed.** The runbook below was followed in order:
+`0011` first, then the deploy, then `0012`/`0013`/`0014`. `npm run verify:rls`
+returned **13/13** against the live database afterwards, including both
+assertions written for the two exposures below. Do not read any narrower
+claim elsewhere in this repo's history as still true — this table is the
+current state.
+
+The verification is worth keeping because it is the only executable evidence
+either exposure is closed. Two results from that run are load-bearing:
+
+- `select site_admin_users (granted site) returns zero rows` — the script
+  seeds a row through the service-role client first, so zero rows is the
+  policy filtering it, not an empty table.
+- `select sites.mcp_endpoint (granted site) is rejected: refused (code
+  42501): permission denied for table sites` — note **table**, not
+  **column**. PostgreSQL's SELECT executor reports the table name; the
+  `permission denied for column` wording belongs to COPY. An earlier draft
+  of that assertion matched the column phrasing and would have reported a
+  false FAIL here. It now matches SQLSTATE `42501` alone and echoes whatever
+  message comes back.
 
 `0009` corrects a gap in `0008`'s write policies (see "Read vs. manage" below).
 `0010` fixes one permission mapping in `0009`: `site_vulnerabilities` writes
@@ -495,18 +512,22 @@ active cross-tenant leak** — that is the exact failure this phase exists to
 prevent, not a test to adjust.
 
 This document does not claim any of the thirteen assertions have been run
-against the live database as part of writing it — that verification is the
-operator's step, after applying the pending migrations above, not something
-a documentation change can assert on their behalf.
+against the live database as part of writing it. That verification has since
+been performed by the operator: all of `0010`–`0014` are applied and the run
+returned 13/13, including the two assertions written for the exposures below.
 
 ## Known exposures
 
-Two exposures were identified and are being closed in Phase 9b. **As of this
-writing, neither is closed**, because every migration either one depends on
-is still pending (see the migration ledger at the top of this document). An
-on-call engineer must not read "the code for this shipped" and conclude an
-exposure is closed — closure is a database state, not a code state, for both
-of these.
+Two exposures were identified in Phase 9b. **Both are now closed**, verified
+against the live database by `npm run verify:rls` (13/13) after every
+migration they depend on was applied and the dependent code deployed.
+
+The framing below is kept deliberately, because it is the thing to reason
+from next time: closure here is a **database state, not a code state**. For
+the whole window in which this branch's code was written, reviewed and
+merged, both exposures were live. An on-call engineer must never read "the
+code for this shipped" and conclude an exposure is closed — check the
+migration ledger and re-run the verification.
 
 1. **`site_snapshots.payload.admin_users`** — every WordPress administrator's
    login and email, readable by any client with a grant on that site over
@@ -536,15 +557,22 @@ of these.
       `site_snapshots_no_admin_users` check constraint as a permanent,
       database-level backstop.
 
-   **Current state: none of the three have happened.** Every historical
-   `site_snapshots` row still carries `payload.admin_users`, and any client
-   holding a grant on that site can still read it out over PostgREST today.
+   **Current state: all three are done and verified.** WordPress
+   administrator identities now live in their own table, gated by RLS to
+   holders of `sites.view_all` only, and the check constraint stands
+   permanently — so a future revert of the application code fails loudly at
+   write time instead of silently re-publishing admin logins to every client
+   with a grant. If you ever need to drop that constraint during an
+   incident (`alter table site_snapshots drop constraint
+   site_snapshots_no_admin_users;`), understand that doing so re-opens the
+   exposure for any snapshot written afterwards; it is a way to unblock a
+   rollback, not a fix.
 
-   Once all three steps are complete, WordPress administrator identities
-   live in their own table, gated by RLS to holders of `sites.view_all`
-   only, and the check constraint stands permanently — so a future revert of
-   the application code fails loudly at write time instead of silently
-   re-publishing admin logins to every client with a grant.
+   The verification for this one is `select site_admin_users (granted site)
+   returns zero rows`, and it is only meaningful because the script seeds a
+   row through the service-role client immediately before reading it back as
+   the client. Without that seed, zero rows would prove nothing — an empty
+   table returns zero rows whether or not any policy exists.
 
 2. **`mcp_endpoint`, `wp_username` and `app_password_encrypted` on `sites`**
    — readable by any client with a grant, over PostgREST, regardless of what
@@ -577,10 +605,14 @@ of these.
    unchanged. `0012` instead revokes the table-level grant outright and
    re-grants exactly the safe column subset
    (`id, name, url, status, client_label, capabilities, created_at,
-   updated_at`) in the same transaction. **Current state: `0012` is
-   unapplied, so `authenticated` still holds the original blanket
-   table-level grant and all three columns remain readable by any client
-   with a site grant.**
+   updated_at`) in the same transaction. **Current state: `0012` is applied
+   and verified.** Before it was applied, the verification script read
+   `mcp_endpoint` for a granted site as a real client session and got the
+   value back; afterwards the same query is refused with SQLSTATE `42501`,
+   `permission denied for table sites`. Note that the same run's positive
+   control selects the full re-granted column list as that client and gets
+   its row — the check that the re-grant did not overshoot and break every
+   client page.
 
 3. ~~A `client`-role user with a `manage`-level site grant can trigger
    `refreshInventoryAction`.~~ **Closed, on both paths that could produce
