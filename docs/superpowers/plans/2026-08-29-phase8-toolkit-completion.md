@@ -19,6 +19,14 @@
 - **UI follows `DESIGN.md`** and the token vocabulary in `src/components/ui/styles.ts`. Run `node C:/Users/raroc/.claude/skills/impeccable/scripts/detect.mjs --json <changed files>` after UI work; responsive down to 375px is mandatory.
 - **All 163 existing tests must still pass.** Run `npm test` before every commit.
 - **Do not add permission checks.** RBAC is Phase 9; every action stays available to any authenticated user.
+- **The theme delete gate is deliberately implemented twice, and this is not a
+  defect to be consolidated.** `canDeleteTheme` (TypeScript) judges the stored
+  snapshot so the UI can disable a Delete button and state the reason; the PHP
+  in `buildPhp({kind:"delete_theme"})` judges live WordPress state and is the
+  check that actually protects the site. A snapshot can be hours stale — if
+  someone activates a child theme in wp-admin, a TypeScript-only gate would
+  offer to delete its parent. Decision confirmed by the project owner
+  2026-08-29. Keep both copies in sync when either changes.
 
 ---
 
