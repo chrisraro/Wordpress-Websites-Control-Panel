@@ -59,9 +59,27 @@ Changes take effect on the affected users' **next request** — 9a reads role, p
 
 ## 3. Invitations
 
-`supabase.auth.admin.inviteUserByEmail(email, { redirectTo })` from a server action, then the role row, then any site grants — in that order, so a failure never leaves a user with no role, which 9a treats as no access at all.
+`supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } })`
+from a server action, then the role row, then any site grants — in that order, so a
+failure never leaves a user with no role, which 9a treats as no access at all.
 
-**The generated invite link is returned to the UI and shown with a copy control.** Supabase's built-in mailer is rate-limited to a handful per hour and is frequently spam-filtered; without a visible link, a throttled invite is a dead end with no recovery path in the product. No password is ever set by anyone but the recipient.
+**`generateLink`, not `inviteUserByEmail`** — measured against this project on
+2026-08-29. `inviteUserByEmail` creates the account but its returned user has
+`action_link: undefined`, so there is no link to show. `generateLink` creates the
+same account *and* returns `properties.action_link`. Since the whole point of
+showing a link is to survive an email that never arrives, the API that cannot
+produce one is the wrong tool. Whether Supabase also emails the link depends on
+the project's SMTP configuration, so the UI presents the link as the thing to
+send and treats any email as a bonus rather than the mechanism.
+
+**The invite link is returned to the UI and shown with a copy control.** Supabase's
+built-in mailer is rate-limited to a handful per hour and is frequently
+spam-filtered; without a visible link, a throttled invite is a dead end with no
+recovery path in the product. No password is ever set by anyone but the recipient.
+
+The link is a bearer credential — anyone holding it can claim that account. It is
+shown once, to the administrator who just created the account, and never stored
+or logged.
 
 **A `client` must be granted at least one site at invite time.** A client with no grants has an empty dashboard and can do nothing, so creating one is a way to manufacture a confusing account. The form requires it; the server action re-checks.
 

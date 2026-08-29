@@ -259,6 +259,11 @@ Create `src/services/users/repo.ts`. It takes the service-role client — the Su
 inviteUser(email: string, redirectTo: string): Promise<{ id: string; inviteLink: string | null }>;
 ```
 
+**Use `auth.admin.generateLink({ type: "invite", email, options: { redirectTo } })`, not `inviteUserByEmail`.** Measured on this project: `inviteUserByEmail` returns a user whose `action_link` is `undefined`, so there is no link to show; `generateLink` creates the same account and returns `properties.action_link`. The link is a bearer credential — return it, never log it.
+
+```ts
+```
+
 - [ ] **Step 4: Write the service**
 
 `src/services/users/service.ts` composes repo calls into the operations the actions need, and is where the guards are applied — so an action cannot forget one:
