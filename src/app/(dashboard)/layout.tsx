@@ -3,7 +3,13 @@ import { requireViewer } from "@/lib/authz/server";
 import { can } from "@/lib/authz/decide";
 import { Sidebar } from "@/components/shell/sidebar";
 
-export default async function DashboardLayout({ children }: { children: ReactNode }) {
+export default async function DashboardLayout({
+  children,
+  modal,
+}: {
+  children: ReactNode;
+  modal: ReactNode;
+}) {
   // requireViewer() only confirms someone is signed in with a valid role —
   // it is authentication, not per-page authorization. It says nothing about
   // which sites this user may reach, and a layout runs once per navigation,
@@ -25,6 +31,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       />
       {/* Page max-width per DESIGN.md, measured inside the sidebar column. */}
       <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 sm:py-8">{children}</div>
+      {modal}
     </div>
   );
 }
