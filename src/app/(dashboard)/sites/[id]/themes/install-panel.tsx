@@ -53,7 +53,9 @@ export function InstallPanel({ siteId, siteName }: { siteId: string; siteName: s
         toast({
           tone: "success",
           title: `${label} installed`,
-          description: activate ? `Activated on ${siteName}.` : `Installed on ${siteName}.`,
+          // WordPress's own message, so an activation it declined (missing parent
+          // theme) is not reported here as a successful activation.
+          description: res.message ?? (activate ? `Activated on ${siteName}.` : `Installed on ${siteName}.`),
         });
         router.refresh();
       } else {
@@ -112,7 +114,9 @@ export function InstallPanel({ siteId, siteName }: { siteId: string; siteName: s
         toast({
           tone: "success",
           title: "Upload complete",
-          description: activate ? `Activated on ${siteName}.` : `Installed on ${siteName}.`,
+          // WordPress's own message, so an activation it declined (missing parent
+          // theme) is not reported here as a successful activation.
+          description: res.message ?? (activate ? `Activated on ${siteName}.` : `Installed on ${siteName}.`),
         });
         setFileName(null);
         if (fileRef.current) fileRef.current.value = "";

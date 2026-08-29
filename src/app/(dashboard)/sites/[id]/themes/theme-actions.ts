@@ -24,7 +24,7 @@ export async function installThemeAction(
   siteId: string,
   _prevState?: { ok: boolean; error?: string } | null,
   formData?: FormData,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; message?: string; error?: string }> {
   const user = await requireUser();
   if (!formData) return { ok: false, error: "Form data missing — please resubmit" };
 
@@ -54,7 +54,14 @@ export async function installThemeAction(
     siteId, user.id, source, activate,
   );
   revalidatePath(`/sites/${siteId}/themes`);
-  return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
+  // Pass WordPress's own message through: activation can be skipped even when
+  // the install succeeds (a child theme whose parent is not installed), and the
+  // caller must not claim the theme was activated when it was not.
+  return {
+    ok: result.ok,
+    ...(result.output ? { message: result.output } : {}),
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
 /** Mirrors `prepareUploadAction` in the marketplace, but signs into the
