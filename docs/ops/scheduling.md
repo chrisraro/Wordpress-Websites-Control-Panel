@@ -1,5 +1,9 @@
 # Scheduling (pg_cron + pg_net)
 
+**pg_cron is the only scheduler for this app.** `vercel.json` must not
+declare a `crons` entry for `/api/cron/enqueue` (or any of the three routes
+below) — see "Why pg_cron only", below, before adding one back.
+
 Vercel Hobby crons run at most once per day, so fine-grained schedules live in
 Supabase. Run this ONCE in the Supabase SQL editor after deploying the app.
 Replace `APP_URL` (your deployed origin, e.g. https://wp-panel.vercel.app) and
@@ -51,3 +55,33 @@ Note: `/api/cron/process` declares `maxDuration = 300`, which needs Vercel Pro
 (or Fluid Compute). On the Hobby plan the function is capped lower — jobs still
 complete because each run claims at most 3 and unfinished jobs retry, but keep
 individual site jobs fast.
+
+## Why pg_cron only
+
+`enqueueJob(..., { dedupe: true })` only suppresses a duplicate while an
+identical job is still **pending** (see `JobsRepo.pendingExists`). It does
+not — and cannot, without a much bigger change — know that a job it enqueued
+an hour ago already ran to completion. A second scheduler hitting
+`/api/cron/enqueue` after the first batch has finished re-enqueues the whole
+nightly fan-out: `vuln_feed_refresh` again, and `snapshot_refresh` +
+`security_scan` for every active site again, meaning every client's
+production WordPress gets hit by the toolkit twice in one night instead of
+once. This is exactly what happened when `vercel.json` also scheduled
+`/api/cron/enqueue` at 03:00 alongside pg_cron's `wp-panel-enqueue` at 02:00.
+
+pg_cron has to be the one scheduler that survives, because it already owns
+`wp-panel-process` (every minute) and `wp-panel-uptime` (every five minutes)
+above — schedules Vercel's own cron cannot express on all plans (Hobby cron
+runs at most once a day). Consolidating everything onto pg_cron means one
+scheduler to reason about instead of two that can silently overlap.
+
+**If you are tempted to add a Vercel cron for `/api/cron/enqueue` "for
+reliability" or "as a backup"**: don't. `enqueueJob`'s dedupe guard will not
+save you — by the time a second trigger fires, the first run's jobs are no
+longer pending, so nothing suppresses the duplicate. The result is silent:
+no error, no alert, just every site's nightly snapshot and security scan
+running twice, and the Wordfence-backed vuln feed refresh burning through its
+rate limit on a duplicate request it didn't need. If you need "reliability",
+add monitoring on `cron.job_run_details` in Supabase, or a health check that
+alerts when `wp-panel-enqueue` hasn't fired — not a second scheduler hitting
+the same endpoint.

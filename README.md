@@ -27,9 +27,10 @@ server-side over MCP.
 
 ## Deploy (Vercel)
 
-Set the same env vars in Vercel (including `CRON_SECRET`). `vercel.json`
-registers a daily backstop cron; the real schedules run from Supabase —
-see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup.
+Set the same env vars in Vercel (including `CRON_SECRET`). All schedules run
+from Supabase pg_cron — `vercel.json` does not declare any `crons` itself;
+see `docs/ops/scheduling.md` for the one-time pg_cron + pg_net setup and why
+a second, Vercel-side cron on the same endpoint is a bug, not a backstop.
 
 ## Background jobs
 
