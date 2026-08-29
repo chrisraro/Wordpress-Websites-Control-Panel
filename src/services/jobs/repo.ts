@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createServiceSupabase } from "@/lib/supabase/server";
 import type { JobRow, JobType } from "./types";
 
 export interface JobsRepo {
@@ -15,6 +16,8 @@ export interface JobsRepo {
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
   listStaleAwaiting(olderThanMs: number): Promise<JobRow[]>;
+  /** Clears the failed-runs alert for a site/type without touching the rows. */
+  dismissFailed(siteId: string, type: JobType): Promise<void>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -83,6 +86,25 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .eq("status", "awaiting_callback").lt("started_at", cutoff);
       if (error) throw new Error(`jobs.listStaleAwaiting failed: ${error.message}`, { cause: error });
       return (data ?? []) as JobRow[];
+    },
+    async dismissFailed(siteId, type) {
+      // jobs has RLS enabled with no write policy at all (0008_rls_scoped.sql:
+      // "every legitimate enqueue goes through enqueueJob() on the
+      // service-role client, which bypasses RLS entirely... A write policy
+      // here would open a client-side path to enqueue arbitrary jobs"). Every
+      // other write in this file relies on its caller having already passed a
+      // service-role `db` — true today, but this method is reachable from a
+      // page-read call site too (the GeoGrid page builds its JobsRepo off
+      // `readDbFor(viewer)`, which is user-scoped for clients). Rather than
+      // depend on every future caller getting that right, this one write
+      // constructs its own service-role client, so dismissing an alert works
+      // (or fails loudly with a thrown error) regardless of which `db` this
+      // factory happened to be built with.
+      const service = createServiceSupabase();
+      const { error } = await service.from("jobs")
+        .update({ dismissed_at: new Date().toISOString() })
+        .eq("site_id", siteId).eq("type", type).eq("status", "failed");
+      if (error) throw new Error(`jobs.dismissFailed failed: ${error.message}`, { cause: error });
     },
   };
 }

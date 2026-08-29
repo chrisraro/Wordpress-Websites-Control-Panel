@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildGrid, gridBounds } from "@/services/geogrid/grid";
-import { averageRank, coverage, type RankPoint } from "@/services/geogrid/types";
+import { averageRank, coverage, measuredCount, type RankPoint } from "@/services/geogrid/types";
 
 describe("buildGrid", () => {
   it("builds N*N points with the centre exactly in the middle", () => {
@@ -83,5 +83,46 @@ describe("averageRank / coverage", () => {
     expect(averageRank(none)).toBeNull();
     expect(coverage(none)).toBe(0);
     expect(coverage([])).toBe(0);
+  });
+});
+
+describe("measuredCount / coverage with unmeasured points", () => {
+  it("counts every point whose measured flag is not explicitly false", () => {
+    const pts: RankPoint[] = [
+      { idx: 0, lat: 0, lng: 0, rank: 1 },                       // measured absent -> measured
+      { idx: 1, lat: 0, lng: 0, rank: null, measured: true },    // explicit true -> measured
+      { idx: 2, lat: 0, lng: 0, rank: null, measured: false },   // failed lookup -> unmeasured
+    ];
+    expect(measuredCount(pts)).toBe(2);
+  });
+
+  it("excludes unmeasured points from both sides of the coverage ratio", () => {
+    // 1 of 2 *measured* points ranks -> 50%, not 1 of 3 (33%) and not 1 of 2
+    // measured-as-denominator-only either: the unmeasured point must not
+    // appear in the numerator or the denominator.
+    const pts: RankPoint[] = [
+      { idx: 0, lat: 0, lng: 0, rank: 1 },
+      { idx: 1, lat: 0, lng: 0, rank: null },
+      { idx: 2, lat: 0, lng: 0, rank: null, measured: false },
+    ];
+    expect(coverage(pts)).toBe(50);
+  });
+
+  it("reports 0% coverage when every point is unmeasured, not a divide-by-zero crash", () => {
+    const pts: RankPoint[] = [
+      { idx: 0, lat: 0, lng: 0, rank: null, measured: false },
+      { idx: 1, lat: 0, lng: 0, rank: null, measured: false },
+    ];
+    expect(measuredCount(pts)).toBe(0);
+    expect(coverage(pts)).toBe(0);
+  });
+
+  it("treats every point as measured on a pre-existing snapshot with no measured field at all", () => {
+    const legacy: RankPoint[] = [
+      { idx: 0, lat: 0, lng: 0, rank: 2 },
+      { idx: 1, lat: 0, lng: 0, rank: null },
+    ];
+    expect(measuredCount(legacy)).toBe(legacy.length);
+    expect(coverage(legacy)).toBe(50);
   });
 });

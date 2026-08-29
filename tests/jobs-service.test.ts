@@ -41,6 +41,11 @@ function memoryJobsRepo() {
     async markAwaiting(id) { rows.find((r) => r.id === id)!.status = "awaiting_callback"; },
     async getJob(id) { return rows.find((r) => r.id === id) ?? null; },
     async listStaleAwaiting() { return rows.filter((r) => r.status === "awaiting_callback"); },
+    async dismissFailed(siteId, type) {
+      rows
+        .filter((r) => r.site_id === siteId && r.type === type && r.status === "failed")
+        .forEach((r) => { (r as JobRow & { dismissed_at?: string }).dismissed_at = new Date().toISOString(); });
+    },
   };
   return { repo, rows };
 }

@@ -30,7 +30,9 @@ vi.mock("@/lib/supabase/server", () => ({
 import { checkPermission, checkSiteAccess } from "@/lib/authz/server";
 import { runSecurityScanAction } from "@/app/(dashboard)/sites/[id]/security-actions";
 import { runSeoScanAction } from "@/app/(dashboard)/sites/[id]/seo-actions";
-import { saveGeoGridConfigAction, runGeoGridAction } from "@/app/(dashboard)/sites/[id]/geogrid-actions";
+import {
+  saveGeoGridConfigAction, runGeoGridAction, dismissFailedGeoGridRunsAction,
+} from "@/app/(dashboard)/sites/[id]/geogrid-actions";
 import { generateReportAction, revokeReportAction } from "@/app/(dashboard)/sites/[id]/reports-actions";
 import { processQueueNowAction, drainQueueAction } from "@/app/(dashboard)/queue-actions";
 
@@ -46,6 +48,7 @@ describe("permission gates", () => {
     ["runSecurityScanAction", () => runSecurityScanAction("s1")],
     ["runSeoScanAction", () => runSeoScanAction("s1")],
     ["runGeoGridAction", () => runGeoGridAction("s1")],
+    ["dismissFailedGeoGridRunsAction", () => dismissFailedGeoGridRunsAction("s1")],
     ["revokeReportAction", () => revokeReportAction("s1", "r1")],
     // Both queue entry points: processQueueNowAction is an exported helper and
     // therefore its own public endpoint, not merely an internal function.
@@ -65,6 +68,7 @@ describe("permission gates", () => {
       [() => runSecurityScanAction("s1"), "security.run"],
       [() => runSeoScanAction("s1"), "seo.run"],
       [() => saveGeoGridConfigAction("s1", null, new FormData()), "geogrid.manage"],
+      [() => dismissFailedGeoGridRunsAction("s1"), "geogrid.manage"],
       [() => generateReportAction("s1", null, new FormData()), "reports.generate"],
       [() => revokeReportAction("s1", "r1"), "reports.manage"],
       [() => processQueueNowAction(), "queue.process"],

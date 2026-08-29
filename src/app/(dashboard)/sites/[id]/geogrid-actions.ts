@@ -78,3 +78,32 @@ export async function runGeoGridAction(
     return { ok: false, error: e instanceof Error ? e.message : "Could not queue the run" };
   }
 }
+
+/**
+ * Clears the "N failed" alert on the GeoGrid page. This dismisses only —
+ * the job rows and their `last_error` stay exactly as they are, so a
+ * resolved failure can stop nagging without losing the record of what
+ * happened.
+ */
+export async function dismissFailedGeoGridRunsAction(
+  siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const gate = await checkPermission("geogrid.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
+  const db = createServiceSupabase();
+  try {
+    await supabaseJobsRepo(db).dismissFailed(siteId, "geogrid_run");
+    await supabaseSitesRepo(db).insertActivity({
+      actor: user.id, site_id: siteId, action: "site.geogrid_dismiss_failed",
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not dismiss the failed runs" };
+  }
+  revalidatePath(`/sites/${siteId}/geogrid`);
+  return { ok: true };
+}

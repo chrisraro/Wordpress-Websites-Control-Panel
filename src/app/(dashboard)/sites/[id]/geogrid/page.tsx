@@ -7,10 +7,10 @@ import { requireSiteAccess } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
 import { can } from "@/lib/authz/decide";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
-import { averageRank, coverage } from "@/services/geogrid/types";
+import { averageRank, coverage, measuredCount } from "@/services/geogrid/types";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
-import { runGeoGridAction } from "../geogrid-actions";
+import { runGeoGridAction, dismissFailedGeoGridRunsAction } from "../geogrid-actions";
 import { drainQueueAction } from "../../../queue-actions";
 import { GeoGridConfigForm } from "./config-form";
 import { GridMap } from "./grid-map";
@@ -45,19 +45,25 @@ export default async function GeoGridPage({
   // identical to "never scanned".
   const { data: runJobs } = await db
     .from("jobs")
-    .select("status,attempts,last_error,payload,scheduled_for")
+    .select("status,attempts,last_error,payload,scheduled_for,dismissed_at")
     .eq("site_id", id).eq("type", "geogrid_run")
     .order("scheduled_for", { ascending: false })
     .limit(20);
   const openRuns = (runJobs ?? []).filter(
     (j) => j.status === "pending" || j.status === "running" || j.status === "awaiting_callback",
   );
-  const failedRuns = (runJobs ?? []).filter((j) => j.status === "failed");
+  // Dismissed failures stay in the table (and in runJobs above, for anything
+  // that ever inspects the raw rows) — they are just left out of this alert.
+  const failedRuns = (runJobs ?? []).filter((j) => j.status === "failed" && !j.dismissed_at);
 
   const run = runGeoGridAction.bind(null, id);
+  const dismissFailed = dismissFailedGeoGridRunsAction.bind(null, id);
   const drainQueue = drainQueueAction.bind(null, `/sites/${id}/geogrid`);
   const avg = current ? averageRank(current.points) : null;
   const cov = current ? coverage(current.points) : 0;
+  const currentMeasured = current ? measuredCount(current.points) : 0;
+  const currentTotal = current ? current.points.length : 0;
+  const currentHasGap = current !== undefined && currentMeasured < currentTotal;
   const previous = history[1];
   const prevAvg = previous ? averageRank(previous.points) : null;
   const delta = avg !== null && prevAvg !== null ? Math.round((prevAvg - avg) * 10) / 10 : null;
@@ -159,11 +165,29 @@ export default async function GeoGridPage({
 
           {failedRuns.length > 0 && (
             <div className={`${cardClass} mb-4 p-5`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge tone="bad">
-                  {failedRuns.length} failed
-                </StatusBadge>
-                <p className="text-body font-medium text-ink">Recent runs did not complete</p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge tone="bad">
+                    {failedRuns.length} failed
+                  </StatusBadge>
+                  <p className="text-body font-medium text-ink">Recent runs did not complete</p>
+                </div>
+                {canManageGeoGrid && (
+                  <ManageForm
+                    action={dismissFailed}
+                    label="Dismiss"
+                    pendingLabel="Dismissing…"
+                    success="Failed runs dismissed"
+                    size="sm"
+                    confirm={{
+                      title: "Dismiss these failed runs?",
+                      description:
+                        "The runs stay in the record for diagnosis — this only clears the alert above, it does not delete anything.",
+                      confirmLabel: "Dismiss",
+                    }}
+                    showInlineError={false}
+                  />
+                )}
               </div>
               <p className="mt-1 break-words text-body text-mid-gray">
                 {failedRuns[0].last_error ?? "No error was recorded."}
@@ -181,7 +205,11 @@ export default async function GeoGridPage({
               label="Coverage"
               value={`${cov}%`}
               tone={cov >= 70 ? "good" : cov >= 30 ? "warn" : "bad"}
-              hint="Points in the top 20"
+              hint={
+                currentHasGap
+                  ? `Points in the top 20 · ${currentMeasured} of ${currentTotal} measured`
+                  : "Points in the top 20"
+              }
             />
             <Stat label="Grid" value={`${config.grid_size}×${config.grid_size}`} hint={`${config.spacing_m}m spacing`} />
             <Stat
@@ -208,6 +236,12 @@ export default async function GeoGridPage({
                   top 3
                   <span aria-hidden className="ml-1 size-1.5 rounded-full bg-status-bad" />
                   outside the top 20
+                  {currentHasGap && (
+                    <>
+                      <span aria-hidden className="ml-1 size-1.5 rounded-full bg-mid-gray" />
+                      not measured
+                    </>
+                  )}
                 </span>
               </p>
             ) : (
@@ -230,13 +264,24 @@ export default async function GeoGridPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((snap) => (
-                      <tr key={snap.id} className={tableRowClass}>
-                        <td className={tableCellClass}>{new Date(snap.run_at).toLocaleString()}</td>
-                        <td className={tableCellClass}>{averageRank(snap.points) ?? "—"}</td>
-                        <td className={tableCellClass}>{coverage(snap.points)}%</td>
-                      </tr>
-                    ))}
+                    {history.map((snap) => {
+                      const measured = measuredCount(snap.points);
+                      const total = snap.points.length;
+                      return (
+                        <tr key={snap.id} className={tableRowClass}>
+                          <td className={tableCellClass}>{new Date(snap.run_at).toLocaleString()}</td>
+                          <td className={tableCellClass}>{averageRank(snap.points) ?? "—"}</td>
+                          <td className={tableCellClass}>
+                            {coverage(snap.points)}%
+                            {measured < total && (
+                              <span className="ml-1.5 text-caption tracking-normal text-mid-gray">
+                                ({measured}/{total} measured)
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

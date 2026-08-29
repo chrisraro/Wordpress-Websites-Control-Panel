@@ -4,14 +4,14 @@ import { useEffect, useRef } from "react";
 import type { RankPoint } from "@/services/geogrid/types";
 
 /** Popup content as real DOM so untrusted text can never become markup. */
-function popupNode(businessName: string, label: string): HTMLElement {
+function popupNode(businessName: string, label: string, measured: boolean): HTMLElement {
   const wrap = document.createElement("div");
   wrap.style.font = "500 13px var(--font-geist, system-ui)";
   const name = document.createElement("strong");
   name.textContent = businessName;
   const rank = document.createElement("div");
   rank.style.color = "#737373";
-  rank.textContent = `Rank: ${label}`;
+  rank.textContent = measured ? `Rank: ${label}` : "Not measured — lookup failed";
   wrap.append(name, rank);
   return wrap;
 }
@@ -19,8 +19,13 @@ function popupNode(businessName: string, label: string): HTMLElement {
 /**
  * The rank ramp is the one place colour carries the whole meaning, so it uses
  * the data-status scale from globals.css rather than the monochrome chrome.
+ * An unmeasured point gets mid-gray, not the "outside the top 20" red: a
+ * failed lookup carries no information about whether the business ranks
+ * there, and colouring it the same as a confirmed non-rank would say
+ * otherwise.
  */
-function colourFor(rank: number | null): string {
+function colourFor(rank: number | null, measured: boolean): string {
+  if (!measured) return "#707070";
   if (rank === null) return "#b91c1c";
   if (rank <= 3) return "#15803d";
   if (rank <= 7) return "#4d7c0f";
@@ -53,7 +58,8 @@ export function GridMap({
       }).addTo(map);
 
       points.forEach((p, i) => {
-        const label = p.rank === null ? "20+" : String(p.rank);
+        const measured = p.measured !== false;
+        const label = !measured ? "?" : p.rank === null ? "20+" : String(p.rank);
         L.marker([p.lat, p.lng], {
           icon: L.divIcon({
             className: "",
@@ -62,7 +68,7 @@ export function GridMap({
             // --i drives the stagger; the delay is capped in globals.css so a
             // 9×9 grid never outlasts the glance it exists to serve.
             html:
-              `<div class="grid-point" style="--i:${i};background:${colourFor(p.rank)};` +
+              `<div class="grid-point" style="--i:${i};background:${colourFor(p.rank, measured)};` +
               `color:#fff;border-radius:9999px;width:28px;height:28px;display:flex;` +
               `align-items:center;justify-content:center;` +
               `font:600 12px var(--font-geist, system-ui);border:2px solid #fff;` +
@@ -74,7 +80,7 @@ export function GridMap({
           .addTo(map!)
           // Built as DOM, not an HTML string: Leaflet assigns string popup
           // content via innerHTML, and the business name is user-entered.
-          .bindPopup(popupNode(businessName, label));
+          .bindPopup(popupNode(businessName, label, measured));
       });
 
       L.circleMarker([center.lat, center.lng], {
