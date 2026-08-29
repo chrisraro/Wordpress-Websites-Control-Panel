@@ -52,6 +52,17 @@ uploaded plugin ZIPs (stored in the private `plugins` Supabase Storage bucket �
 created by migration 0003). The Themes tab can generate a child theme of the
 active theme.
 
+## Theme management and bulk actions
+
+The per-site Themes tab installs from wordpress.org or a ZIP upload (private
+`themes` bucket — migration 0005), then activates, updates, or deletes. Theme
+and plugin delete are gated server-side — a theme cannot be removed while it's
+active, is the parent of the active theme, is the parent of another installed
+theme, or is the only theme left, and a plugin cannot be removed while active.
+Both Plugins and Themes tables support multi-select bulk actions (update,
+activate/deactivate, delete); each selected item runs as its own job sharing a
+batch id, so one failure doesn't block the rest — see `docs/ops/themes.md`.
+
 ## SEO & AEO
 
 The SEO tab shows the Rank Math site-audit score with a trend sparkline, failing
