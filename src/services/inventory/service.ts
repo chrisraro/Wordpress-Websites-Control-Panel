@@ -2,8 +2,8 @@ import { runPhp } from "@/lib/wpphp";
 import { decryptSecret } from "@/lib/crypto/secrets";
 import type { McpFactory, SiteMcpClient } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
-import type { SnapshotsRepo } from "./repo";
-import type { InventoryPayload } from "./types";
+import type { AdminUsersRepo, SnapshotsRepo } from "./repo";
+import type { AdminUser, InventoryPayload } from "./types";
 
 // One round trip collects the whole inventory inside WordPress. WP-CLI is not
 // used at all: many shared hosts (including this project's) expose a broken
@@ -63,14 +63,26 @@ return json_encode(array(
 ));
 `.trim();
 
-type RawInventory = Omit<InventoryPayload, "collected_at">;
+// WordPress admin identities travel over the wire alongside the rest of the
+// inventory (the PHP snippet above still gathers $admins in the same round
+// trip), but they are pulled off the raw response here and never spread into
+// the InventoryPayload that gets stored in site_snapshots.payload -- see
+// 0011_site_admin_users.sql and spec §5.1 for why that split exists.
+type RawInventory = Omit<InventoryPayload, "collected_at"> & { admin_users: AdminUser[] };
 
-export async function collectInventory(client: SiteMcpClient): Promise<InventoryPayload> {
-  const raw = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
-  return { ...raw, collected_at: new Date().toISOString() };
+export interface CollectedInventory { payload: InventoryPayload; adminUsers: AdminUser[] }
+
+export async function collectInventory(client: SiteMcpClient): Promise<CollectedInventory> {
+  const { admin_users, ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
+  return { payload: { ...rest, collected_at: new Date().toISOString() }, adminUsers: admin_users };
 }
 
-export interface InventoryDeps { sites: SitesRepo; snapshots: SnapshotsRepo; mcp: McpFactory }
+export interface InventoryDeps {
+  sites: SitesRepo;
+  snapshots: SnapshotsRepo;
+  adminUsers: AdminUsersRepo;
+  mcp: McpFactory;
+}
 
 export async function refreshSnapshot(deps: InventoryDeps, siteId: string): Promise<InventoryPayload> {
   const creds = await deps.sites.getSiteCredentials(siteId);
@@ -81,8 +93,9 @@ export async function refreshSnapshot(deps: InventoryDeps, siteId: string): Prom
     appPassword: await decryptSecret(creds.app_password_encrypted),
   });
   try {
-    const payload = await collectInventory(client);
+    const { payload, adminUsers } = await collectInventory(client);
     await deps.snapshots.insertSnapshot(siteId, payload);
+    await deps.adminUsers.upsertAdminUsers(siteId, adminUsers);
     return payload;
   } finally {
     await client.close();

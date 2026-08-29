@@ -36,7 +36,6 @@ export interface InventoryPayload {
   core_update: string | null;
   plugins: PluginInfo[];
   themes: ThemeInfo[];
-  admin_users: AdminUser[];
 }
 
 export function pendingUpdates(p: InventoryPayload): number {

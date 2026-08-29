@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { randomBytes } from "node:crypto";
 import { collectInventory, refreshSnapshot, INVENTORY_PHP } from "@/services/inventory/service";
 import { pendingUpdates, type InventoryPayload } from "@/services/inventory/types";
-import type { SnapshotsRepo } from "@/services/inventory/repo";
+import type { AdminUsersRepo, SnapshotsRepo } from "@/services/inventory/repo";
 import type { SitesRepo } from "@/services/sites/repo";
 import { MockMcpClient } from "@/lib/mcp/mock";
 import { encryptSecret } from "@/lib/crypto/secrets";
@@ -19,10 +19,15 @@ const RAW = {
   themes: [
     { name: "generatepress", template: "generatepress", title: "GeneratePress", version: "3.4", status: "active", update: "none", update_version: null },
   ],
-  admin_users: [{ ID: 1, user_login: "admin", user_email: "a@b.co" }],
 };
 
-function fixtureClient(raw: unknown = RAW) {
+const ADMIN_USERS = [{ ID: 1, user_login: "admin", user_email: "a@b.co" }];
+
+// The wire shape WordPress actually returns: admin_users rides alongside
+// the rest of the inventory in the same execute-php round trip. See
+// tests/inventory-admin-users.test.ts for the split that keeps it out of
+// the stored InventoryPayload.
+function fixtureClient(raw: unknown = { ...RAW, admin_users: ADMIN_USERS }) {
   return new MockMcpClient({
     handler: (name, args) => {
       if (name !== "novamira/execute-php") throw new Error(`unexpected ability ${name}`);
@@ -36,16 +41,15 @@ function fixtureClient(raw: unknown = RAW) {
 describe("collectInventory", () => {
   it("collects the payload through a single execute-php call", async () => {
     const client = fixtureClient();
-    const inv = await collectInventory(client);
-    expect(inv.wp_version).toBe("6.7.1");
-    expect(inv.php_version).toBe("8.2.20");
-    expect(inv.admin_url).toBe("https://example.com/wp-admin/");
-    expect(inv.core_update).toBe("6.8");
-    expect(inv.plugins[0]).toMatchObject({ file: "akismet/akismet.php", name: "akismet", update: "available" });
-    expect(inv.themes[0].name).toBe("generatepress");
-    expect(inv.themes[0].template).toBe("generatepress");
-    expect(inv.admin_users[0].user_login).toBe("admin");
-    expect(inv.collected_at).toMatch(/^\d{4}-/);
+    const { payload } = await collectInventory(client);
+    expect(payload.wp_version).toBe("6.7.1");
+    expect(payload.php_version).toBe("8.2.20");
+    expect(payload.admin_url).toBe("https://example.com/wp-admin/");
+    expect(payload.core_update).toBe("6.8");
+    expect(payload.plugins[0]).toMatchObject({ file: "akismet/akismet.php", name: "akismet", update: "available" });
+    expect(payload.themes[0].name).toBe("generatepress");
+    expect(payload.themes[0].template).toBe("generatepress");
+    expect(payload.collected_at).toMatch(/^\d{4}-/);
     expect(client.calls).toHaveLength(1);
   });
 
@@ -73,6 +77,7 @@ describe("refreshSnapshot", () => {
 
   function deps(mock: MockMcpClient, encrypted: string) {
     const stored: Array<{ siteId: string; payload: InventoryPayload }> = [];
+    const storedAdmins: Array<{ siteId: string; users: unknown }> = [];
     const sites = {
       async getSiteCredentials(id: string) {
         return id === "site-1"
@@ -84,7 +89,11 @@ describe("refreshSnapshot", () => {
       async insertSnapshot(siteId, payload) { stored.push({ siteId, payload }); },
       async latestSnapshot() { return null; },
     };
-    return { deps: { sites, snapshots, mcp: async () => mock }, stored };
+    const adminUsers: AdminUsersRepo = {
+      async upsertAdminUsers(siteId, users) { storedAdmins.push({ siteId, users }); },
+      async latestAdminUsers() { return null; },
+    };
+    return { deps: { sites, snapshots, adminUsers, mcp: async () => mock }, stored, storedAdmins };
   }
 
   it("collects, stores, and closes the client", async () => {
@@ -93,6 +102,7 @@ describe("refreshSnapshot", () => {
     const payload = await refreshSnapshot(f.deps, "site-1");
     expect(payload.wp_version).toBe("6.7.1");
     expect(f.stored[0]).toMatchObject({ siteId: "site-1" });
+    expect(f.storedAdmins[0]).toEqual({ siteId: "site-1", users: ADMIN_USERS });
     expect(mock.closed).toBe(true);
   });
 

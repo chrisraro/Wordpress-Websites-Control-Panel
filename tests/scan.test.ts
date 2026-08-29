@@ -5,7 +5,7 @@ import type { SecurityRepo, OpenVuln } from "@/services/security/repo";
 import type { FeedEntry } from "@/lib/adapters/vulnfeed/wordfence";
 import type { SecurityCheck } from "@/services/security/types";
 import type { SitesRepo } from "@/services/sites/repo";
-import type { SnapshotsRepo } from "@/services/inventory/repo";
+import type { AdminUsersRepo, SnapshotsRepo } from "@/services/inventory/repo";
 import type { InventoryPayload } from "@/services/inventory/types";
 import { MockMcpClient } from "@/lib/mcp/mock";
 import { encryptSecret } from "@/lib/crypto/secrets";
@@ -18,7 +18,7 @@ afterEach(() => { delete process.env.WORDFENCE_API_KEY; });
 const INV: InventoryPayload = {
   collected_at: "2026-08-28T00:00:00Z", wp_version: "6.4.1", php_version: "8.2",
   admin_url: "https://example.com/wp-admin/",
-  core_update: null, admin_users: [],
+  core_update: null,
   plugins: [{ file: "akismet/akismet.php", name: "akismet", version: "5.3", status: "active", update: "none", update_version: null }],
   themes: [],
 };
@@ -75,6 +75,11 @@ const snapshotsWith = (payload: InventoryPayload | null): SnapshotsRepo => ({
   async latestSnapshot() { return payload ? { payload, taken_at: "2026-08-28T00:00:00Z" } : null; },
 });
 
+const fakeAdminUsers = (): AdminUsersRepo => ({
+  async upsertAdminUsers() {},
+  async latestAdminUsers() { return null; },
+});
+
 function phpClient() {
   // Serves both hardening (array) and checksums (object) snippets.
   return new MockMcpClient({
@@ -96,7 +101,7 @@ describe("securityScan", () => {
     const f = fakeSites();
     f.setCreds(await encryptSecret("pass"));
     const deps: ScanDeps = {
-      sites: f.sites, snapshots: snapshotsWith(INV), security: sec.repo,
+      sites: f.sites, snapshots: snapshotsWith(INV), adminUsers: fakeAdminUsers(), security: sec.repo,
       mcp: async () => phpClient(), fetchImpl: okFetch,
     };
     const res = await securityScan(deps, "site-1");
@@ -115,7 +120,7 @@ describe("securityScan", () => {
     const f = fakeSites();
     f.setCreds(await encryptSecret("pass"));
     const deps: ScanDeps = {
-      sites: f.sites, snapshots: snapshotsWith(INV), security: sec.repo,
+      sites: f.sites, snapshots: snapshotsWith(INV), adminUsers: fakeAdminUsers(), security: sec.repo,
       mcp: async () => phpClient(), fetchImpl: okFetch,
     };
     const res = await securityScan(deps, "site-1");
@@ -128,7 +133,7 @@ describe("securityScan", () => {
     const f = fakeSites();
     f.setCreds(await encryptSecret("pass"));
     const deps: ScanDeps = {
-      sites: f.sites, snapshots: snapshotsWith(INV), security: sec.repo,
+      sites: f.sites, snapshots: snapshotsWith(INV), adminUsers: fakeAdminUsers(), security: sec.repo,
       mcp: async () => { throw new Error("unreachable"); }, fetchImpl: okFetch,
     };
     await expect(securityScan(deps, "site-1")).rejects.toThrow("unreachable");

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { securityScan } from "@/services/security/scan";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
-import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
@@ -24,6 +24,7 @@ export async function runSecurityScanAction(
     await securityScan(
       {
         sites: supabaseSitesRepo(db), snapshots: supabaseSnapshotsRepo(db),
+        adminUsers: supabaseAdminUsersRepo(db),
         security: supabaseSecurityRepo(db), mcp: createSiteMcpClient,
       },
       siteId,

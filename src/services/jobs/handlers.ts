@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JobHandlers } from "@/services/jobs/service";
 import { refreshSnapshot } from "@/services/inventory/service";
-import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
@@ -68,6 +68,7 @@ export function resolveInstallKind(target: PluginInstallPayload["target"]): {
 export function buildJobHandlers(db: SupabaseClient): JobHandlers {
   const sites = supabaseSitesRepo(db);
   const snapshots = supabaseSnapshotsRepo(db);
+  const adminUsers = supabaseAdminUsersRepo(db);
   const security = supabaseSecurityRepo(db);
   const jobs = supabaseJobsRepo(db);
   const seo = supabaseSeoRepo(db);
@@ -75,11 +76,11 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
   return {
     snapshot_refresh: async ({ job }) => {
       if (!job.site_id) throw new Error("snapshot_refresh requires site_id");
-      await refreshSnapshot({ sites, snapshots, mcp: createSiteMcpClient }, job.site_id);
+      await refreshSnapshot({ sites, snapshots, adminUsers, mcp: createSiteMcpClient }, job.site_id);
     },
     security_scan: async ({ job }) => {
       if (!job.site_id) throw new Error("security_scan requires site_id");
-      await securityScan({ sites, snapshots, security, mcp: createSiteMcpClient }, job.site_id);
+      await securityScan({ sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id);
     },
     vuln_feed_refresh: async () => {
       await refreshVulnFeed(security);

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { manageSite } from "@/services/manage/service";
 import type { ManageAction } from "@/services/manage/types";
 import { refreshSnapshot } from "@/services/inventory/service";
-import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
@@ -53,7 +53,10 @@ export async function refreshInventoryAction(
   const db = createServiceSupabase();
   try {
     await refreshSnapshot(
-      { sites: supabaseSitesRepo(db), snapshots: supabaseSnapshotsRepo(db), mcp: createSiteMcpClient },
+      {
+        sites: supabaseSitesRepo(db), snapshots: supabaseSnapshotsRepo(db),
+        adminUsers: supabaseAdminUsersRepo(db), mcp: createSiteMcpClient,
+      },
       siteId,
     );
   } catch (e) {

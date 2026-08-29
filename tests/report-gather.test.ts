@@ -103,7 +103,7 @@ function deps(over: Partial<GatherDeps> = {}): GatherDeps {
         taken_at: "2026-08-23T00:00:00Z",
         payload: {
           collected_at: "2026-08-23T00:00:00Z", wp_version: "6.7.1", php_version: "8.2",
-          core_update: "6.8", admin_users: [],
+          core_update: "6.8",
           plugins: [
             { file: "a/a.php", name: "a", version: "1", status: "active", update: "available", update_version: "2" },
             { file: "b/b.php", name: "b", version: "1", status: "active", update: "none", update_version: null },

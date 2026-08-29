@@ -5,16 +5,16 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { requireSiteAccess } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
 import { can, canAccessSite } from "@/lib/authz/decide";
-import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
-import { Card, CardTitle, StatusBadge, type StatusTone } from "@/components/ui/primitives";
+import { Card, CardTitle, EmptyState, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { buttonClass, cardClass } from "@/components/ui/styles";
 import { CopyValueButton } from "@/components/ui/copy-button";
-import { IconChevronRight, IconExternal, IconRefresh } from "@/components/ui/icons";
+import { IconChevronRight, IconExternal, IconRefresh, IconUsers } from "@/components/ui/icons";
 import type { SiteStatus } from "@/services/sites/types";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +38,9 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
+  // site_admin_users is staff-only (0011_site_admin_users.sql) -- a client's
+  // user-scoped read would just come back empty under RLS, so skip the call.
+  const adminUsers = isClient ? null : await supabaseAdminUsersRepo(db).latestAdminUsers(id);
 
   const { data: activity } = await db
     .from("activity_log")
@@ -265,13 +268,13 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         {!isClient && (
         <Card>
           <CardTitle>Administrators</CardTitle>
-          {!inv?.admin_users?.length ? (
-            <p className="px-5 py-6 text-body text-mid-gray">
-              Refresh the inventory to list administrator accounts.
-            </p>
+          {!adminUsers?.users.length ? (
+            <EmptyState icon={<IconUsers size={28} />} title="No administrator data collected yet">
+              Refresh the inventory to collect this site&rsquo;s administrator accounts.
+            </EmptyState>
           ) : (
             <ul className="divide-y divide-hairline px-5">
-              {inv.admin_users.map((u) => (
+              {adminUsers.users.map((u) => (
                 <li key={u.ID} className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 text-body">
                   <span className="font-medium text-ink">{u.user_login}</span>
                   <span className="min-w-0 truncate text-mid-gray">{u.user_email}</span>

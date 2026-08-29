@@ -3,7 +3,7 @@ import { getOptionalEnv } from "@/lib/env";
 import { fetchWordfenceFeed } from "@/lib/adapters/vulnfeed/wordfence";
 import type { McpFactory } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
-import type { SnapshotsRepo } from "@/services/inventory/repo";
+import type { AdminUsersRepo, SnapshotsRepo } from "@/services/inventory/repo";
 import { refreshSnapshot } from "@/services/inventory/service";
 import { matchInventory } from "./vulns";
 import { runPhpHardening, runHttpHardening } from "./hardening";
@@ -14,6 +14,7 @@ import type { SecurityRepo } from "./repo";
 export interface ScanDeps {
   sites: SitesRepo;
   snapshots: SnapshotsRepo;
+  adminUsers: AdminUsersRepo;
   security: SecurityRepo;
   mcp: McpFactory;
   fetchImpl?: typeof fetch;
