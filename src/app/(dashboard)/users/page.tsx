@@ -5,6 +5,7 @@ import { supabaseUsersRepo } from "@/services/users/repo";
 import { listManagedUsers } from "@/services/users/service";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui/primitives";
 import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
@@ -32,7 +33,7 @@ export default async function UsersPage() {
 
   const db = createServiceSupabase();
   const usersRepo = supabaseUsersRepo(db);
-  const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient };
+  const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
 
   const [users, allSites] = await Promise.all([
     listManagedUsers(usersRepo),

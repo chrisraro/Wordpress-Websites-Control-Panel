@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { addSite, testSiteConnection, mcpEndpointFor } from "@/services/sites/service";
 import type { SitesRepo } from "@/services/sites/repo";
+import type { JobsRepo } from "@/services/jobs/repo";
 import type { SiteRow, SiteStatus } from "@/services/sites/types";
 import { MockMcpClient } from "@/lib/mcp/mock";
 import { McpAuthError, McpConnectionError } from "@/lib/mcp/errors";
@@ -48,6 +49,33 @@ function memoryRepo() {
   return { repo, sites, activity };
 }
 
+/** A minimal in-memory JobsRepo — only `insert` and `pendingExists` (what
+ *  enqueueJob calls) do anything; the rest are unused by these tests. */
+function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
+  const jobs: Array<{ id: string; type: string; site_id: string | null; payload: Record<string, unknown> }> = [];
+  const repo: JobsRepo = {
+    async insert(job) {
+      if (opts.failInsert) throw new Error("jobs.insert failed: connection refused");
+      const id = `job-${jobs.length + 1}`;
+      jobs.push({ id, type: job.type, site_id: job.site_id ?? null, payload: job.payload ?? {} });
+      return { id };
+    },
+    async pendingExists(type, siteId) {
+      return jobs.some((j) => j.type === type && j.site_id === siteId);
+    },
+    async claim() { return []; },
+    async markDone() {},
+    async retry() {},
+    async markFailed() {},
+    async batchJobs() { return []; },
+    async markAwaiting() {},
+    async getJob() { return null; },
+    async listStaleAwaiting() { return []; },
+    async dismissFailed() {},
+  };
+  return { repo, jobs };
+}
+
 const INPUT = {
   name: "El Nido Guide", url: "https://elnidoguide.ph",
   wpUsername: "admin", appPassword: "aaaa bbbb cccc dddd",
@@ -63,10 +91,11 @@ describe("mcpEndpointFor", () => {
 describe("addSite", () => {
   it("verifies MCP, stores encrypted password + capabilities, logs activity", async () => {
     const { repo, sites, activity } = memoryRepo();
+    const { repo: jobs } = memoryJobsRepo();
     const mcp = async () =>
       new MockMcpClient({ abilities: [{ name: "novamira/run-wp-cli" }, { name: "rank-math/audit-site-seo" }] });
 
-    const { id } = await addSite({ repo, mcp }, INPUT, "user-1");
+    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
 
     expect(id).toBe("site-1");
     const row = sites[0];
@@ -78,28 +107,59 @@ describe("addSite", () => {
 
   it("rejects with a friendly error when auth fails, and stores nothing", async () => {
     const { repo, sites } = memoryRepo();
+    const { repo: jobs } = memoryJobsRepo();
     const mcp = async () => new MockMcpClient({ failWith: new McpAuthError("401") });
-    await expect(addSite({ repo, mcp }, INPUT, "user-1")).rejects.toThrow(/application password/i);
+    await expect(addSite({ repo, mcp, jobs }, INPUT, "user-1")).rejects.toThrow(/application password/i);
     expect(sites).toHaveLength(0);
+  });
+
+  it("enqueues exactly one snapshot_refresh job for the new site", async () => {
+    const { repo } = memoryRepo();
+    const { repo: jobs, jobs: enqueued } = memoryJobsRepo();
+    const mcp = async () => new MockMcpClient();
+
+    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
+
+    const forSite = enqueued.filter((j) => j.type === "snapshot_refresh" && j.site_id === id);
+    expect(forSite).toHaveLength(1);
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it("does not fail the connect when enqueueing the initial refresh fails", async () => {
+    const { repo, sites } = memoryRepo();
+    const { repo: jobs } = memoryJobsRepo({ failInsert: true });
+    const mcp = async () => new MockMcpClient();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
+
+    expect(id).toBe("site-1");
+    expect(sites).toHaveLength(1);
+    // The site is created and connected — the failure is surfaced, not
+    // silent, but it must not be mistaken for the connect itself failing.
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 
 describe("testSiteConnection", () => {
   it("marks reconnect_needed on auth failure", async () => {
     const { repo, sites } = memoryRepo();
-    await addSite({ repo, mcp: async () => new MockMcpClient() }, INPUT, "user-1");
+    const { repo: jobs } = memoryJobsRepo();
+    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs }, INPUT, "user-1");
     const failing = async () => new MockMcpClient({ failWith: new McpAuthError("401") });
-    const res = await testSiteConnection({ repo, mcp: failing }, "site-1", "user-1");
+    const res = await testSiteConnection({ repo, mcp: failing, jobs }, "site-1", "user-1");
     expect(res).toMatchObject({ ok: false, status: "reconnect_needed" });
     expect(sites[0].status).toBe("reconnect_needed");
   });
 
   it("marks degraded on connection failure and connected on success", async () => {
     const { repo, sites } = memoryRepo();
-    await addSite({ repo, mcp: async () => new MockMcpClient() }, INPUT, "user-1");
+    const { repo: jobs } = memoryJobsRepo();
+    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs }, INPUT, "user-1");
     const down = async () => new MockMcpClient({ failWith: new McpConnectionError("ENOTFOUND") });
-    expect((await testSiteConnection({ repo, mcp: down }, "site-1", "u")).status).toBe("degraded");
-    expect((await testSiteConnection({ repo, mcp: async () => new MockMcpClient() }, "site-1", "u")).status)
+    expect((await testSiteConnection({ repo, mcp: down, jobs }, "site-1", "u")).status).toBe("degraded");
+    expect((await testSiteConnection({ repo, mcp: async () => new MockMcpClient(), jobs }, "site-1", "u")).status)
       .toBe("connected");
     expect(sites[0].status).toBe("connected");
   });

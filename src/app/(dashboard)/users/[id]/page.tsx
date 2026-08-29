@@ -7,6 +7,7 @@ import { listSiteGrants, listRolePermissions } from "@/services/users/service";
 import { canChangeRole, canDeleteUser } from "@/services/users/guards";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, PageHeader, StatusBadge } from "@/components/ui/primitives";
@@ -45,7 +46,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
 
   const db = createServiceSupabase();
   const usersRepo = supabaseUsersRepo(db);
-  const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient };
+  const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
 
   const [person, users, grants, allSites, rolePermissions] = await Promise.all([
     usersRepo.getUser(id),

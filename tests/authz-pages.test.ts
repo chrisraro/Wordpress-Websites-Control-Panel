@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Viewer } from "@/lib/authz/decide";
 import type { SitesRepo } from "@/services/sites/repo";
+import type { JobsRepo } from "@/services/jobs/repo";
 import type { SiteRow } from "@/services/sites/types";
 
 // This task gates the read surface (12 dashboard pages, the scoped site
@@ -31,12 +32,17 @@ function memoryRepo(sites: SiteRow[]): SitesRepo {
   } as unknown as SitesRepo;
 }
 
+// listSitesForViewer never touches jobs — this fake exists only so the
+// SitesDeps shape is satisfied (jobs is a required dependency, added when
+// addSite started enqueueing a site's first snapshot_refresh).
+const unusedJobsRepo = {} as unknown as JobsRepo;
+
 describe("listSitesForViewer", () => {
   it("a viewer with sites.view_all sees every site", async () => {
     const { listSitesForViewer } = await import("@/services/sites/service");
     const viewer = viewerWith({ viewAll: true });
     const result = await listSitesForViewer(
-      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); } },
+      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); }, jobs: unusedJobsRepo },
       viewer,
     );
     expect(result.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
@@ -46,7 +52,7 @@ describe("listSitesForViewer", () => {
     const { listSitesForViewer } = await import("@/services/sites/service");
     const viewer = viewerWith({ grants: { s2: "read" } });
     const result = await listSitesForViewer(
-      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); } },
+      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); }, jobs: unusedJobsRepo },
       viewer,
     );
     expect(result.map((s) => s.id)).toEqual(["s2"]);
@@ -56,7 +62,7 @@ describe("listSitesForViewer", () => {
     const { listSitesForViewer } = await import("@/services/sites/service");
     const viewer = viewerWith({});
     const result = await listSitesForViewer(
-      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); } },
+      { repo: memoryRepo(FAKE_SITES), mcp: async () => { throw new Error("must not connect"); }, jobs: unusedJobsRepo },
       viewer,
     );
     expect(result).toEqual([]);

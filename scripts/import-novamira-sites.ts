@@ -215,11 +215,15 @@ async function main() {
   }
 
   const { supabaseSitesRepo } = await import("@/services/sites/repo");
+  const { supabaseJobsRepo } = await import("@/services/jobs/repo");
   const { createSiteMcpClient } = await import("@/lib/mcp/client");
   const { addSite, mcpEndpointFor } = await import("@/services/sites/service");
   const { McpAuthError, McpConnectionError } = await import("@/lib/mcp/errors");
 
-  const deps: SitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient };
+  // addSite enqueues each imported site's first snapshot_refresh itself
+  // (src/services/sites/service.ts) -- this script only has to supply the
+  // dependency, exactly like /sites/new's server action does.
+  const deps: SitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
 
   let adminId: string | undefined;
   if (APPLY) adminId = await findAdminUserId(db);

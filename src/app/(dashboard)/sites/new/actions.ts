@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { addSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
@@ -31,10 +32,11 @@ export async function createSite(_prev: { error?: string } | undefined, formData
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
-  const repo = supabaseSitesRepo(createServiceSupabase());
+  const db = createServiceSupabase();
+  const repo = supabaseSitesRepo(db);
   let id: string;
   try {
-    ({ id } = await addSite({ repo, mcp: createSiteMcpClient }, parsed.data, user.id));
+    ({ id } = await addSite({ repo, mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, parsed.data, user.id));
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Failed to connect site" };
   }

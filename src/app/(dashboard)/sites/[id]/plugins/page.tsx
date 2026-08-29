@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { requireSiteAccess } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
@@ -23,7 +24,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const viewer = await requireSiteAccess(id);
   const db = await readDbFor(viewer);
-  const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
+  const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, id);
   if (!site) notFound();
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const plugins = snapshot?.payload.plugins ?? [];

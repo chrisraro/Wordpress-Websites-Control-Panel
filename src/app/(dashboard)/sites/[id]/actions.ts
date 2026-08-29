@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { testSiteConnection } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
@@ -16,8 +17,9 @@ export async function runConnectionTest(
   if (isDenied(gate)) return { ok: false, status: "disabled", error: gate.error };
   const site = await checkSiteAccess(siteId);
   if (isDenied(site)) return { ok: false, status: "disabled", error: site.error };
-  const repo = supabaseSitesRepo(createServiceSupabase());
-  const result = await testSiteConnection({ repo, mcp: createSiteMcpClient }, siteId, user.id);
+  const db = createServiceSupabase();
+  const repo = supabaseSitesRepo(db);
+  const result = await testSiteConnection({ repo, mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, siteId, user.id);
   revalidatePath(`/sites/${siteId}`);
   return result;
 }

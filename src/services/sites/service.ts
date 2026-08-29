@@ -2,12 +2,22 @@ import { encryptSecret, decryptSecret } from "@/lib/crypto/secrets";
 import { McpAuthError, McpConnectionError } from "@/lib/mcp/errors";
 import type { McpFactory } from "@/lib/mcp/client";
 import { visibleSiteIds, type Viewer } from "@/lib/authz/decide";
+import { enqueueJob } from "@/services/jobs/service";
+import type { JobsRepo } from "@/services/jobs/repo";
 import type { SitesRepo } from "./repo";
 import type { NewSiteInput, SiteRow, SiteStatus } from "./types";
 
 export interface SitesDeps {
   repo: SitesRepo;
   mcp: McpFactory;
+  // Required, not optional: a newly connected site needs its first
+  // snapshot_refresh enqueued (see addSite below), and an optional field is
+  // exactly the kind of thing a caller silently omits. There are two paths
+  // that create sites today (the /sites/new server action and
+  // scripts/import-novamira-sites.ts) and every other caller of this file's
+  // functions has to construct a SitesDeps regardless, so making this
+  // required just means every call site is honest about the dependency.
+  jobs: JobsRepo;
 }
 
 export function mcpEndpointFor(url: string): string {
@@ -43,6 +53,27 @@ export async function addSite(
     actor: actorId, site_id: id, action: "site.connect",
     detail: { url: input.url, abilities: abilities.length },
   });
+
+  // Without this, a newly connected site shows no inventory until the
+  // nightly 02:00 UTC fan-out (src/app/api/cron/enqueue/route.ts) reaches it
+  // — up to a day blank on the dashboard. Enqueue only: collecting inventory
+  // means an MCP round trip plus PHP execution on the live site, which
+  // belongs on the queue (drained within a minute by the per-minute cron),
+  // not inline in this request, which would risk the connect form hanging
+  // or hitting the serverless timeout.
+  //
+  // The site is already created and connected at this point, which is a
+  // genuinely usable state — throwing here would make the caller believe
+  // the connect itself failed, when only the inventory kick-off did. So a
+  // failed enqueue must not undo or fail the connect. It is not swallowed
+  // silently, though: it's logged so the gap is visible to an operator, and
+  // the site is still picked up by tomorrow's nightly fan-out regardless.
+  try {
+    await enqueueJob(deps.jobs, "snapshot_refresh", id, {}, { dedupe: true });
+  } catch (e) {
+    console.error(`[sites] failed to enqueue initial snapshot_refresh for site ${id}:`, e);
+  }
+
   return { id };
 }
 
