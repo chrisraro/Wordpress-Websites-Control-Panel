@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { notFound } from "next/navigation";
 import { createServerSupabase, createServiceSupabase } from "@/lib/supabase/server";
-import type { AppPermission, AppRole, SiteAccessLevel } from "./types";
+import { APP_ROLES, type AppPermission, type SiteAccessLevel } from "./types";
 import { can, canAccessSite, type Viewer } from "./decide";
 
 /**
@@ -23,16 +23,44 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     db.from("user_site_access").select("site_id,access_level").eq("user_id", data.user.id),
   ]);
 
+  // A database error is not "no data" — Supabase returns data:[] for a
+  // successful query with zero rows, and data:null (with .error set) when
+  // the query itself failed. Conflating the two would fail OPEN for the
+  // overrides query in particular: a `deny` override exists to strip a
+  // permission the role would otherwise grant, so if that query errors and
+  // we treated it as "no overrides", the role default would silently win
+  // and the user would keep a permission that was explicitly revoked. A
+  // database error means we do not know what this user may do, and the
+  // only safe answer to that is nothing — so any of the four queries
+  // erroring denies the viewer entirely.
+  if (roleRow.error) {
+    console.error("[authz] failed to load viewer:", "user_roles", roleRow.error.message);
+    return null;
+  }
+  if (overrides.error) {
+    console.error("[authz] failed to load viewer:", "user_permission_overrides", overrides.error.message);
+    return null;
+  }
+  if (grants.error) {
+    console.error("[authz] failed to load viewer:", "user_site_access", grants.error.message);
+    return null;
+  }
+
   // No role row means no access at all — fail closed. This is why the
   // bootstrap script must run before enforcement ships.
-  const role = roleRow.data?.role as AppRole | undefined;
+  const roleValue = roleRow.data?.role;
+  const role = APP_ROLES.find((r) => r === roleValue);
   if (!role) return null;
 
-  const { data: rolePerms } = await db
+  const rolePerms = await db
     .from("role_permissions").select("permission").eq("role", role);
+  if (rolePerms.error) {
+    console.error("[authz] failed to load viewer:", "role_permissions", rolePerms.error.message);
+    return null;
+  }
 
   const permissions = new Set<AppPermission>(
-    (rolePerms ?? []).map((r) => r.permission as AppPermission),
+    (rolePerms.data ?? []).map((r) => r.permission as AppPermission),
   );
   for (const o of overrides.data ?? []) {
     if (o.effect === "allow") permissions.add(o.permission as AppPermission);
