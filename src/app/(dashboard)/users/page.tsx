@@ -7,8 +7,8 @@ import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui/primitives";
-import { tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
-import { IconChevronRight, IconUsers } from "@/components/ui/icons";
+import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconChevronRight, IconShield, IconUsers } from "@/components/ui/icons";
 import { InviteDialog } from "./invite-dialog";
 import type { AppRole } from "@/lib/authz/types";
 
@@ -49,7 +49,15 @@ export default async function UsersPage() {
       <PageHeader
         title="Users"
         subtitle="Invite people, and see who can sign in to the panel."
-        actions={<InviteDialog sites={inviteSites} />}
+        actions={
+          <>
+            <Link href="/users/roles" className={buttonClass("outline")}>
+              <IconShield size={16} className="shrink-0" />
+              Permission matrix
+            </Link>
+            <InviteDialog sites={inviteSites} />
+          </>
+        }
       />
 
       {users.length === 0 ? (
