@@ -74,7 +74,10 @@ export async function fetchWordfenceFeed(
     // is hours) and only spends quota the next legitimate attempt needs.
     // Surface Retry-After (if the API sent one) so an operator checking
     // jobs.last_error knows when it's worth trying again by hand.
-    const retryAfter = res.headers.get("retry-after");
+    // Retry-After is upstream-controlled and flows straight into
+    // jobs.last_error; truncate it so a misbehaving/malicious upstream can't
+    // write an arbitrary-length value into that column.
+    const retryAfter = res.headers.get("retry-after")?.slice(0, 64);
     const wait = retryAfter ? ` (Retry-After: ${retryAfter})` : "";
     throw new NonRetryableError(`Wordfence feed rate limited: HTTP 429${wait}`);
   }

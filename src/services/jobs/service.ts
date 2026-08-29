@@ -16,7 +16,8 @@ export type JobHandlers = Partial<Record<JobType, JobHandler>>;
  * three attempts available.
  *
  * Keep this narrow and explicit: every job type flows through processJobs,
- * so an error must opt in by name to skip the ladder. Anything else — a
+ * so an error must opt in by type (the `instanceof` check below, not
+ * `e.name`) to skip the ladder. Anything else — a
  * plain Error, a thrown string, whatever a handler happens to throw — keeps
  * today's retry-then-fail behaviour unchanged.
  */
