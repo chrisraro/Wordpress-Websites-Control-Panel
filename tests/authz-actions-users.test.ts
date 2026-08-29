@@ -112,30 +112,35 @@ describe("permission gate — every action refuses without users.manage", () => 
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await setUserRoleAction("u2", "developer", undefined, formData());
     expect(result).toEqual(DENIED);
+    expect(checkPermissionMock).toHaveBeenCalledWith("users.manage");
   });
 
   it("deleteUserAction", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await deleteUserAction("u2", undefined, formData());
     expect(result).toEqual(DENIED);
+    expect(checkPermissionMock).toHaveBeenCalledWith("users.manage");
   });
 
   it("grantSiteAction", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await grantSiteAction("u2", "site-1", "read", undefined, formData());
     expect(result).toEqual(DENIED);
+    expect(checkPermissionMock).toHaveBeenCalledWith("users.manage");
   });
 
   it("revokeSiteAction", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await revokeSiteAction("u2", "site-1", undefined, formData());
     expect(result).toEqual(DENIED);
+    expect(checkPermissionMock).toHaveBeenCalledWith("users.manage");
   });
 
   it("setRolePermissionAction", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await setRolePermissionAction("developer", "seo.run", false, undefined, formData());
     expect(result).toEqual(DENIED);
+    expect(checkPermissionMock).toHaveBeenCalledWith("users.manage");
   });
 });
 
@@ -212,6 +217,51 @@ describe("inviteUserAction — invite rules", () => {
 
     expect(result.ok).toBe(false);
     expect(inviteUser).toHaveBeenCalledTimes(1);
+    expect(deleteUser).toHaveBeenCalledWith("new-user-id");
+  });
+
+  it("rolls back a failed invite even when the guarded delete would refuse", async () => {
+    // Reproduces the trace from the Phase 9b review: changeUserRole commits
+    // the new account's role to "admin" (its role was still null when the
+    // guard ran, so the last-admin check did not engage), then a site grant
+    // fails. By the time the rollback runs, the freshly-created account is
+    // "admin" and, in this fake directory, the *only* admin — exactly the
+    // state that makes the guarded deleteManagedUser refuse. The rollback
+    // must use the unguarded rollbackFailedInvite instead, or a live,
+    // fully-privileged admin account survives while the action claims
+    // nothing was kept.
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    let targetRole: ManagedUser["role"] = null;
+    const inviteUser = vi.fn(async () => ({ id: "new-user-id", inviteLink: "https://x/invite?token=abc" }));
+    const setRole = vi.fn(async (_userId: string, role: ManagedUser["role"]) => {
+      targetRole = role;
+    });
+    const grantSite = vi.fn(async () => {
+      throw new Error("grantSite failed: foreign key violation on site_id");
+    });
+    const deleteUser = vi.fn(async () => {});
+    currentRepo = fakeRepo({
+      inviteUser,
+      // Re-read on every call, the same as the real repo — so the second
+      // read (inside the rollback) reflects the setRole write the first
+      // read triggered. Only the invited account is present, making it the
+      // sole admin the moment its role becomes "admin".
+      listUsers: async () => [managedUser("new-user-id", targetRole)],
+      setRole,
+      grantSite,
+      deleteUser,
+    });
+
+    const result = await inviteUserAction(
+      undefined,
+      formData({ email: "new-admin@example.com", role: "admin", siteIds: ["bad-site"] }),
+    );
+
+    expect(result.ok).toBe(false);
+    // The account must actually be gone. Before the fix, the rollback went
+    // through the guarded deleteManagedUser, which refused (last admin) and
+    // returned {ok:false} rather than throwing, so the `.catch(() => {})`
+    // around it swallowed nothing and deleteUser was never called.
     expect(deleteUser).toHaveBeenCalledWith("new-user-id");
   });
 });

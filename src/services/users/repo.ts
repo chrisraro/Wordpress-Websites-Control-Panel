@@ -44,8 +44,11 @@ export interface UsersRepo {
    * Creates the account via `auth.admin.generateLink({ type: "invite" })`
    * (not `inviteUserByEmail`, whose returned user never carries a usable
    * action_link — measured against this project) and returns the action
-   * link so the UI can offer it as a copyable fallback: Supabase's built-in
-   * mailer is rate-limited and frequently spam-filtered. `null` when no
+   * link. No email is sent by this call, or by anything else in this
+   * codebase: `generateLink` only generates the link, it does not deliver
+   * it. The returned link is the *only* delivery mechanism — whoever
+   * consumes it must copy/send it to the invitee themselves, not present it
+   * as a fallback for a mail that is otherwise on its way. `null` when no
    * link is present; never invented. The link is a bearer credential —
    * callers must return it, never log or store it.
    */
@@ -197,9 +200,9 @@ export function supabaseUsersRepo(db: SupabaseClient): UsersRepo {
       // against this project, inviteUserByEmail creates the account but
       // returns a user whose action_link is undefined, so there is no link
       // to show. generateLink creates the same account and returns
-      // properties.action_link. Surfacing a link exists specifically to
-      // survive an email that never arrives, so the API that cannot
-      // produce one is the wrong tool.
+      // properties.action_link. Neither call sends an email — the returned
+      // link is the only way this invite ever reaches the invitee, so the
+      // API that cannot produce a link is the wrong tool regardless.
       const { data, error } = await db.auth.admin.generateLink({
         type: "invite",
         email,

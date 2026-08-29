@@ -93,3 +93,17 @@ export async function inviteNewUser(
 ): Promise<{ id: string; inviteLink: string | null }> {
   return repo.inviteUser(email, redirectTo);
 }
+
+/**
+ * Deletes an account this same request just created, before any external actor
+ * could observe or rely on it. Deliberately skips the lockout guards: those
+ * protect real administrators from being removed, and a half-created invite is
+ * not one — applying them here can refuse to clean up an account that should
+ * never have existed, which is strictly worse than removing it.
+ *
+ * Never use this to delete an account a caller intends to remove. That is
+ * deleteManagedUser, and it must stay guarded.
+ */
+export async function rollbackFailedInvite(repo: UsersRepo, userId: string): Promise<void> {
+  await repo.deleteUser(userId);
+}

@@ -15,7 +15,16 @@ import { join } from "node:path";
 // runtime test, precisely because a unit test of one call site looks
 // identical whether it went through the guard or around it; only reading
 // the actual call expression tells them apart.
+//
+// The scan matches on the *method name* being invoked — `.setRole(`,
+// `.deleteUser(`, `.setRolePermission(` — on any receiver, not on the literal
+// text `repo.setRole(`. `actions.ts` binds `const users = repo();`, so a
+// naive string match on `repo.setRole(` would pass right through
+// `users.setRole(...)`, which is exactly the unguarded call this test exists
+// to catch. Matching the method name regardless of receiver closes that gap;
+// it does allowlist any particular receiver name.
 const ACTIONS_FILE = join(__dirname, "..", "src", "app", "(dashboard)", "users", "actions.ts");
+const UNGUARDED_METHODS = ["setRole", "deleteUser", "setRolePermission"];
 
 describe("users actions route guarded mutations through the service, not the repo", () => {
   const source = readFileSync(ACTIONS_FILE, "utf8");
@@ -24,10 +33,8 @@ describe("users actions route guarded mutations through the service, not the rep
     expect(source.length).toBeGreaterThan(0);
   });
 
-  it.each(["repo.setRole(", "repo.deleteUser(", "repo.setRolePermission("])(
-    "does not call %s directly",
-    (unguardedCall) => {
-      expect(source).not.toContain(unguardedCall);
-    },
-  );
+  it.each(UNGUARDED_METHODS)("does not call the unguarded repo method %s(...) on any receiver", (method) => {
+    const pattern = new RegExp(`\\.\\s*${method}\\s*\\(`);
+    expect(source).not.toMatch(pattern);
+  });
 });

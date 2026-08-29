@@ -13,6 +13,7 @@ import {
   grantSiteAccess,
   inviteNewUser,
   revokeSiteAccess,
+  rollbackFailedInvite,
   setRolePermissionChecked,
 } from "@/services/users/service";
 
@@ -82,11 +83,30 @@ export async function inviteUserAction(
     for (const siteId of siteIds) {
       await grantSiteAccess(users, invited.id, siteId, "read", user.id);
     }
-  } catch {
-    // Best effort: undo the just-created account so it doesn't linger with
-    // no role (denied everything, with no explanation) or a half-applied
-    // set of grants.
-    await deleteManagedUser(users, user.id, invited.id).catch(() => {});
+  } catch (failure) {
+    // Undo the just-created account. This must use rollbackFailedInvite, not
+    // the guarded deleteManagedUser: by the time a grant fails, changeUserRole
+    // may already have committed an "admin" role onto this brand-new account,
+    // and if that account is now the only admin (e.g. the inviting actor holds
+    // users.manage without being an admin themselves — the permission matrix
+    // is editable), the lockout guard in deleteManagedUser will refuse to
+    // remove it. That refusal must never be swallowed: a live, fully-
+    // privileged admin account would then exist while this action reports
+    // that nothing was kept.
+    const failureReason = failure instanceof Error ? failure.message : String(failure);
+    try {
+      await rollbackFailedInvite(users, invited.id);
+    } catch (rollbackFailure) {
+      const rollbackReason =
+        rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure);
+      return {
+        ok: false,
+        error:
+          `Could not finish creating the account, and cleanup also failed: the account ` +
+          `${email} (${invited.id}) still exists with no usable access. Remove it from the ` +
+          `user list manually. (Setup error: ${failureReason}. Cleanup error: ${rollbackReason})`,
+      };
+    }
     return { ok: false, error: "Could not finish creating the account — nothing was kept." };
   }
 
