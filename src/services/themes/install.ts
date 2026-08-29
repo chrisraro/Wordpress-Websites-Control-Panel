@@ -1,6 +1,11 @@
-import { phpString } from "@/lib/wpphp";
+import { phpString, runPhp } from "@/lib/wpphp";
+import { decryptSecret } from "@/lib/crypto/secrets";
 import { SLUG_RE } from "@/services/manage/service";
 import type { InstallSource } from "@/services/marketplace/install";
+import type { McpFactory } from "@/lib/mcp/client";
+import type { SitesRepo } from "@/services/sites/repo";
+import type { JobsRepo } from "@/services/jobs/repo";
+import { enqueueJob } from "@/services/jobs/service";
 
 export const THEME_INSTALL_TIMEOUT_MS = 300_000;
 
@@ -64,4 +69,65 @@ if ($res === false || $res === null) {
   return json_encode(array('ok' => false, 'error' => 'Install failed: ' . (empty($msgs) ? 'download or filesystem error' : implode(' | ', array_slice($msgs, -3)))));
 }
 ${activatePhp}`.trim();
+}
+
+export interface ThemeInstallDeps { sites: SitesRepo; jobs: JobsRepo; mcp: McpFactory }
+
+/**
+ * Runs a theme install/activate inline, the same way `createChildTheme` and
+ * every other per-site manage action does — no job queue, just an awaited MCP
+ * round-trip. `installPlugin` in the marketplace only queues because it fans
+ * a single click out across many sites; a per-site installer has exactly one
+ * site to talk to, so there is nothing for a job to buy here.
+ */
+export async function installTheme(
+  deps: ThemeInstallDeps, siteId: string, actorId: string,
+  source: InstallSource, activate: boolean,
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const sourceSummary = source.kind === "wporg" ? { kind: source.kind, slug: source.slug } : { kind: source.kind };
+  let code: string;
+  try {
+    code = buildThemeInstallPhp(source, activate);
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    await deps.sites.insertActivity({
+      actor: actorId, site_id: siteId, action: "site.theme_install",
+      detail: { source: sourceSummary, ok: false, error, rejected: "invalid_source" },
+    });
+    return { ok: false, error };
+  }
+
+  const creds = await deps.sites.getSiteCredentials(siteId);
+  if (!creds) return { ok: false, error: "Site not found" };
+
+  let output = "";
+  let error: string | undefined;
+  try {
+    const client = await deps.mcp({
+      endpoint: creds.mcp_endpoint,
+      username: creds.wp_username,
+      appPassword: await decryptSecret(creds.app_password_encrypted),
+    });
+    try {
+      const result = await runPhp<{ ok: boolean; message?: string; error?: string }>(
+        client, code, THEME_INSTALL_TIMEOUT_MS,
+      );
+      if (result.ok) output = result.message ?? "Installed";
+      else error = result.error ?? "Install failed";
+    } finally {
+      await client.close();
+    }
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+
+  await deps.sites.insertActivity({
+    actor: actorId, site_id: siteId, action: "site.theme_install",
+    detail: { source: sourceSummary, activate, ok: !error, ...(error ? { error } : { message: output }) },
+  });
+  if (!error) {
+    await enqueueJob(deps.jobs, "snapshot_refresh", siteId, {}, { dedupe: true });
+    return { ok: true, output };
+  }
+  return { ok: false, error };
 }

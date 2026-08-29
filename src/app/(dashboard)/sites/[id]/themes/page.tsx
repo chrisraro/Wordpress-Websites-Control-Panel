@@ -6,11 +6,12 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
-import { manageAction, refreshInventoryAction } from "../manage-actions";
+import { refreshInventoryAction } from "../manage-actions";
 import { createChildThemeAction } from "../child-theme-actions";
+import { ThemeTable } from "./theme-table";
+import { InstallPanel } from "./install-panel";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
-import { Card, CardTitle, EmptyState, StatusBadge } from "@/components/ui/primitives";
-import { tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { Card, CardTitle, EmptyState } from "@/components/ui/primitives";
 import { IconRefresh, IconThemes } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
@@ -65,77 +66,25 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
         />
       </div>
 
-      <Card className="overflow-hidden">
-        {themes.length === 0 ? (
-          <EmptyState
-            icon={<IconThemes size={28} />}
-            title={snapshot ? "No themes installed" : "No inventory yet"}
-          >
-            {snapshot
-              ? "This site has no themes registered."
-              : "Refresh the inventory to pull the current theme list from the site."}
+      {!snapshot ? (
+        <Card className="overflow-hidden">
+          <EmptyState icon={<IconThemes size={28} />} title="No inventory yet">
+            Refresh the inventory to pull the current theme list from the site.
           </EmptyState>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-body">
-              <thead>
-                <tr className={tableHeadClass}>
-                  <th className="px-5 py-3 font-medium">Theme</th>
-                  <th className="px-5 py-3 font-medium">Version</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Update</th>
-                  <th className="px-5 py-3 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {themes.map((t) => {
-                  const update = manageAction.bind(null, id, {
-                    kind: "update_theme" as const, slug: t.name,
-                  });
-                  const name = t.title || t.name;
-                  return (
-                    <tr key={t.name} className={tableRowClass}>
-                      <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
-                      <td className={`${tableCellClass} text-mid-gray`}>{t.version}</td>
-                      <td className={tableCellClass}>
-                        <StatusBadge tone={t.status === "active" ? "good" : "idle"}>
-                          {t.status}
-                        </StatusBadge>
-                      </td>
-                      <td className={tableCellClass}>
-                        {t.update === "available" ? (
-                          <StatusBadge tone="warn">{t.update_version ?? "available"}</StatusBadge>
-                        ) : (
-                          <span className="text-caption tracking-normal text-mid-gray">current</span>
-                        )}
-                      </td>
-                      <td className={tableCellClass}>
-                        <div className="flex justify-end">
-                          {t.update === "available" && (
-                            <ManageForm
-                              action={update}
-                              label="Update"
-                              pendingLabel="Updating…"
-                              success={`${name} updated`}
-                              size="sm"
-                              confirm={{
-                                title: `Update ${name}?`,
-                                description: `Version ${t.version} will be replaced with ${t.update_version ?? "the latest release"}. If this theme has been edited directly, those changes will be lost — that is what child themes are for.`,
-                                confirmLabel: "Update",
-                              }}
-                              showInlineError={false}
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+        </Card>
+      ) : themes.length === 0 ? (
+        <Card className="overflow-hidden">
+          <EmptyState icon={<IconThemes size={28} />} title="No themes installed">
+            This site has no themes registered.
+          </EmptyState>
+        </Card>
+      ) : (
+        <ThemeTable siteId={id} siteName={site.name} themes={themes} />
+      )}
+
+      <div className="mt-4">
+        <InstallPanel siteId={id} siteName={site.name} />
+      </div>
 
       <Card className="mt-4">
         <CardTitle>Child theme</CardTitle>
