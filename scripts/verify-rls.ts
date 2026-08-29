@@ -71,6 +71,19 @@ function record(name: string, pass: boolean, detail?: string): void {
   console.log(line);
 }
 
+// Assertions 4 and 5 treat an error response as proof RLS refused the write.
+// That is only true if the error IS an RLS refusal -- a constraint
+// violation, a network blip, or an exception raised inside authorize() would
+// also come back as a truthy `error` and would otherwise be misreported as
+// "correctly rejected". PostgREST surfaces a Postgres RLS policy violation
+// as SQLSTATE 42501 with a message containing "row-level security"; require
+// one of those two signals before treating an error as a pass.
+function isRlsRefusal(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === "42501") return true;
+  return typeof error.message === "string" && /row-level security/i.test(error.message);
+}
+
 async function main(): Promise<void> {
   // Read the live site ids at runtime -- never hardcode them.
   const { data: sites, error: sitesErr } = await admin
@@ -93,6 +106,7 @@ async function main(): Promise<void> {
   let scoped: SupabaseClient | undefined;
   let insertedSnapshotId: string | undefined;
   let seededJobId: string | undefined;
+  let seededSnapshotId: string | undefined;
   let mutatedSiteName: { id: string; name: string } | undefined;
 
   try {
@@ -132,6 +146,29 @@ async function main(): Promise<void> {
         .single();
       if (fixtureErr) throw new Error(`could not seed jobs fixture: ${fixtureErr.message}`);
       seededJobId = fixture!.id as string;
+    }
+
+    // Assertion 3 needs the UNGRANTED site to actually have a row in
+    // site_snapshots -- otherwise "select returns zero rows" is true
+    // whether or not RLS works, because the table would be empty for that
+    // site regardless. Seed one if none exists, same reasoning as the jobs
+    // fixture above.
+    const { data: existingSnapshots, error: existingSnapshotsErr } = await admin
+      .from("site_snapshots")
+      .select("id")
+      .eq("site_id", ungranted.id)
+      .limit(1);
+    if (existingSnapshotsErr) {
+      throw new Error(`could not read site_snapshots: ${existingSnapshotsErr.message}`);
+    }
+    if (!existingSnapshots || existingSnapshots.length === 0) {
+      const { data: fixture, error: fixtureErr } = await admin
+        .from("site_snapshots")
+        .insert({ site_id: ungranted.id, payload: { rls_verification_probe: true } })
+        .select("id")
+        .single();
+      if (fixtureErr) throw new Error(`could not seed site_snapshots fixture: ${fixtureErr.message}`);
+      seededSnapshotId = fixture!.id as string;
     }
 
     // Sign in as the throwaway user with the ANON key -- this is the same
@@ -209,7 +246,15 @@ async function main(): Promise<void> {
         .eq("id", granted.id)
         .select("id,name");
       if (error) {
-        record("update on granted site is rejected", true, `refused: ${error.message}`);
+        if (isRlsRefusal(error)) {
+          record("update on granted site is rejected", true, `refused: ${error.message}`);
+        } else {
+          record(
+            "update on granted site is rejected",
+            false,
+            `errored for a reason other than RLS (code ${error.code ?? "?"}): ${error.message}`,
+          );
+        }
       } else if (!data || data.length === 0) {
         record("update on granted site is rejected", true, "0 rows affected");
       } else {
@@ -231,7 +276,15 @@ async function main(): Promise<void> {
         .insert({ site_id: granted.id, payload: { probe: true } })
         .select("id");
       if (error) {
-        record("insert into site_snapshots (granted site) is rejected", true, `refused: ${error.message}`);
+        if (isRlsRefusal(error)) {
+          record("insert into site_snapshots (granted site) is rejected", true, `refused: ${error.message}`);
+        } else {
+          record(
+            "insert into site_snapshots (granted site) is rejected",
+            false,
+            `errored for a reason other than RLS (code ${error.code ?? "?"}): ${error.message}`,
+          );
+        }
       } else if (!data || data.length === 0) {
         record("insert into site_snapshots (granted site) is rejected", true, "0 rows returned");
       } else {
@@ -278,6 +331,10 @@ async function main(): Promise<void> {
     if (seededJobId) {
       const { error } = await admin.from("jobs").delete().eq("id", seededJobId);
       if (error) console.error(`cleanup: failed to delete jobs fixture: ${error.message}`);
+    }
+    if (seededSnapshotId) {
+      const { error } = await admin.from("site_snapshots").delete().eq("id", seededSnapshotId);
+      if (error) console.error(`cleanup: failed to delete site_snapshots fixture: ${error.message}`);
     }
     if (userId) {
       const { error: grantDelErr } = await admin

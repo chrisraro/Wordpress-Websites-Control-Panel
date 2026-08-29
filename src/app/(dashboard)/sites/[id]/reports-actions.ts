@@ -71,7 +71,7 @@ export async function revokeReportAction(
   if (isDenied(site)) return site;
   const db = createServiceSupabase();
   try {
-    await supabaseReportsRepo(db).revoke(reportId);
+    await supabaseReportsRepo(db).revoke(reportId, siteId);
     await supabaseSitesRepo(db).insertActivity({
       actor: user.id, site_id: siteId, action: "site.report_revoke", detail: { report_id: reportId },
     });

@@ -1,8 +1,10 @@
 # Authorization (roles, permissions, site grants)
 
 Spec: `docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md`.
-Schema: `supabase/migrations/0006_rbac_schema.sql`, `0007_authz_functions.sql`,
+Schema: `supabase/migrations/0006_rbac_schema.sql`, `0007_rbac_functions.sql`,
 `0008_rls_scoped.sql`. All three are applied to the live database.
+`0009_rbac_write_scope.sql` corrects a gap in `0008`'s write policies (see
+below) and is not yet applied.
 
 ## The four roles and the default matrix
 
@@ -39,15 +41,38 @@ Two more tables adjust the matrix per user rather than per role:
 
 - `user_permission_overrides` — one row per `(user_id, permission)`, with
   effect `allow` or `deny`. Checked *before* the role default in both
-  `authorize()` and `authorize_for_user()` (`0007_authz_functions.sql`), so a
+  `authorize()` and `authorize_for_user()` (`0007_rbac_functions.sql`), so a
   `deny` override always wins even though the role would otherwise allow it.
   This is how one person is excluded from something their role generally
   grants, without inventing a role just for them.
 - `user_site_access` — one row per `(user_id, site_id)`, with `access_level`
   `read` or `manage`. A `manage` grant satisfies both `read` and `manage`
-  checks; a `read` grant satisfies only `read`. This is the read/manage split
-  that separates "can see this site's data" from "can change it" — see the
-  `sites_write` / child-table `_write` policies in `0008_rls_scoped.sql`.
+  checks; a `read` grant satisfies only `read`.
+
+  **This does not, by itself, separate "can see this site's data" from "can
+  change it".** `0008_rls_scoped.sql`'s child-table `_write` policies were
+  written as `has_site_access(site_id, 'manage')` alone, and
+  `has_site_access()` opens with `(select authorize('sites.view_all')) or
+  ...` — a check that short-circuits to `true` for anyone holding
+  `sites.view_all` regardless of the `'manage'` argument. `sites.view_all` is
+  a *read*-scope permission that `content_writer` holds, so under `0008`
+  alone a `content_writer` could write any of the eight child tables
+  (`site_snapshots`, `site_vulnerabilities`, `security_checks`,
+  `uptime_checks`, `seo_snapshots`, `geogrid_configs`, `geogrid_snapshots`,
+  `reports`) over PostgREST with their own session, with no `manage`-level
+  site grant and none of `wp_toolkit.manage`, `security.run`, `seo.run`,
+  `geogrid.manage` or `reports.manage`.
+
+  `0009_rbac_write_scope.sql` closes this. Each of those eight `_write`
+  policies now requires **both** a real per-site `manage` grant — checked by
+  a new helper, `has_site_grant_at_least()`, which never consults
+  `sites.view_all` — **and** `authorize()` for the permission that governs
+  that table. `has_site_access()` itself is unchanged; it is still correct
+  for every `_read` policy and for `sites_select_scoped`, which do mean to
+  let `sites.view_all` see everything. Staff who hold `sites.view_all` but no
+  per-site grant can no longer write these tables through the anon/user-scoped
+  client as a result — that's fine, because every legitimate write already
+  goes through the service-role client, which bypasses RLS entirely.
 
 ## Changing a role or a site grant by SQL (until Phase 9b ships)
 
@@ -185,3 +210,35 @@ prints `PASS` or `FAIL`; the process exits non-zero if any assertion fails.
 **If assertion 2 or 3 ever passes rows through, stop and treat it as an
 active cross-tenant leak** — that is the exact failure this phase exists to
 prevent, not a test to adjust.
+
+## Known exposures
+
+Two things this phase does **not** close. Recorded here explicitly so they
+are tracked as open work, not silently assumed closed by the RLS rewrite.
+
+1. **`site_snapshots.payload` contains every WordPress administrator's login
+   and email**, under an `admin_users` key. RLS is row-level: a client
+   granted `read` access to a site can select that site's `site_snapshots`
+   rows in full, `payload` included. The overview page hides the
+   `admin_users` card for clients, but that's presentation — Postgres RLS
+   cannot filter inside a JSONB column, and PostgREST has no column-level
+   granularity into a JSON value the way it does for a real column. A client
+   who queries `site_snapshots` directly (same anon key and session JWT the
+   app already gives them) gets the administrator list regardless of what
+   the UI renders. The real fix is to stop storing `admin_users` inside
+   `payload` — move it to its own table (or a column) that a client-scoped
+   read never selects — not a policy change.
+
+2. **A `client`-role user with a `manage`-level site grant can trigger
+   `refreshInventoryAction`.** That action requires site access at `manage`
+   specifically because it opens an MCP connection and runs PHP against the
+   live WordPress site (see spec §4.3) — it is not a read despite looking
+   like one. The brief for `client` accounts is read-only access and report
+   generation; nothing in the schema or the RLS policies stops an operator
+   from granting a `client` a `manage`-level row in `user_site_access`
+   instead of `read`. Doing so silently hands that client the ability to run
+   PHP on the customer's site through `refreshInventoryAction`, bypassing
+   the intended read-only boundary. Until this is enforced in code (e.g.
+   rejecting `manage` grants for `client`-role users at grant time), **client
+   grants must always be created at `read`, never `manage`** — this is an
+   operational rule, not something the database currently prevents.
