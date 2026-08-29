@@ -52,8 +52,15 @@ describe("0011_site_admin_users.sql", () => {
   );
 
   it("creates a staff-only site_admin_users table with RLS enabled", () => {
-    expect(SQL).toMatch(/create table site_admin_users\s*\(/);
+    // "if not exists": this migration has not been applied to any database
+    // yet, so, per 0008_rls_scoped.sql's convention, it is written to be
+    // re-run safely rather than to error on a second run.
+    expect(SQL).toMatch(/create table if not exists site_admin_users\s*\(/);
     expect(SQL).toMatch(/alter table site_admin_users enable row level security;/);
+  });
+
+  it("drops the read policy before recreating it, for the same re-run safety", () => {
+    expect(SQL).toContain("drop policy if exists site_admin_users_read on site_admin_users;");
   });
 
   it("gates reads on sites.view_all, to authenticated, wrapped as a subselect", () => {
@@ -67,5 +74,17 @@ describe("0011_site_admin_users.sql", () => {
     expect(SQL).toContain(
       "update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';",
     );
+  });
+
+  it("backstops the strip with a check constraint, added after the strip and re-run safe", () => {
+    const stripIndex = SQL.indexOf(
+      "update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';",
+    );
+    const dropIndex = SQL.indexOf("drop constraint if exists site_snapshots_no_admin_users");
+    const addIndex = SQL.indexOf("add constraint site_snapshots_no_admin_users");
+    expect(stripIndex).toBeGreaterThan(-1);
+    expect(dropIndex).toBeGreaterThan(stripIndex);
+    expect(addIndex).toBeGreaterThan(dropIndex);
+    expect(SQL).toMatch(/check \(not \(payload \? 'admin_users'\)\)/);
   });
 });

@@ -37,7 +37,10 @@ export function supabaseAdminUsersRepo(db: SupabaseClient): AdminUsersRepo {
   return {
     async upsertAdminUsers(siteId, users) {
       const { error } = await db.from("site_admin_users")
-        .upsert({ site_id: siteId, users, collected_at: new Date().toISOString() });
+        .upsert(
+          { site_id: siteId, users, collected_at: new Date().toISOString() },
+          { onConflict: "site_id" },
+        );
       if (error) throw new Error(`upsertAdminUsers failed: ${error.message}`, { cause: error });
     },
     async latestAdminUsers(siteId) {

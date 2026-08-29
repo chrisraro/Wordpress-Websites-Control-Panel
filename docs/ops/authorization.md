@@ -2,13 +2,20 @@
 
 Spec: `docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md`.
 Schema: `supabase/migrations/0006_rbac_schema.sql`, `0007_rbac_functions.sql`,
-`0008_rls_scoped.sql`, `0009_rbac_write_scope.sql` and
-`0010_vuln_write_permission.sql`. 0006-0009 are applied to the live database;
-**0010 still needs applying.**
+`0008_rls_scoped.sql`, `0009_rbac_write_scope.sql`,
+`0010_vuln_write_permission.sql` and `0011_site_admin_users.sql`. 0006-0009
+are applied to the live database; **0010 and 0011 still need applying.**
 `0009` corrects a gap in `0008`'s write policies (see below); `0010` fixes one
 permission mapping in `0009` — `site_vulnerabilities` writes require
 `security.run`, not `wp_toolkit.manage`, because the security scan is the only
-thing that writes them.
+thing that writes them. `0011` moves WordPress administrator identities into
+their own staff-only table (see "Known exposures" below, item 1) — **it must
+be applied before this code is deployed.** The application code reads
+`site_admin_users` unconditionally for any viewer who holds `sites.view_all`
+(`latestAdminUsers` in `src/services/inventory/repo.ts`, called from the site
+overview page); deploying the code before the migration creates the table
+means that read throws on a missing relation, 500ing every site overview page
+for staff.
 
 ## The four roles and the default matrix
 
@@ -217,21 +224,29 @@ prevent, not a test to adjust.
 
 ## Known exposures
 
-Two things this phase does **not** close. Recorded here explicitly so they
-are tracked as open work, not silently assumed closed by the RLS rewrite.
+One thing this phase does **not** close, recorded here explicitly so it is
+tracked as open work, not silently assumed closed by the RLS rewrite. A
+second, related exposure — `admin_users` inside `site_snapshots.payload` —
+was closed in phase 9b (see below).
 
-1. **`site_snapshots.payload` contains every WordPress administrator's login
-   and email**, under an `admin_users` key. RLS is row-level: a client
-   granted `read` access to a site can select that site's `site_snapshots`
-   rows in full, `payload` included. The overview page hides the
-   `admin_users` card for clients, but that's presentation — Postgres RLS
-   cannot filter inside a JSONB column, and PostgREST has no column-level
-   granularity into a JSON value the way it does for a real column. A client
-   who queries `site_snapshots` directly (same anon key and session JWT the
-   app already gives them) gets the administrator list regardless of what
-   the UI renders. The real fix is to stop storing `admin_users` inside
-   `payload` — move it to its own table (or a column) that a client-scoped
-   read never selects — not a policy change.
+1. ~~`site_snapshots.payload` contains every WordPress administrator's login
+   and email~~ — **closed by `0011_site_admin_users.sql` (phase 9b).**
+   WordPress administrator identities now live in their own table,
+   `site_admin_users` (one row per site, replaced wholesale on each
+   inventory refresh), with its own RLS policy,
+   `site_admin_users_read`, granting `select` to holders of
+   `sites.view_all` only. `collectInventory`
+   (`src/services/inventory/service.ts`) pulls `admin_users` off the raw MCP
+   response before it ever reaches the `InventoryPayload` that gets written
+   to `site_snapshots.payload`, and the migration adds a database-level
+   backstop — a check constraint, `site_snapshots_no_admin_users`, that
+   rejects any insert or update whose `payload` still carries an
+   `admin_users` key — so a revert of that application code fails loudly
+   at write time instead of silently re-publishing admin logins to every
+   client with a grant. The site overview page's Administrators card reads
+   `site_admin_users` gated on `can(viewer, "sites.view_all")`, the same
+   permission the RLS policy checks, rather than on role, so the UI and the
+   database state the same rule.
 
 2. **A `client`-role user with a `manage`-level site grant can trigger
    `refreshInventoryAction`.** That action requires site access at `manage`

@@ -85,4 +85,24 @@ describe("the site overview page never unconditionally renders credentials-adjac
     expect(source).toContain('isClient ? [] : [{ term: "WP user", value: site.wp_username');
     expect(source).toContain("!isClient && (");
   });
+
+  it("does not render WordPress administrator logins/emails unconditionally", () => {
+    // site_admin_users (0011_site_admin_users.sql) is staff-only, gated by
+    // the same `sites.view_all` permission its RLS policy checks -- not by
+    // role. Pinning the occurrence count here means a refactor that lifts
+    // the Administrators card out of its guard (or adds a second,
+    // unguarded place that prints a login or email) fails a test instead
+    // of shipping.
+    const loginOccurrences = source.split("u.user_login").length - 1;
+    const emailOccurrences = source.split("u.user_email").length - 1;
+    expect(loginOccurrences).toBe(1);
+    expect(emailOccurrences).toBe(1);
+    // The gate must be the permission the RLS policy checks, not the
+    // `isClient` role check: they only coincide under today's seeded
+    // permission matrix, and an admin editing the matrix must not leave
+    // this page rendering data the database would now refuse.
+    expect(source).toContain('const canViewAdminUsers = can(viewer, "sites.view_all");');
+    expect(source).toContain("canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null");
+    expect(source).toContain("{canViewAdminUsers && (");
+  });
 });

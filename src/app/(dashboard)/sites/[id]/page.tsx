@@ -38,9 +38,14 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
-  // site_admin_users is staff-only (0011_site_admin_users.sql) -- a client's
-  // user-scoped read would just come back empty under RLS, so skip the call.
-  const adminUsers = isClient ? null : await supabaseAdminUsersRepo(db).latestAdminUsers(id);
+  // site_admin_users' RLS policy (0011_site_admin_users.sql) grants read to
+  // holders of sites.view_all, not to "non-clients" -- those happen to
+  // coincide only under today's seeded permission matrix. Gate on the same
+  // permission the policy checks, not on role, so an admin editing the
+  // matrix (this phase ships that editor) can't unticking a permission
+  // while this page keeps rendering the data anyway.
+  const canViewAdminUsers = can(viewer, "sites.view_all");
+  const adminUsers = canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null;
 
   const { data: activity } = await db
     .from("activity_log")
@@ -265,11 +270,26 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         </Card>
         )}
 
-        {!isClient && (
+        {canViewAdminUsers && (
         <Card>
           <CardTitle>Administrators</CardTitle>
           {!adminUsers?.users.length ? (
-            <EmptyState icon={<IconUsers size={28} />} title="No administrator data collected yet">
+            <EmptyState
+              icon={<IconUsers size={28} />}
+              title="No administrator data collected yet"
+              action={
+                canRefresh ? (
+                  <ManageForm
+                    action={refresh}
+                    label="Refresh inventory"
+                    pendingLabel="Refreshing…"
+                    success="Inventory refreshed"
+                    icon={<IconRefresh size={16} />}
+                    showInlineError={false}
+                  />
+                ) : undefined
+              }
+            >
               Refresh the inventory to collect this site&rsquo;s administrator accounts.
             </EmptyState>
           ) : (

@@ -73,7 +73,13 @@ type RawInventory = Omit<InventoryPayload, "collected_at"> & { admin_users: Admi
 export interface CollectedInventory { payload: InventoryPayload; adminUsers: AdminUser[] }
 
 export async function collectInventory(client: SiteMcpClient): Promise<CollectedInventory> {
-  const { admin_users, ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
+  // Default to [] if WordPress ever omits admin_users: leaving it undefined
+  // would make supabase-js drop the key from the upsert body entirely, and
+  // the `not null` column would reject the row -- after insertSnapshot has
+  // already inserted the snapshot row, so every retry piles up another
+  // snapshot and re-runs PHP against the live site instead of failing
+  // cleanly up front.
+  const { admin_users = [], ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
   return { payload: { ...rest, collected_at: new Date().toISOString() }, adminUsers: admin_users };
 }
 

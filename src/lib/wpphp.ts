@@ -27,7 +27,13 @@ export async function runPhp<T = unknown>(
   const raw = await client.executeAbility("novamira/execute-php", { code }, { timeoutMs });
   const env = unwrapAbility(raw) as ExecutePhpResult | null;
   if (!env || typeof env !== "object") {
-    throw new McpToolError(`execute-php returned an unexpected result: ${JSON.stringify(raw)}`);
+    // The raw envelope can carry admin_users and other site-sensitive data
+    // (see collectInventory). Keep it in the server log for diagnosis, but
+    // never let it reach a thrown message: manage-actions.ts returns
+    // e.message verbatim to the caller, and a client holding a `manage`
+    // grant can reach this path via refreshInventoryAction.
+    console.error("execute-php returned an unexpected result", raw);
+    throw new McpToolError("execute-php returned an unexpected result");
   }
   if (env.success === false) {
     const detail = env.errors?.length ? JSON.stringify(env.errors) : env.output || "unknown error";
