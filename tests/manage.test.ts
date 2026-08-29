@@ -60,6 +60,75 @@ describe("buildPhp", () => {
   });
 });
 
+describe("buildPhp — delete_plugin", () => {
+  it("refuses to delete an active plugin, inside WordPress", () => {
+    const php = buildPhp({ kind: "delete_plugin", file: "akismet/akismet.php" });
+    expect(php).toContain("is_plugin_active");
+    expect(php).toContain("delete_plugins");
+  });
+
+  it("passes the plugin file as base64, never interpolated", () => {
+    const php = buildPhp({ kind: "delete_plugin", file: "akismet/akismet.php" });
+    expect(php).not.toContain("akismet/akismet.php");
+    expect(php).toContain(Buffer.from("akismet/akismet.php", "utf8").toString("base64"));
+  });
+
+  it("rejects a malformed plugin file", () => {
+    expect(() => buildPhp({ kind: "delete_plugin", file: "../../evil.php" })).toThrow();
+  });
+
+  it("checks WP_Filesystem()'s return value instead of calling it bare", () => {
+    const php = buildPhp({ kind: "delete_plugin", file: "akismet/akismet.php" });
+    expect(php).not.toContain("WP_Filesystem();");
+    expect(php).toContain("if (!WP_Filesystem())");
+  });
+});
+
+describe("buildPhp — activate_theme", () => {
+  it("checks the theme and its parent exist before switching", () => {
+    const php = buildPhp({ kind: "activate_theme", slug: "storefront" });
+    expect(php).toContain("wp_get_theme");
+    expect(php).toContain("switch_theme");
+    expect(php).toContain("get_stylesheet()");
+  });
+
+  it("passes the slug as base64, never interpolated", () => {
+    const php = buildPhp({ kind: "activate_theme", slug: "storefront" });
+    expect(php).not.toContain("'storefront'");
+    expect(php).toContain(Buffer.from("storefront", "utf8").toString("base64"));
+  });
+
+  it("rejects a malformed slug", () => {
+    expect(() => buildPhp({ kind: "activate_theme", slug: "../evil" })).toThrow();
+  });
+});
+
+describe("buildPhp — delete_theme", () => {
+  it("re-checks parentage inside WordPress, not just in TypeScript", () => {
+    const php = buildPhp({ kind: "delete_theme", slug: "storefront" });
+    // The snapshot the UI gated on can be stale; WordPress is the authority.
+    expect(php).toContain("get_stylesheet()");
+    expect(php).toContain("get_template()");
+    expect(php).toContain("delete_theme");
+  });
+
+  it("requires theme.php via a guard that is not a deprecated shim", () => {
+    const php = buildPhp({ kind: "delete_theme", slug: "storefront" });
+    expect(php).toContain("wp-admin/includes/theme.php");
+    expect(php).not.toContain("function_exists('get_themes')");
+  });
+
+  it("rejects a malformed slug", () => {
+    expect(() => buildPhp({ kind: "delete_theme", slug: "../evil" })).toThrow();
+  });
+
+  it("checks WP_Filesystem()'s return value instead of calling it bare", () => {
+    const php = buildPhp({ kind: "delete_theme", slug: "storefront" });
+    expect(php).not.toContain("WP_Filesystem();");
+    expect(php).toContain("if (!WP_Filesystem())");
+  });
+});
+
 function phpResult(payload: unknown) {
   return { success: true, data: { success: true, return_value: JSON.stringify(payload), output: "", errors: [] } };
 }

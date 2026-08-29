@@ -12,6 +12,13 @@ export interface PluginInfo {
 export interface ThemeInfo {
   /** Stylesheet slug, e.g. "generatepress" */
   name: string;
+  /**
+   * Parent stylesheet slug. Equals `name` for a theme that is not a child.
+   * Required by the delete gate: a parent theme reports status "inactive"
+   * while its child is active, so parentage is the only way to tell that
+   * deleting it would break the site.
+   */
+  template: string;
   title?: string;
   version: string;
   status: string;
@@ -24,6 +31,8 @@ export interface InventoryPayload {
   collected_at: string;
   wp_version: string;
   php_version: string;
+  /** WordPress's own admin_url() — correct for subdirectory installs. */
+  admin_url: string;
   core_update: string | null;
   plugins: PluginInfo[];
   themes: ThemeInfo[];

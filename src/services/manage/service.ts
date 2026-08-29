@@ -107,6 +107,74 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 wp_upgrade();
 return json_encode(array('ok' => true, 'message' => 'Core updated to ' . $update->version . ' (DB upgraded)'));`.trim();
 
+    case "delete_plugin":
+      // delete_plugins() fires each plugin's uninstall hook, which routinely
+      // drops its tables and options. The UI names that consequence; here we
+      // only guarantee we never do it to a running plugin.
+      return `
+require_once ABSPATH . 'wp-admin/includes/plugin.php';
+require_once ABSPATH . 'wp-admin/includes/file.php';
+global $wp_filesystem;
+// WP_Filesystem() can fail (e.g. no direct filesystem access and no FTP_*
+// creds in wp-config.php). If we ignore that and call delete_plugins()
+// anyway, core's own request_filesystem_credentials() fallback kicks in,
+// which can require_once the wp-admin header and echo/exit mid-request,
+// breaking the JSON contract this whole feature relies on. Bail here instead.
+if (!WP_Filesystem()) { return json_encode(array('ok' => false, 'error' => 'Could not access the filesystem on this host')); }
+$f = ${phpString(pluginFile(action.file))};
+if (!array_key_exists($f, get_plugins())) { return json_encode(array('ok' => false, 'error' => 'Plugin is not installed')); }
+if (is_plugin_active($f) || is_plugin_active_for_network($f)) {
+  return json_encode(array('ok' => false, 'error' => 'Deactivate the plugin before deleting it'));
+}
+$r = delete_plugins(array($f));
+if (is_wp_error($r)) { return json_encode(array('ok' => false, 'error' => $r->get_error_message())); }
+if ($r === false || $r === null) { return json_encode(array('ok' => false, 'error' => 'Delete failed (filesystem error)')); }
+${OK("Plugin deleted")}`.trim();
+
+    case "activate_theme":
+      return `
+require_once ABSPATH . 'wp-admin/includes/theme.php';
+$s = ${phpString(themeSlug(action.slug))};
+$t = wp_get_theme($s);
+if (!$t->exists()) { return json_encode(array('ok' => false, 'error' => 'Theme is not installed')); }
+$parent = $t->get_template();
+if ($parent && $parent !== $s && !wp_get_theme($parent)->exists()) {
+  return json_encode(array('ok' => false, 'error' => 'Parent theme ' . $parent . ' is not installed'));
+}
+switch_theme($s);
+if (get_stylesheet() !== $s) { return json_encode(array('ok' => false, 'error' => 'WordPress did not switch themes')); }
+${OK("Theme activated")}`.trim();
+
+    case "delete_theme":
+      // The gate also lives in TypeScript (services/themes/safety.ts) to drive
+      // the UI, but that reads a snapshot which can be stale. This copy runs
+      // against live state and is the one that actually protects the site.
+      return `
+require_once ABSPATH . 'wp-admin/includes/theme.php';
+require_once ABSPATH . 'wp-admin/includes/file.php';
+global $wp_filesystem;
+// WP_Filesystem() can fail (e.g. no direct filesystem access and no FTP_*
+// creds in wp-config.php). If we ignore that and call delete_theme()
+// anyway, core's own request_filesystem_credentials() fallback kicks in,
+// which can require_once the wp-admin header and echo/exit mid-request,
+// breaking the JSON contract this whole feature relies on. Bail here instead.
+if (!WP_Filesystem()) { return json_encode(array('ok' => false, 'error' => 'Could not access the filesystem on this host')); }
+$s = ${phpString(themeSlug(action.slug))};
+$all = wp_get_themes();
+if (!isset($all[$s])) { return json_encode(array('ok' => false, 'error' => 'Theme is not installed')); }
+if (count($all) <= 1) { return json_encode(array('ok' => false, 'error' => 'This is the only theme installed')); }
+if ($s === get_stylesheet()) { return json_encode(array('ok' => false, 'error' => 'Theme is active')); }
+if ($s === get_template()) { return json_encode(array('ok' => false, 'error' => 'Theme is the parent of the active theme')); }
+foreach ($all as $slug => $t) {
+  if ($slug !== $s && $t->get_template() === $s) {
+    return json_encode(array('ok' => false, 'error' => 'Theme is the parent of ' . $slug));
+  }
+}
+$r = delete_theme($s);
+if (is_wp_error($r)) { return json_encode(array('ok' => false, 'error' => $r->get_error_message())); }
+if ($r === false || $r === null) { return json_encode(array('ok' => false, 'error' => 'Delete failed (filesystem error)')); }
+${OK("Theme deleted")}`.trim();
+
     case "maintenance":
       return action.enable
         ? `

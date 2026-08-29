@@ -10,21 +10,36 @@ export async function createInstallBatchAction(input: {
   source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
   siteIds: string[];
   activate: boolean;
+  /**
+   * Themes fan out across sites the same way plugins do, so they ride the
+   * same `plugin_install` job type; the payload's `target` tells the handler
+   * which installer (and which wordpress.org API) to use. Omitted = plugin,
+   * for backward compatibility with jobs already queued.
+   */
+  target?: "plugin" | "theme";
 }): Promise<{ ok: boolean; batchId?: string; error?: string }> {
   const user = await requireUser();
   if (!Array.isArray(input.siteIds) || input.siteIds.length === 0) {
     return { ok: false, error: "Select at least one site" };
   }
   if (input.source.kind === "wporg" && !SLUG_RE.test(input.source.slug)) {
-    return { ok: false, error: "Invalid plugin slug" };
+    return { ok: false, error: "Invalid slug" };
   }
   if (input.source.kind === "upload" && !/^uploads\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+\.zip$/i.test(input.source.path)) {
     return { ok: false, error: "Invalid upload path" };
   }
   const db = createServiceSupabase();
+  // Install batches are one item across many sites, so the batch table's
+  // "Item" column needs the thing being installed, not the (per-row) site
+  // name the API falls back to when a payload carries no label.
+  const label =
+    input.source.kind === "wporg"
+      ? input.source.slug
+      : input.source.path.split("/").pop() || "Uploaded package";
   try {
     const { batchId } = await enqueueBatch(supabaseJobsRepo(db), "plugin_install", input.siteIds, {
       source: input.source, activate: Boolean(input.activate), actor: user.id,
+      target: input.target ?? "plugin", label,
     });
     return { ok: true, batchId };
   } catch (e) {

@@ -7,6 +7,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { securityScan, refreshVulnFeed } from "@/services/security/scan";
 import { installPlugin, type InstallSource } from "@/services/marketplace/install";
+import { installTheme } from "@/services/themes/install";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { seoScan } from "@/services/seo/scan";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -18,11 +19,50 @@ import { getOptionalEnv } from "@/lib/env";
 import { generateReport } from "@/services/reports/generate";
 import { supabaseReportsRepo, supabaseReportStorage } from "@/services/reports/repo";
 import { parseSections, REPORT_SECTIONS } from "@/services/reports/types";
+import { manageSite } from "@/services/manage/service";
+import { toManageAction } from "@/services/bulk/service";
+import type { BulkJobPayload } from "@/services/bulk/types";
 
 interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
   activate: boolean;
   actor: string;
+  /**
+   * Multi-site theme installs fan out through this same job type — themes
+   * and plugins both install "on N sites at once" the same way, so a second
+   * job type would just duplicate the batching logic. This field is the only
+   * thing that tells the handler which wordpress.org API and which upgrader
+   * (`Plugin_Upgrader` vs `Theme_Upgrader`) to use. Omitted = plugin, so jobs
+   * already queued before this field existed keep behaving as plugin installs.
+   */
+  target?: "plugin" | "theme";
+}
+
+/**
+ * The payload the UI/API read (BulkJobPayload) doesn't carry who queued the
+ * batch — that's for the handler alone, so it rides along as an extra field
+ * rather than widening the shared contract. Same idea as PluginInstallPayload
+ * above: the job's actual payload is a superset of what other code needs.
+ */
+interface BulkManagePayload extends BulkJobPayload {
+  actor: string;
+}
+
+export type InstallKind = "plugin" | "theme";
+
+/**
+ * Pure dispatch decision for the plugin_install handler: which installer to
+ * run and which storage bucket an uploaded package's signed URL comes from.
+ * Extracted so the theme/plugin branch — and its backward-compatible
+ * "no target field at all" default to plugin — has direct test coverage
+ * without standing up the handler's full Supabase + MCP scaffolding.
+ */
+export function resolveInstallKind(target: PluginInstallPayload["target"]): {
+  kind: InstallKind;
+  bucket: "plugins" | "themes";
+} {
+  const kind: InstallKind = target === "theme" ? "theme" : "plugin";
+  return { kind, bucket: kind === "theme" ? "themes" : "plugins" };
 }
 
 export function buildJobHandlers(db: SupabaseClient): JobHandlers {
@@ -52,19 +92,25 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("plugin_install requires site_id");
       const p = job.payload as unknown as PluginInstallPayload;
       if (!p?.source || typeof p.actor !== "string") throw new Error("plugin_install payload malformed");
+      const { kind, bucket } = resolveInstallKind(p.target);
+      const isTheme = kind === "theme";
       let source: InstallSource;
       if (p.source.kind === "upload") {
-        const { data, error } = await db.storage.from("plugins").createSignedUrl(p.source.path, 3600);
+        const { data, error } = await db.storage.from(bucket).createSignedUrl(p.source.path, 3600);
         if (error || !data?.signedUrl) {
-          throw new Error(`Could not sign uploaded plugin URL: ${error?.message ?? "unknown"}`);
+          throw new Error(`Could not sign uploaded ${isTheme ? "theme" : "plugin"} URL: ${error?.message ?? "unknown"}`);
         }
         source = { kind: "url", url: data.signedUrl };
       } else {
         source = p.source;
       }
-      const result = await installPlugin(
-        { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
-      );
+      const result = isTheme
+        ? await installTheme(
+            { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
+          )
+        : await installPlugin(
+            { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, source, Boolean(p.activate),
+          );
       if (!result.ok) throw new Error(result.error ?? "Install failed");
     },
     geogrid_run: async ({ job }) => {
@@ -96,6 +142,38 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         Number(p.period_days) > 0 ? Number(p.period_days) : 30,
         true,
       );
+    },
+    bulk_manage: async ({ job }) => {
+      if (!job.site_id) throw new Error("bulk_manage requires a site_id");
+      const p = job.payload as unknown as BulkManagePayload;
+      if (!p?.kind || !p?.target || !p?.id || typeof p.actor !== "string") {
+        throw new Error("bulk_manage payload malformed");
+      }
+      const action = toManageAction(p.kind, p.target, p.id);
+      const result = await manageSite(
+        { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, action,
+      );
+      // Throwing puts the job on the retry ladder; a failing item must never
+      // abort its siblings, which are separate jobs.
+      if (!result.ok) {
+        // A slow bulk run can be killed by the platform's function time
+        // limit mid-item. The job is left `running`, gets re-claimed ~15
+        // minutes later by the retry ladder, and re-runs — but the delete
+        // already succeeded, so the item is already gone. The PHP in
+        // services/manage/service.ts then returns exactly "Plugin is not
+        // installed" / "Theme is not installed" for delete_plugin/
+        // delete_theme. Without this, that retry turns a *successful*
+        // delete into a reported failure, and the operator concludes the
+        // plugin/theme is still on the site when it is not. Scoped to
+        // delete kinds only: for every other kind, "not installed" is a
+        // genuine failure (e.g. the item was deleted out from under an
+        // update/activate job) and must still throw.
+        const deletedAlready = p.kind === "delete" && (
+          (p.target === "plugin" && result.error === "Plugin is not installed") ||
+          (p.target === "theme" && result.error === "Theme is not installed")
+        );
+        if (!deletedAlready) throw new Error(result.error ?? "Bulk action failed");
+      }
     },
   };
 }

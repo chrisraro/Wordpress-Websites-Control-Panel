@@ -36,6 +36,7 @@ foreach (wp_get_themes() as $stylesheet => $t) {
   $upd = (is_object($tu) && isset($tu->response[$stylesheet])) ? $tu->response[$stylesheet] : null;
   $themes[] = array(
     'name' => $stylesheet,
+    'template' => $t->get_template(),
     'title' => $t->get('Name'),
     'version' => $t->get('Version'),
     'status' => $stylesheet === $current ? 'active' : 'inactive',
@@ -54,6 +55,7 @@ foreach (get_users(array('role' => 'administrator', 'fields' => array('ID', 'use
 return json_encode(array(
   'wp_version' => get_bloginfo('version'),
   'php_version' => PHP_VERSION,
+  'admin_url' => admin_url(),
   'core_update' => $core,
   'plugins' => $plugins,
   'themes' => $themes,

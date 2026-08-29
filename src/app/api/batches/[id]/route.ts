@@ -20,14 +20,30 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     supabaseSitesRepo(db).listSites(),
   ]);
   const names = new Map(sites.map((s) => [s.id, s.name]));
-  const rows = jobs.map((j) => ({
-    id: j.id,
-    site_id: j.site_id,
-    site_name: j.site_id ? names.get(j.site_id) ?? j.site_id : "—",
-    status: j.status,
-    attempts: j.attempts,
-    last_error: j.last_error,
-  }));
+  const rows = jobs.map((j) => {
+    const siteName = j.site_id ? names.get(j.site_id) ?? j.site_id : "—";
+    const payload = j.payload as { label?: unknown; kind?: unknown; target?: unknown; activate?: unknown };
+    const payloadLabel = payload.label;
+    return {
+      id: j.id,
+      site_id: j.site_id,
+      site_name: siteName,
+      // Bulk batches are one site, many items; install batches are one item,
+      // many sites. The payload label distinguishes them.
+      label: typeof payloadLabel === "string" && payloadLabel ? payloadLabel : siteName,
+      status: j.status,
+      attempts: j.attempts,
+      last_error: j.last_error,
+      // `type` ("plugin_install" vs "bulk_manage") plus this non-secret bulk
+      // metadata is what lets the batch page describe what is actually
+      // happening instead of hardcoding "install" for every batch shape —
+      // see src/app/(dashboard)/marketplace/batches/[id]/poller.tsx.
+      type: j.type,
+      kind: typeof payload.kind === "string" ? payload.kind : undefined,
+      target: typeof payload.target === "string" ? payload.target : undefined,
+      activate: typeof payload.activate === "boolean" ? payload.activate : undefined,
+    };
+  });
   const done = rows.length > 0 && rows.every((r) => r.status === "done" || r.status === "failed");
   return NextResponse.json({ jobs: rows, done });
 }

@@ -8,8 +8,9 @@ import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/co
 import { IconSpinner } from "@/components/ui/icons";
 
 interface BatchJob {
-  id: string; site_id: string | null; site_name: string;
+  id: string; site_id: string | null; site_name: string; label: string;
   status: string; attempts: number; last_error: string | null;
+  type: string; kind?: string; target?: string; activate?: boolean;
 }
 
 const STATUS_TONE: Record<string, StatusTone> = {
@@ -19,6 +20,34 @@ const STATUS_TONE: Record<string, StatusTone> = {
   done: "good",
   failed: "bad",
 };
+
+const BULK_VERB: Record<string, string> = {
+  update: "Updating",
+  activate: "Activating",
+  deactivate: "Deactivating",
+  delete: "Deleting",
+};
+
+/**
+ * This page renders two different batch shapes: `plugin_install` jobs fan one
+ * install out across many sites, `bulk_manage` jobs fan many bulk actions
+ * (update/activate/deactivate/delete) out across one site's items. Neither
+ * the heading nor the completion toast may assert "install" for a batch that
+ * deleted things — that inaccuracy is exactly what this function exists to
+ * prevent. Every job in one batch shares the same kind/target, so the first
+ * row is representative of the whole batch.
+ */
+function describeBatch(jobs: BatchJob[]): string {
+  const first = jobs[0];
+  if (!first) return "Batch";
+  const noun = first.target === "theme" ? "theme(s)" : "plugin(s)";
+  if (first.type === "bulk_manage") {
+    const verb = BULK_VERB[first.kind ?? ""] ?? "Running";
+    return `${verb} ${noun}`;
+  }
+  // plugin_install (including legacy jobs queued before `target` existed).
+  return first.activate ? `Installing and activating ${noun}` : `Installing ${noun}`;
+}
 
 export function BatchPoller({ batchId }: { batchId: string }) {
   const [jobs, setJobs] = useState<BatchJob[] | null>(null);
@@ -67,7 +96,10 @@ export function BatchPoller({ batchId }: { batchId: string }) {
             title: "Batch finished with failures",
             description: `${ok} succeeded, ${failed} failed. Reasons are in the table.`,
           }
-        : { tone: "success", title: "Batch complete", description: `Installed on ${ok} site(s).` },
+        // Neutral on purpose: this batch could be an install, an update, or a
+        // delete, and the toast must be correct for all of them — see
+        // describeBatch() above.
+        : { tone: "success", title: "Batch complete", description: `${ok} of ${jobs.length} item(s) finished.` },
     );
   }, [done, jobs, toast]);
 
@@ -101,6 +133,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
+          <p className="text-caption tracking-normal text-mid-gray">{describeBatch(jobs)}</p>
           <p className="text-body text-ink" aria-live="polite">
             {done
               ? `Finished — ${doneCount} succeeded, ${failedCount} failed.`
@@ -137,9 +170,10 @@ export function BatchPoller({ batchId }: { batchId: string }) {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-body">
+          <table className="w-full min-w-[720px] text-body">
             <thead>
               <tr className={tableHeadClass}>
+                <th className="px-5 py-3 font-medium">Item</th>
                 <th className="px-5 py-3 font-medium">Site</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Attempts</th>
@@ -149,7 +183,8 @@ export function BatchPoller({ batchId }: { batchId: string }) {
             <tbody>
               {jobs.map((j) => (
                 <tr key={j.id} className={tableRowClass}>
-                  <td className={`${tableCellClass} font-medium text-ink`}>{j.site_name}</td>
+                  <td className={`${tableCellClass} font-medium text-ink`}>{j.label}</td>
+                  <td className={`${tableCellClass} text-mid-gray`}>{j.site_name}</td>
                   <td className={tableCellClass}>
                     <StatusBadge tone={STATUS_TONE[j.status] ?? "idle"}>
                       {j.status.replace("_", " ")}

@@ -10,7 +10,8 @@ import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, StatusBadge, type StatusTone } from "@/components/ui/primitives";
-import { cardClass } from "@/components/ui/styles";
+import { buttonClass, cardClass } from "@/components/ui/styles";
+import { CopyValueButton } from "@/components/ui/copy-button";
 import { IconChevronRight, IconExternal, IconRefresh } from "@/components/ui/icons";
 import type { SiteStatus } from "@/services/sites/types";
 
@@ -73,22 +74,40 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-start gap-2">
-          <ManageForm
-            action={refresh}
-            label="Refresh inventory"
-            pendingLabel="Refreshing…"
-            success="Inventory refreshed"
-            icon={<IconRefresh size={16} />}
-            showInlineError={false}
-          />
-          <ManageForm
-            action={testConnection}
-            label="Test connection"
-            pendingLabel="Testing…"
-            success="Connection is healthy"
-            showInlineError={false}
-          />
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap items-start gap-2">
+            <ManageForm
+              action={refresh}
+              label="Refresh inventory"
+              pendingLabel="Refreshing…"
+              success="Inventory refreshed"
+              icon={<IconRefresh size={16} />}
+              showInlineError={false}
+            />
+            <ManageForm
+              action={testConnection}
+              label="Test connection"
+              pendingLabel="Testing…"
+              success="Connection is healthy"
+              showInlineError={false}
+            />
+            <a
+              href={inv?.admin_url ?? `${site.url.replace(/\/+$/, "")}/wp-admin/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClass("outline")}
+            >
+              <IconExternal size={16} />
+              Open wp-admin
+            </a>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <CopyValueButton value={site.wp_username} label="Copy WP username" />
+          </div>
+          <p className="max-w-72 text-right text-caption tracking-normal text-mid-gray">
+            Application passwords can’t sign in to wp-admin — sign in with your usual WordPress
+            password once there.
+          </p>
         </div>
       </div>
 
