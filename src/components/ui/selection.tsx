@@ -6,7 +6,7 @@
  * components below are pure presentation over it, so a table only wires up
  * `onChange` handlers and never touches selection state directly.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { buttonClass } from "./styles";
 
 export function useSelection(allIds: string[]) {
@@ -21,27 +21,59 @@ export function useSelection(allIds: string[]) {
     });
   }, [allIds]);
 
-  return useMemo(() => {
-    const isSelected = (id: string) => selected.has(id);
-    const toggle = (id: string) =>
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    const toggleAll = () =>
-      setSelected((prev) => (prev.size === allIds.length ? new Set() : new Set(allIds)));
-    return {
-      selected: [...selected],
-      isSelected,
-      toggle,
-      toggleAll,
-      clear: () => setSelected(new Set()),
-      allChecked: allIds.length > 0 && selected.size === allIds.length,
-      someChecked: selected.size > 0 && selected.size < allIds.length,
-    };
-  }, [selected, allIds]);
+  // Callers pass `allIds` as an inline expression (e.g. `plugins.map(p => p.file)`),
+  // so it is a brand-new array identity on every parent render even when its
+  // contents haven't changed. Track the latest value in a ref -- updated here
+  // during render, not in an effect, so it's current the instant a handler
+  // reads it -- so `toggleAll` doesn't need `allIds` in a dependency array.
+  // That's what keeps toggle/toggleAll/clear stable across parent re-renders,
+  // which matters because row components are memoised against them.
+  const allIdsRef = useRef(allIds);
+  allIdsRef.current = allIds;
+
+  const toggle = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelected((prev) => {
+      const ids = allIdsRef.current;
+      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+      return allSelected ? new Set() : new Set(ids);
+    });
+  }, []);
+
+  const clear = useCallback(() => setSelected(new Set()), []);
+
+  const isSelected = (id: string) => selected.has(id);
+
+  // Checked by membership, not by comparing sizes. `allIds` is a fresh array
+  // every parent render, but `selected` is only pruned of vanished ids by the
+  // effect above, which runs after paint. That leaves a reachable render
+  // where `selected` still holds the OLD ids while `allIds` already holds a
+  // NEW set of the same length -- a same-size mismatch. Comparing set sizes
+  // would misreport allChecked/someChecked in that window, and worse, would
+  // make a "select all" click take the old `prev.size === allIds.length`
+  // branch and CLEAR the selection instead of selecting the visible rows.
+  // Checking membership directly is correct in that window too, since it
+  // never depends on the prune effect having already run.
+  const allChecked = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const someChecked = !allChecked && allIds.some((id) => selected.has(id));
+
+  return {
+    selected: [...selected],
+    isSelected,
+    toggle,
+    toggleAll,
+    clear,
+    allChecked,
+    someChecked,
+  };
 }
 
 export function SelectAllCheckbox({
