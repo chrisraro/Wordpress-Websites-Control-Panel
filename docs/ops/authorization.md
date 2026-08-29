@@ -2,9 +2,12 @@
 
 Spec: `docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md`.
 Schema: `supabase/migrations/0006_rbac_schema.sql`, `0007_rbac_functions.sql`,
-`0008_rls_scoped.sql`. All three are applied to the live database.
-`0009_rbac_write_scope.sql` corrects a gap in `0008`'s write policies (see
-below) and is not yet applied.
+`0008_rls_scoped.sql`, `0009_rbac_write_scope.sql` and
+`0010_vuln_write_permission.sql`. All five are applied to the live database.
+`0009` corrects a gap in `0008`'s write policies (see below); `0010` fixes one
+permission mapping in `0009` — `site_vulnerabilities` writes require
+`security.run`, not `wp_toolkit.manage`, because the security scan is the only
+thing that writes them.
 
 ## The four roles and the default matrix
 

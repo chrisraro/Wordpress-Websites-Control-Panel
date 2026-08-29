@@ -94,7 +94,10 @@ function record(name: string, pass: boolean, detail?: string): void {
 // one of those two signals before treating an error as a pass.
 function isRlsRefusal(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
-  if (error.code === "42501") return true;
+  // 42501 alone is not enough: Postgres returns it for "permission denied
+  // for table" from a missing GRANT too, which is not a policy refusal.
+  // Require the message to confirm row-level security actually fired.
+  if (error.code === "42501") return /row-level security/i.test(error.message ?? "");
   return typeof error.message === "string" && /row-level security/i.test(error.message);
 }
 
