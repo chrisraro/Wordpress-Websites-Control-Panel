@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  computeRetryDelayMs, enqueueJob, processJobs, recoverStaleAwaiting, NonRetryableError,
+  allSettled, computeRetryDelayMs, enqueueJob, isOpenJobStatus, processJobs,
+  recoverStaleAwaiting, NonRetryableError,
 } from "@/services/jobs/service";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { JobRow, JobType } from "@/services/jobs/types";
@@ -195,5 +196,30 @@ describe("recoverStaleAwaiting", () => {
     const res = await recoverStaleAwaiting(repo, 0);
     expect(res).toEqual({ retried: 0, failed: 1 });
     expect(rows[0].status).toBe("failed");
+  });
+});
+
+describe("isOpenJobStatus / allSettled", () => {
+  it("treats pending, running and awaiting_callback as open", () => {
+    expect(isOpenJobStatus("pending")).toBe(true);
+    expect(isOpenJobStatus("running")).toBe(true);
+    expect(isOpenJobStatus("awaiting_callback")).toBe(true);
+  });
+
+  it("treats done and failed as settled, not open", () => {
+    expect(isOpenJobStatus("done")).toBe(false);
+    expect(isOpenJobStatus("failed")).toBe(false);
+  });
+
+  it("is not settled while any job in the list is still open", () => {
+    expect(allSettled([{ status: "done" }, { status: "awaiting_callback" }])).toBe(false);
+  });
+
+  it("is settled once every job has reached a terminal status", () => {
+    expect(allSettled([{ status: "done" }, { status: "failed" }])).toBe(true);
+  });
+
+  it("is vacuously settled for an empty list — nothing left to poll for", () => {
+    expect(allSettled([])).toBe(true);
   });
 });

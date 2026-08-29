@@ -1,6 +1,28 @@
 import { randomUUID } from "node:crypto";
 import type { JobsRepo } from "./repo";
-import type { JobRow, JobType } from "./types";
+import type { JobRow, JobStatus, JobType } from "./types";
+
+/**
+ * Every non-terminal job status. Shared by the GeoGrid page's "in progress"
+ * banner (src/app/(dashboard)/sites/[id]/geogrid/page.tsx) and the run poller's
+ * API route (src/app/api/sites/[id]/geogrid-runs/route.ts) so "is anything
+ * open" can never be answered two different ways by two different call sites.
+ */
+const OPEN_JOB_STATUSES: ReadonlySet<JobStatus> = new Set(["pending", "running", "awaiting_callback"]);
+
+export function isOpenJobStatus(status: JobStatus): boolean {
+  return OPEN_JOB_STATUSES.has(status);
+}
+
+/**
+ * True once every job in the list has reached a terminal status (done or
+ * failed). Vacuously true for an empty list: no jobs at all means nothing is
+ * left to watch, which is the same "stop polling" outcome as everything
+ * having settled.
+ */
+export function allSettled(jobs: { status: JobStatus }[]): boolean {
+  return jobs.every((j) => !isOpenJobStatus(j.status));
+}
 
 export interface JobContext { job: JobRow }
 export type JobHandler = (ctx: JobContext) => Promise<void | { awaitingCallback: true }>;

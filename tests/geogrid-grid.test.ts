@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { buildGrid, gridBounds } from "@/services/geogrid/grid";
-import { averageRank, coverage, measuredCount, type RankPoint } from "@/services/geogrid/types";
+import {
+  averageRank, coverage, measuredCount, resolveRunPreview,
+  type GeoGridSnapshot, type RankPoint,
+} from "@/services/geogrid/types";
 
 describe("buildGrid", () => {
   it("builds N*N points with the centre exactly in the middle", () => {
@@ -135,5 +138,46 @@ describe("measuredCount / coverage with unmeasured points", () => {
     ];
     expect(measuredCount(legacy)).toBe(legacy.length);
     expect(coverage(legacy)).toBe(50);
+  });
+});
+
+describe("resolveRunPreview", () => {
+  // history is newest-first, exactly as GeoGridRepo.historyForKeyword returns it.
+  const history: GeoGridSnapshot[] = [
+    { id: "snap-latest", config_id: "cfg-1", keyword: "coffee shop", run_at: "2026-03-03T00:00:00Z", points: [] },
+    { id: "snap-mid", config_id: "cfg-1", keyword: "coffee shop", run_at: "2026-03-02T00:00:00Z", points: [] },
+    { id: "snap-oldest", config_id: "cfg-1", keyword: "coffee shop", run_at: "2026-03-01T00:00:00Z", points: [] },
+  ];
+
+  it("defaults to the latest run when no id is requested", () => {
+    const res = resolveRunPreview(history, undefined);
+    expect(res).toEqual({ snapshot: history[0], index: 0, isPast: false });
+  });
+
+  it("resolves a requested id to its run and index", () => {
+    const res = resolveRunPreview(history, "snap-mid");
+    expect(res).toEqual({ snapshot: history[1], index: 1, isPast: true });
+  });
+
+  it("does not flag the latest run as past even when its id is requested explicitly", () => {
+    const res = resolveRunPreview(history, "snap-latest");
+    expect(res).toEqual({ snapshot: history[0], index: 0, isPast: false });
+  });
+
+  it("flags the oldest loaded run as past too", () => {
+    const res = resolveRunPreview(history, "snap-oldest");
+    expect(res).toEqual({ snapshot: history[2], index: 2, isPast: true });
+  });
+
+  it("falls back to the latest run for an id that isn't in the loaded history", () => {
+    // Covers both a stale bookmark for a run that scrolled out of the kept
+    // window and an id copied from a different keyword's history.
+    const res = resolveRunPreview(history, "not-a-real-snapshot-id");
+    expect(res).toEqual({ snapshot: history[0], index: 0, isPast: false });
+  });
+
+  it("returns no snapshot and index -1 for empty history", () => {
+    expect(resolveRunPreview([], undefined)).toEqual({ snapshot: undefined, index: -1, isPast: false });
+    expect(resolveRunPreview([], "anything")).toEqual({ snapshot: undefined, index: -1, isPast: false });
   });
 });
