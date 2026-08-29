@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyN8nRequest } from "@/lib/n8n-auth";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
+import { computeRetryDelayMs } from "@/services/jobs/service";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { completeGeoGridRun } from "@/services/geogrid/run";
 import { buildGrid } from "@/services/geogrid/grid";
@@ -43,8 +44,19 @@ export async function POST(req: Request) {
   }
 
   if (typeof body.error === "string" && body.error) {
-    await jobs.markFailed(runId, `n8n reported: ${body.error}`);
-    return NextResponse.json({ ok: true, recorded: "error" });
+    // n8n posts this only when no point at all could be measured (e.g. a
+    // transient Serper timeout hit the whole run). That is retryable the same
+    // way any other job failure is: back off on the normal ladder
+    // (60s, then 300s) and only give up permanently once it's exhausted —
+    // mirroring processJobs' own catch block in services/jobs/service.ts.
+    const msg = `n8n reported: ${body.error}`;
+    const delay = computeRetryDelayMs(job.attempts);
+    if (delay === null) {
+      await jobs.markFailed(runId, msg);
+      return NextResponse.json({ ok: true, recorded: "error" });
+    }
+    await jobs.retry(runId, msg, new Date(Date.now() + delay).toISOString());
+    return NextResponse.json({ ok: true, recorded: "retry" });
   }
 
   const payload = job.payload as { config_id?: string; keyword?: string };
@@ -63,14 +75,27 @@ export async function POST(req: Request) {
   // Coordinates come from our own config, not from the callback: n8n only
   // reports a rank per point index, so a hostile body cannot move the grid.
   const grid = buildGrid(config.center_lat, config.center_lng, config.grid_size, config.spacing_m);
-  const byIdx = new Map<number, number | null>();
+  // Wire contract: {run_id, ranks: [{idx, rank, measured}]}. `measured` is
+  // optional and defaults to true — the current n8n workflow does not send it
+  // yet, and every entry it does post is a real lookup. `measured: false`
+  // means that point's lookup failed and its rank must be ignored even if one
+  // was sent alongside it (a partial/stale value from n8n is not data).
+  const byIdx = new Map<number, { rank: number | null; measured: boolean }>();
   for (const entry of Array.isArray(body.ranks) ? body.ranks : []) {
-    const e = entry as { idx?: unknown; rank?: unknown };
+    const e = entry as { idx?: unknown; rank?: unknown; measured?: unknown };
     if (typeof e.idx !== "number") continue;
-    const rank = typeof e.rank === "number" && e.rank >= 1 && e.rank <= 20 ? Math.round(e.rank) : null;
-    byIdx.set(e.idx, rank);
+    const measured = typeof e.measured === "boolean" ? e.measured : true;
+    const rank = measured && typeof e.rank === "number" && e.rank >= 1 && e.rank <= 20
+      ? Math.round(e.rank)
+      : null;
+    byIdx.set(e.idx, { rank, measured });
   }
-  const ranks: RankPoint[] = grid.map((p) => ({ ...p, rank: byIdx.get(p.idx) ?? null }));
+  // A grid point missing entirely from ranks[] is a point nobody reported —
+  // that is "unmeasured", not "confirmed outside the top 20".
+  const ranks: RankPoint[] = grid.map((p) => {
+    const entry = byIdx.get(p.idx);
+    return entry ? { ...p, rank: entry.rank, measured: entry.measured } : { ...p, rank: null, measured: false };
+  });
 
   await completeGeoGridRun(geogrid, payload.config_id, payload.keyword, ranks);
   await jobs.markDone(runId);
