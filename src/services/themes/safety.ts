@@ -45,8 +45,15 @@ export function canActivateTheme(themes: ThemeInfo[], slug: string): ThemeVerdic
   const target = themes.find((t) => t.name === slug);
   if (!target) return refuse("That theme is not installed on this site.");
 
-  const isChild = typeof target.template === "string" && target.template !== ""
-    && target.template !== target.name;
+  // Snapshots taken before parentage was collected cannot be reasoned about.
+  // Fail closed: one refresh is cheaper than activating an orphaned child.
+  // Only the target's own parentage matters here — unlike the delete gate,
+  // activation never needs to reason about other themes' template fields.
+  if (typeof target.template !== "string" || target.template === "") {
+    return refuse("Refresh the inventory first — this snapshot predates parent-theme tracking.");
+  }
+
+  const isChild = target.template !== target.name;
   if (isChild && !themes.some((t) => t.name === target.template)) {
     return refuse(`Its parent theme (${target.template}) is not installed.`);
   }

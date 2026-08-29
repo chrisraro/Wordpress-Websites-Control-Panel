@@ -84,9 +84,22 @@ describe("canActivateTheme", () => {
     expect(canActivateTheme(CHILD_SETUP, "acad1-child")).toEqual({ allowed: true });
   });
 
-  it("refuses the already-active theme", () => {
+  it("allows the already-active theme and refuses a missing one", () => {
     expect(canActivateTheme(CHILD_SETUP, "acad1-child").allowed).toBe(true);
     expect(canActivateTheme(CHILD_SETUP, "missing").allowed).toBe(false);
+  });
+
+  it("fails closed when the target's parentage is unknown (pre-upgrade snapshot)", () => {
+    // Snapshots taken before Task 1 have no `template` on the target theme.
+    // Allowing activation here could turn out to activate an orphaned child
+    // theme and break the site, so refuse until refresh.
+    const legacy = [
+      { name: "a", version: "1", status: "active", update: "none" },
+      { name: "b", version: "1", status: "inactive", update: "none" },
+    ] as unknown as ThemeInfo[];
+    const v = canActivateTheme(legacy, "b");
+    expect(v.allowed).toBe(false);
+    expect(v.allowed === false && v.reason).toMatch(/refresh/i);
   });
 });
 
