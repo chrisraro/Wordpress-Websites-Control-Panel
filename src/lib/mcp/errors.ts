@@ -1,6 +1,15 @@
+// Constructors below assign fields in the body rather than via TypeScript
+// parameter-property shorthand (`constructor(public x: T)`): parameter
+// properties require a real transform, not mere type erasure, so they are
+// rejected under `--experimental-strip-types` (and TypeScript's own
+// `erasableSyntaxOnly`). scripts/import-novamira-sites.ts imports this
+// module transitively via src/services/sites/service.ts and runs under
+// `node --experimental-strip-types`, so this file must stay erasable.
 export class McpError extends Error {
-  constructor(message: string, public cause?: unknown) {
+  cause?: unknown;
+  constructor(message: string, cause?: unknown) {
     super(message);
+    this.cause = cause;
     this.name = new.target.name;
   }
 }
@@ -9,8 +18,10 @@ export class McpConnectionError extends McpError {}
 export class McpAuthError extends McpError {}
 
 export class McpAbilityMissingError extends McpError {
-  constructor(public ability: string) {
+  ability: string;
+  constructor(ability: string) {
     super(`Site does not support ability: ${ability}`);
+    this.ability = ability;
   }
 }
 
