@@ -5,6 +5,7 @@ import { enqueueBatch } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { SLUG_RE } from "@/services/manage/service";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 
 export async function createInstallBatchAction(input: {
   source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
@@ -19,9 +20,17 @@ export async function createInstallBatchAction(input: {
   target?: "plugin" | "theme";
 }): Promise<{ ok: boolean; batchId?: string; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
   if (!Array.isArray(input.siteIds) || input.siteIds.length === 0) {
     return { ok: false, error: "Select at least one site" };
   }
+  // Every target site must be checked — a partial check here is a
+  // cross-tenant hole, since a batch that installs on N sites should not
+  // proceed on any of them if the caller lacks access to even one.
+  const siteChecks = await Promise.all(input.siteIds.map((id) => checkSiteAccess(id)));
+  const firstDenial = siteChecks.find(isDenied);
+  if (firstDenial) return firstDenial;
   if (input.source.kind === "wporg" && !SLUG_RE.test(input.source.slug)) {
     return { ok: false, error: "Invalid slug" };
   }
@@ -51,6 +60,12 @@ export async function prepareUploadAction(
   filename: string,
 ): Promise<{ ok: boolean; path?: string; token?: string; error?: string }> {
   await requireUser();
+  // No siteId travels with this call — it only stages a signed upload URL in
+  // a shared bucket, so there is no per-site access to check here. The
+  // site-scoped check happens where the resulting path is actually used
+  // (createInstallBatchAction).
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
   const safe = filename.replace(/[^A-Za-z0-9._-]/g, "_");
   if (!/\.zip$/i.test(safe)) return { ok: false, error: "Only .zip files are supported" };
   const path = `uploads/${randomUUID()}/${safe}`;

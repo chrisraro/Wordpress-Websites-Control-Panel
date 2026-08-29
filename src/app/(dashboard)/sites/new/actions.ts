@@ -6,6 +6,7 @@ import { addSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, isDenied } from "@/lib/authz/server";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -17,6 +18,8 @@ const schema = z.object({
 
 export async function createSite(_prev: { error?: string } | undefined, formData: FormData) {
   const user = await requireUser();
+  const gate = await checkPermission("sites.manage");
+  if (isDenied(gate)) return gate;
   const parsed = schema.safeParse({
     name: formData.get("name"),
     url: formData.get("url"),

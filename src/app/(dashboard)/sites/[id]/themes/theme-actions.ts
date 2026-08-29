@@ -10,6 +10,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, getViewer, isDenied } from "@/lib/authz/server";
 
 const UPLOAD_PATH_RE = /^uploads\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+\.zip$/i;
 
@@ -26,6 +27,10 @@ export async function installThemeAction(
   formData?: FormData,
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
   if (!formData) return { ok: false, error: "Form data missing — please resubmit" };
 
   const kind = String(formData.get("source") ?? "");
@@ -70,6 +75,12 @@ export async function prepareThemeUploadAction(
   filename: string,
 ): Promise<{ ok: boolean; path?: string; token?: string; error?: string }> {
   await requireUser();
+  // No siteId travels with this call — it only stages a signed upload URL
+  // in a shared bucket, so there is no per-site access to check here. The
+  // site-scoped check happens where the resulting path is actually used
+  // (installThemeAction).
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
   const safe = filename.replace(/[^A-Za-z0-9._-]/g, "_");
   if (!/\.zip$/i.test(safe)) return { ok: false, error: "Only .zip files are supported" };
   const path = `uploads/${randomUUID()}/${safe}`;
@@ -86,7 +97,13 @@ export async function prepareThemeUploadAction(
 export async function searchWpThemesAction(
   q: string,
 ): Promise<{ ok: boolean; result?: WpOrgThemeResult; error?: string }> {
-  await requireUser();
+  // This proxies a public wordpress.org API and leaks nothing site-specific,
+  // but an unauthenticated endpoint that makes outbound requests is still a
+  // small abuse surface — so it only requires a signed-in viewer, no
+  // permission or site access. getViewer() (not requireUser/requireViewer)
+  // because a server action must return an inline denial, not notFound().
+  const viewer = await getViewer();
+  if (!viewer) return { ok: false, error: "You do not have permission to do that." };
   try {
     const result = q.trim() ? await searchThemes(q.trim()) : await popularThemes();
     return { ok: true, result };
