@@ -345,8 +345,15 @@ export function canActivateTheme(themes: ThemeInfo[], slug: string): ThemeVerdic
   const target = themes.find((t) => t.name === slug);
   if (!target) return refuse("That theme is not installed on this site.");
 
-  const isChild = typeof target.template === "string" && target.template !== ""
-    && target.template !== target.name;
+  // Fail closed on unknown parentage, exactly as canDeleteTheme does. Without
+  // this, a pre-Phase-8 snapshot makes isChild false and a child theme whose
+  // parent is missing activates into a broken site. Only the target's own
+  // field matters here: the parent lookup keys off other themes' `name`.
+  if (typeof target.template !== "string" || target.template === "") {
+    return refuse("Refresh the inventory first — this snapshot predates parent-theme tracking.");
+  }
+
+  const isChild = target.template !== target.name;
   if (isChild && !themes.some((t) => t.name === target.template)) {
     return refuse(`Its parent theme (${target.template}) is not installed.`);
   }
