@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  computeRetryDelayMs, enqueueJob, processJobs, recoverStaleAwaiting,
+  computeRetryDelayMs, enqueueJob, processJobs, recoverStaleAwaiting, NonRetryableError,
 } from "@/services/jobs/service";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { JobRow, JobType } from "@/services/jobs/types";
@@ -127,6 +127,29 @@ describe("processJobs", () => {
     expect(res.retried).toBe(1);
     expect(rows[0].status).toBe("pending");
     expect(rows[0].dismissed_at).toBeNull();
+  });
+
+  it("fails a NonRetryableError immediately, without consuming a ladder attempt", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "vuln_feed_refresh", null);
+    const rateLimited = {
+      vuln_feed_refresh: async () => { throw new NonRetryableError("Wordfence feed rate limited: HTTP 429"); },
+    };
+    const res = await processJobs(repo, rateLimited);
+    expect(res).toMatchObject({ claimed: 1, done: 0, failed: 1, retried: 0 });
+    expect(rows[0].status).toBe("failed");
+    expect(rows[0].last_error).toBe("Wordfence feed rate limited: HTTP 429");
+    // Only the one claim attempt was consumed — the ladder was never invoked.
+    expect(rows[0].attempts).toBe(1);
+  });
+
+  it("still retries an ordinary error rather than treating it as non-retryable", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "vuln_feed_refresh", null);
+    const ordinary = { vuln_feed_refresh: async () => { throw new Error("HTTP 500"); } };
+    const res = await processJobs(repo, ordinary);
+    expect(res).toMatchObject({ claimed: 1, done: 0, failed: 0, retried: 1 });
+    expect(rows[0].status).toBe("pending");
   });
 
   it("fails a job with no registered handler permanently", async () => {

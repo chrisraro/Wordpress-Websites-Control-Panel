@@ -6,6 +6,27 @@ export interface JobContext { job: JobRow }
 export type JobHandler = (ctx: JobContext) => Promise<void | { awaitingCallback: true }>;
 export type JobHandlers = Partial<Record<JobType, JobHandler>>;
 
+/**
+ * Thrown by a job handler to signal that the failure is not worth retrying —
+ * e.g. an upstream rate limit whose reset window is measured in hours, far
+ * longer than the retry ladder's ~6 minutes of total backoff. processJobs
+ * sends this straight to `markFailed` without consuming a ladder attempt, so
+ * quota isn't burned on retries that cannot succeed and the next legitimate
+ * attempt (tomorrow's run, or after the window clears) still has its full
+ * three attempts available.
+ *
+ * Keep this narrow and explicit: every job type flows through processJobs,
+ * so an error must opt in by name to skip the ladder. Anything else — a
+ * plain Error, a thrown string, whatever a handler happens to throw — keeps
+ * today's retry-then-fail behaviour unchanged.
+ */
+export class NonRetryableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "NonRetryableError";
+  }
+}
+
 export function computeRetryDelayMs(attemptsAfterClaim: number): number | null {
   if (attemptsAfterClaim <= 1) return 60_000;
   if (attemptsAfterClaim === 2) return 300_000;
@@ -65,6 +86,11 @@ export async function processJobs(
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (e instanceof NonRetryableError) {
+        await repo.markFailed(job.id, msg);
+        result.failed++;
+        continue;
+      }
       const delay = computeRetryDelayMs(job.attempts);
       if (delay === null) {
         await repo.markFailed(job.id, msg);
