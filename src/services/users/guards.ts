@@ -1,5 +1,5 @@
 import type { AppPermission, AppRole, SiteAccessLevel } from "@/lib/authz/types";
-import { ALLOWED, refuse, type GuardVerdict, type ManagedUser } from "@/services/users/types";
+import { ALLOWED, refuse, type GuardVerdict, type ManagedUser, type SiteGrant } from "@/services/users/types";
 
 /**
  * These refuse operations that would leave the panel unadministrable. Recovery
@@ -24,8 +24,26 @@ function isSoleAdmin(users: ManagedUser[], target: ManagedUser): boolean {
   return distinctAdminIds.size <= 1;
 }
 
+/**
+ * `targetGrants` must be the target's `user_site_access` rows, read fresh at
+ * the moment of the write (same discipline `canGrantSiteAccess` requires of
+ * its caller) — never a snapshot a page rendered earlier. Defaults to `[]`
+ * so every existing call site (and every transition other than "to client")
+ * is unaffected.
+ *
+ * Finding 4 of the final whole-branch review: a staff account (`admin`,
+ * `developer`, `content_writer`) can legitimately hold a `manage`-level
+ * grant — it is inert for them, since staff already reach every site
+ * through `sites.view_all` — but demoting that same account to `client`
+ * would hand an external customer exactly the live-PHP-execution hole
+ * `canGrantSiteAccess` refuses at grant time, without ever going through
+ * `grantSiteAccess` at all. Refusing here, rather than silently downgrading
+ * the grants to `read`, matches this file's existing convention: a lockout
+ * guard never quietly changes something else as a side effect of the
+ * operation it is asked to perform.
+ */
 export function canChangeRole(
-  users: ManagedUser[], targetId: string, next: AppRole,
+  users: ManagedUser[], targetId: string, next: AppRole, targetGrants: SiteGrant[] = [],
 ): GuardVerdict {
   const target = users.find((u) => u.id === targetId);
   if (!target) return refuse("That account no longer exists.");
@@ -34,6 +52,21 @@ export function canChangeRole(
   if (isSoleAdmin(users, target)) {
     return refuse("This is the last administrator. Promote someone else first.");
   }
+
+  if (next === "client") {
+    const manageSiteIds = targetGrants
+      .filter((g) => g.accessLevel === "manage")
+      .map((g) => g.siteId);
+    if (manageSiteIds.length > 0) {
+      return refuse(
+        `This account holds manage-level access to ${manageSiteIds.length === 1 ? "a site" : `${manageSiteIds.length} sites`} ` +
+          `(${manageSiteIds.join(", ")}). A client with manage-level access could trigger a live ` +
+          "inventory refresh, which opens a connection to that site and runs PHP there. " +
+          "Downgrade those grants to read before changing this account's role to client.",
+      );
+    }
+  }
+
   return ALLOWED;
 }
 

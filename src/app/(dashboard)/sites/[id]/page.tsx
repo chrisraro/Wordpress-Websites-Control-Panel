@@ -31,13 +31,19 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
 
-  const isClient = viewer.role === "client";
   const canTestConnection = can(viewer, "sites.manage");
   // refreshInventoryAction (manage-actions.ts) checks both wp_toolkit.manage
   // and a "manage" site grant -- a `manage` grant alone (the level a
   // client's own dashboard offers) is not enough. canRefresh has to mirror
   // both checks, or the button renders for a viewer the action then refuses.
   const canRefresh = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
+  // manageAction (manage-actions.ts) requires this identical pair --
+  // wp_toolkit.manage plus a "manage" site grant -- so canManageToolkit is
+  // deliberately the same value as canRefresh, not an independent
+  // computation that happens to match today. If manageAction's checks ever
+  // diverge from refreshInventoryAction's, this must be split back into its
+  // own `can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage")`
+  // rather than continuing to alias canRefresh.
   const canManageToolkit = canRefresh;
 
   // site_admin_users' RLS policy (0011_site_admin_users.sql), the sites
@@ -48,9 +54,11 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   // service-role client (readDbFor returns it for any non-client viewer),
   // which bypasses RLS entirely, so every read below that has a matching
   // RLS policy has to re-check the same permission that policy checks --
-  // not stand in an isClient role check, which stops matching the moment an
-  // admin edits the matrix (this phase ships that editor) and would then
-  // keep serving this data to a role the database itself would refuse.
+  // not stand in a role check (e.g. "is this viewer a client"), which stops
+  // matching the moment an admin edits the matrix (this phase ships that
+  // editor) and would then keep serving this data to a role the database
+  // itself would refuse. This page no longer has any role-based gate at
+  // all -- the "Open wp-admin" link was the last one, see below.
   const canViewAdminUsers = can(viewer, "sites.view_all");
 
   // mcp_endpoint and wp_username are credential-adjacent (spec §5.2) and are
@@ -130,7 +138,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 showInlineError={false}
               />
             )}
-            {!isClient && (
+            {canViewAdminUsers && (
               <a
                 href={inv?.admin_url ?? `${site.url.replace(/\/+$/, "")}/wp-admin/`}
                 target="_blank"
@@ -227,6 +235,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
           </details>
         </Card>
 
+        {canViewAdminUsers && (
         <Card>
           <CardTitle>Recent activity</CardTitle>
           {!activity?.length ? (
@@ -246,6 +255,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             </ul>
           )}
         </Card>
+        )}
 
         {canManageToolkit && (
         <Card>

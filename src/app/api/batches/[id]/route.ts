@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/authz/server";
 import { visibleSiteIds } from "@/lib/authz/decide";
+import { isUuidShaped } from "@/lib/uuid";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 
@@ -17,7 +18,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   if (!viewer) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const { id } = await ctx.params;
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+  if (!isUuidShaped(id)) {
     return NextResponse.json({ error: "invalid batch id" }, { status: 400 });
   }
   const db = createServiceSupabase();

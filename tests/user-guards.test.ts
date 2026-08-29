@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canChangeRole, canDeleteUser, canGrantSiteAccess, canSetRolePermission } from "@/services/users/guards";
-import type { ManagedUser } from "@/services/users/types";
+import type { ManagedUser, SiteGrant } from "@/services/users/types";
 import type { AppRole } from "@/lib/authz/types";
 
 const user = (id: string, role: AppRole | null): ManagedUser => ({
@@ -47,6 +47,37 @@ describe("canChangeRole", () => {
     const v = canChangeRole(DUPLICATED_ADMIN_ROW, "a1", "developer");
     expect(v.allowed).toBe(false);
     expect(v.allowed === false && v.reason).toMatch(/last admin/i);
+  });
+
+  // Finding 4 of the final whole-branch review: a staff account can
+  // legitimately hold a manage-level site grant (inert for them, since
+  // sites.view_all already reaches every site), but demoting that account
+  // to `client` -- an external customer -- hands them the same
+  // live-PHP-execution hole canGrantSiteAccess refuses at grant time.
+  describe("changing role to client with an existing manage-level grant", () => {
+    const MANAGE_GRANT: SiteGrant[] = [{ siteId: "site-1", accessLevel: "manage" }];
+    const READ_GRANTS: SiteGrant[] = [{ siteId: "site-1", accessLevel: "read" }];
+
+    it("refuses when the target holds a manage-level grant", () => {
+      const v = canChangeRole(TWO_ADMINS, "d1", "client", MANAGE_GRANT);
+      expect(v.allowed).toBe(false);
+      expect(v.allowed === false && v.reason).toMatch(/manage-level access/i);
+      expect(v.allowed === false && v.reason).toContain("site-1");
+    });
+
+    it("allows when the target holds only read-level grants", () => {
+      expect(canChangeRole(TWO_ADMINS, "d1", "client", READ_GRANTS)).toEqual({ allowed: true });
+    });
+
+    it("allows when the target holds no grants at all", () => {
+      expect(canChangeRole(TWO_ADMINS, "d1", "client", [])).toEqual({ allowed: true });
+      // Also allowed when the caller omits the argument entirely.
+      expect(canChangeRole(TWO_ADMINS, "d1", "client")).toEqual({ allowed: true });
+    });
+
+    it("allows a manage-level grant to survive a change to a staff role, since it is never enforced there", () => {
+      expect(canChangeRole(TWO_ADMINS, "d1", "content_writer", MANAGE_GRANT)).toEqual({ allowed: true });
+    });
   });
 });
 

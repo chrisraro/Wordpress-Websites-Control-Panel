@@ -16,6 +16,11 @@ export async function listManagedUsers(repo: UsersRepo): Promise<ManagedUser[]> 
  * caller-supplied list is a snapshot of what some page rendered, and
  * "is this the last admin?" answered from a stale page is exactly the check
  * that fails when it matters.
+ *
+ * Same freshness discipline for the target's site grants: fetched here,
+ * right before the write, only when `next` is `client` (the one transition
+ * `canChangeRole` consults them for — see its own comment) so an unrelated
+ * role change never pays for a query it does not need.
  */
 export async function changeUserRole(
   repo: UsersRepo,
@@ -24,7 +29,8 @@ export async function changeUserRole(
   next: AppRole,
 ): Promise<ActionResult> {
   const users = await repo.listUsers();
-  const verdict = canChangeRole(users, targetId, next);
+  const targetGrants = next === "client" ? await repo.listGrants(targetId) : [];
+  const verdict = canChangeRole(users, targetId, next, targetGrants);
   if (!verdict.allowed) return { ok: false, error: verdict.reason };
   await repo.setRole(targetId, next, actorId);
   return { ok: true };

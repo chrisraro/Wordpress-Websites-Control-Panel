@@ -8,7 +8,7 @@ import {
   grantSiteAccess,
   setRolePermissionChecked,
 } from "@/services/users/service";
-import type { ManagedUser } from "@/services/users/types";
+import type { ManagedUser, SiteGrant } from "@/services/users/types";
 
 /**
  * A fake shaped like a supabase-js client: `auth.admin.*` for the auth admin
@@ -392,12 +392,16 @@ describe("supabaseUsersRepo — writes", () => {
 });
 
 /** In-memory UsersRepo fake for the service layer — see tests/bulk-service.test.ts. */
-function memoryUsersRepo(initialUsers: ManagedUser[]) {
+function memoryUsersRepo(initialUsers: ManagedUser[], initialGrants: Record<string, SiteGrant[]> = {}) {
   let users = [...initialUsers];
+  const grantsByUserId = new Map<string, SiteGrant[]>(
+    Object.entries(initialGrants).map(([id, grants]) => [id, [...grants]]),
+  );
   const setRoleCalls: { userId: string; role: string; grantedBy: string }[] = [];
   const deleteCalls: string[] = [];
   const setRolePermissionCalls: { role: string; permission: string; enabled: boolean }[] = [];
   const grantSiteCalls: { userId: string; siteId: string; level: string; grantedBy: string }[] = [];
+  const listGrantsCalls: string[] = [];
 
   const repo: UsersRepo = {
     async listUsers() {
@@ -414,13 +418,25 @@ function memoryUsersRepo(initialUsers: ManagedUser[]) {
       deleteCalls.push(id);
       users = users.filter((u) => u.id !== id);
     },
-    async listGrants() {
-      return [];
+    async listGrants(userId) {
+      listGrantsCalls.push(userId);
+      return grantsByUserId.get(userId) ?? [];
     },
     async grantSite(userId, siteId, level, grantedBy) {
       grantSiteCalls.push({ userId, siteId, level, grantedBy });
+      const existing = grantsByUserId.get(userId) ?? [];
+      grantsByUserId.set(userId, [
+        ...existing.filter((g) => g.siteId !== siteId),
+        { siteId, accessLevel: level },
+      ]);
     },
-    async revokeSite() {},
+    async revokeSite(userId, siteId) {
+      const existing = grantsByUserId.get(userId) ?? [];
+      grantsByUserId.set(
+        userId,
+        existing.filter((g) => g.siteId !== siteId),
+      );
+    },
     async listRolePermissions() {
       return [];
     },
@@ -431,7 +447,15 @@ function memoryUsersRepo(initialUsers: ManagedUser[]) {
       return { id: `invited-${email}`, inviteLink: null };
     },
   };
-  return { repo, setRoleCalls, deleteCalls, setRolePermissionCalls, grantSiteCalls, getUsers: () => users };
+  return {
+    repo,
+    setRoleCalls,
+    deleteCalls,
+    setRolePermissionCalls,
+    grantSiteCalls,
+    listGrantsCalls,
+    getUsers: () => users,
+  };
 }
 
 const managedUser = (id: string, role: ManagedUser["role"]): ManagedUser => ({
@@ -472,6 +496,80 @@ describe("changeUserRole", () => {
     const result = await changeUserRole(repo, "a1", "a2", "client");
     expect(result.ok).toBe(true);
     expect(setRoleCalls).toHaveLength(1);
+  });
+
+  // Finding 4 of the final whole-branch review: changing a staff account's
+  // role to `client` while it still holds a manage-level site grant would
+  // re-create the exposure canGrantSiteAccess refuses at grant time.
+  describe("changing role to client with an existing site grant", () => {
+    it("refuses when the target holds a manage-level grant, and writes nothing", async () => {
+      const { repo, setRoleCalls } = memoryUsersRepo(
+        [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
+        { d1: [{ siteId: "site-1", accessLevel: "manage" }] },
+      );
+      const result = await changeUserRole(repo, "a1", "d1", "client");
+      expect(result).toEqual({ ok: false, error: expect.stringMatching(/manage-level access/i) });
+      expect(setRoleCalls).toHaveLength(0);
+    });
+
+    it("allows when the target holds only read-level grants", async () => {
+      const { repo, setRoleCalls } = memoryUsersRepo(
+        [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
+        { d1: [{ siteId: "site-1", accessLevel: "read" }] },
+      );
+      const result = await changeUserRole(repo, "a1", "d1", "client");
+      expect(result).toEqual({ ok: true });
+      expect(setRoleCalls).toHaveLength(1);
+    });
+
+    it("allows when the target holds no grants at all", async () => {
+      const { repo, setRoleCalls } = memoryUsersRepo([
+        managedUser("a1", "admin"),
+        managedUser("a2", "admin"),
+        managedUser("d1", "developer"),
+      ]);
+      const result = await changeUserRole(repo, "a1", "d1", "client");
+      expect(result).toEqual({ ok: true });
+      expect(setRoleCalls).toHaveLength(1);
+    });
+
+    it("allows changing to a staff role even with a manage-level grant, since it is never enforced there", async () => {
+      const { repo, setRoleCalls } = memoryUsersRepo(
+        [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
+        { d1: [{ siteId: "site-1", accessLevel: "manage" }] },
+      );
+      const result = await changeUserRole(repo, "a1", "d1", "content_writer");
+      expect(result).toEqual({ ok: true });
+      expect(setRoleCalls).toHaveLength(1);
+    });
+
+    it("reads the target's grants fresh at write time, not a stale snapshot", async () => {
+      // The grant is added *after* this repo was constructed, standing in
+      // for "someone granted this account manage access between render and
+      // this write" -- the same freshness discipline this file already
+      // exercises for the last-admin list above and for grantSiteAccess's
+      // role read.
+      const { repo, setRoleCalls, listGrantsCalls } = memoryUsersRepo([
+        managedUser("a1", "admin"),
+        managedUser("a2", "admin"),
+        managedUser("d1", "developer"),
+      ]);
+      await repo.grantSite("d1", "site-1", "manage", "someone-else");
+      const result = await changeUserRole(repo, "a1", "d1", "client");
+      expect(result.ok).toBe(false);
+      expect(setRoleCalls).toHaveLength(0);
+      expect(listGrantsCalls).toContain("d1");
+    });
+
+    it("does not fetch grants at all for a transition that is not to client", async () => {
+      const { repo, listGrantsCalls } = memoryUsersRepo([
+        managedUser("a1", "admin"),
+        managedUser("a2", "admin"),
+        managedUser("d1", "developer"),
+      ]);
+      await changeUserRole(repo, "a1", "d1", "content_writer");
+      expect(listGrantsCalls).toHaveLength(0);
+    });
   });
 });
 

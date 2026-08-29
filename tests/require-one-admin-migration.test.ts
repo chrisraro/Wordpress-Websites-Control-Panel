@@ -37,8 +37,20 @@ describe("0014_require_one_admin.sql", () => {
 
   it("raises when no admin row would remain", () => {
     const m = SQL.match(/create or replace function public\.require_one_admin\(\)[\s\S]*?\$\$;/);
-    expect(m![0]).toMatch(/not exists \(select 1 from public\.user_roles where role = 'admin'\)/);
+    expect(m![0]).toMatch(/not exists \(select 1 from public\.user_roles where role = 'admin' for update\)/);
     expect(m![0]).toMatch(/raise exception/);
+  });
+
+  it("locks the admin rows it reads with FOR UPDATE, closing the concurrent-demotion race", () => {
+    // Finding 1 of the final review: a plain SELECT under READ COMMITTED
+    // takes no row lock and reads only the latest *committed* version, so
+    // two overlapping demotions could otherwise both observe an admin row
+    // that the other transaction has already changed but not yet
+    // committed, and both pass. FOR UPDATE forces the second trigger to
+    // block on the row lock and re-evaluate against the first
+    // transaction's committed result once it releases that lock.
+    const m = SQL.match(/create or replace function public\.require_one_admin\(\)[\s\S]*?\$\$;/);
+    expect(m![0]).toMatch(/for update/);
   });
 
   it("is re-runnable: drops the trigger before recreating it, and replaces rather than merely creates the function", () => {
@@ -50,17 +62,21 @@ describe("0014_require_one_admin.sql", () => {
     expect(createIndex).toBeGreaterThan(dropIndex);
   });
 
-  it("is row-level, not statement-level -- statement-level never fires for repo.setRole's upsert", () => {
+  it("is row-level, not statement-level -- statement-level would still fire on a zero-row upsert", () => {
     // repo.setRole (src/services/users/repo.ts) writes every role change via
     // `.upsert(..., { onConflict: "user_id" })`, i.e.
-    // `insert ... on conflict (user_id) do update ...`. Postgres classifies a
-    // statement-level trigger's firing by the literal command keyword, not by
-    // which branch a given row took, so a statement-level AFTER UPDATE
-    // trigger never fires for that statement at all -- missing the
-    // application's only demotion path entirely. Row-level AFTER UPDATE
-    // triggers fire for exactly the rows that took the DO UPDATE branch,
-    // which is documented Postgres behaviour for ON CONFLICT DO UPDATE and
-    // closes that gap.
+    // `insert ... on conflict (user_id) do update ...`. Postgres has fired
+    // statement-level AFTER UPDATE triggers for that statement shape since
+    // 9.5 (a statement-level trigger's firing is governed by which events
+    // the statement's command could invoke, not by which branch, if any, a
+    // row actually took) -- so that is not why row-level is the right
+    // choice. The reason is that a statement-level trigger fires
+    // unconditionally once per statement even when the DO UPDATE branch
+    // changes zero rows, evaluating this invariant on a write that never
+    // actually changed anyone's role. Row-level AFTER UPDATE triggers fire
+    // only for rows genuinely taking the DO UPDATE branch -- documented
+    // Postgres behaviour for ON CONFLICT DO UPDATE -- so this only ever
+    // runs the check when a role change really happened.
     const m = SQL.match(/create trigger user_roles_require_one_admin[\s\S]*?;/);
     expect(m).not.toBeNull();
     expect(m![0]).toMatch(/for each row/);
@@ -79,14 +95,9 @@ describe("0014_require_one_admin.sql", () => {
     expect(m![0]).not.toMatch(/insert/i);
   });
 
-  it("documents that it has no deploy-order dependency, unlike 0012/0013", () => {
-    expect(SQL).toMatch(/no deploy-order dependency/i);
-    expect(SQL).toContain("safe to apply before, during or");
-    expect(SQL).toContain("after this branch's code goes live");
-  });
-
-  it("documents why the application-level guards remain primary and this is only a backstop", () => {
-    expect(SQL.toLowerCase()).toContain("primary mechanism");
-    expect(SQL.toLowerCase()).toContain("backstop");
+  it("revokes execute from public/anon/authenticated, matching 0007's convention -- nothing ever calls this directly", () => {
+    expect(SQL).toContain(
+      "revoke all on function public.require_one_admin() from public, anon, authenticated;",
+    );
   });
 });

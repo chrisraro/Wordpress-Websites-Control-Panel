@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/authz/server";
+import { isUuidShaped } from "@/lib/uuid";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseUsersRepo } from "@/services/users/repo";
 import { listSiteGrants, listRolePermissions } from "@/services/users/service";
@@ -40,7 +41,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   // error instead, which throws rather than 404ing. Same fix as
   // marketplace/batches/[id]/page.tsx: reject the shape before it ever
   // reaches Supabase.
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
+  if (!isUuidShaped(id)) notFound();
 
   const db = createServiceSupabase();
   const usersRepo = supabaseUsersRepo(db);

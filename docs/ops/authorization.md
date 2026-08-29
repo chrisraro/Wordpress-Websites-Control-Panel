@@ -582,20 +582,53 @@ of these.
    table-level grant and all three columns remain readable by any client
    with a site grant.**
 
-3. **A `client`-role user with a `manage`-level site grant can trigger
-   `refreshInventoryAction`.** That action requires site access at `manage`
-   specifically because it opens an MCP connection and runs PHP against the
-   live WordPress site (spec §4.3) — it is not a read despite looking like
-   one. The brief for `client` accounts is read-only access and report
-   generation; nothing in the schema or the RLS policies stops an operator
-   from granting a `client` a `manage`-level row in `user_site_access`
-   instead of `read`. Doing so silently hands that client the ability to run
-   PHP on the customer's site, bypassing the intended read-only boundary.
-   Until this is enforced in code (e.g. rejecting `manage` grants for
-   `client`-role users at grant time), **client grants must always be
-   created at `read`, never `manage`** — this is an operational rule, not
-   something the database or the `/users` invite flow currently prevents.
-   (The invite flow's own site grants are hardcoded to `read` — see
-   "Invitations" above — so this risk is specifically about grants made
-   through `grantSiteAction` or direct SQL after the fact, not through
-   invitation.)
+3. ~~A `client`-role user with a `manage`-level site grant can trigger
+   `refreshInventoryAction`.~~ **Closed, on both paths that could produce
+   that combination.** `refreshInventoryAction` requires site access at
+   `manage` specifically because it opens an MCP connection and runs PHP
+   against the live WordPress site (spec §4.3) — it is not a read despite
+   looking like one, and the brief for `client` accounts is read-only
+   access and report generation. Two application-level guards now stop a
+   `client` account from ever holding that combination:
+
+   - **At grant time:** `canGrantSiteAccess` (`src/services/users/guards.ts`),
+     enforced inside `grantSiteAccess` (`src/services/users/service.ts`),
+     refuses a `manage`-level `user_site_access` row for a target whose role
+     is `client`, reading that role fresh from the repo at the moment of the
+     write rather than trusting a value the caller may have captured
+     earlier. The `/users/[id]` site-grants UI additionally disables the
+     `manage` option in the level selector for a `client` account, so the
+     refusal is never the first time an operator learns about it.
+   - **At role-change time:** `changeUserRole` refuses changing an account's
+     role *to* `client` while that account still holds any `manage`-level
+     row in `user_site_access` — closing the path the grant-time guard
+     alone could not: a `developer` or other staff account can legitimately
+     hold a `manage` grant (staff already reach every site through
+     `sites.view_all`, so the grant is inert for them), and demoting that
+     same account to `client` would otherwise re-create exactly the
+     combination the grant-time guard exists to prevent, without ever going
+     through `grantSiteAccess` at all. The refusal names the affected sites
+     and asks the admin to downgrade those grants to `read` first, rather
+     than silently downgrading them as a side effect of an unrelated role
+     change.
+
+   As defence in depth, `refreshInventoryAction` also requires the
+   `wp_toolkit.manage` *permission* in addition to the `manage` site grant
+   — the one WP Toolkit write in the codebase that used to check only site
+   access — so even a `client` account that somehow ended up holding a
+   stray `manage` grant (a row written before this branch shipped, for
+   instance) cannot reach it while the seeded matrix keeps
+   `wp_toolkit.manage` off the `client` role.
+
+   **Residual risk, now that both application-level guards exist:** the
+   permission matrix is editable at runtime, so an admin who ticks
+   `wp_toolkit.manage` on for `client` removes that last line of defence
+   (see the client-grant confirmation dialog on `/users/roles`, which exists
+   specifically to interrupt that click). And, as with every guard in this
+   document, direct SQL against the database bypasses the application
+   entirely — nothing analogous to `0014_require_one_admin.sql`'s
+   database-level trigger backstops this particular invariant, so an
+   operator (or a bug) writing `role = 'client'` and a `manage`-level
+   `user_site_access` row straight through SQL is not stopped by anything
+   described here. Both are operator-discipline risks, not code gaps this
+   branch left open.

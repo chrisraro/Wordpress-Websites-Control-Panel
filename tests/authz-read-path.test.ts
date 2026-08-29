@@ -142,4 +142,27 @@ describe("the site overview page never unconditionally renders credentials-adjac
     expect(occurrences).toBe(1);
     expect(source).toContain("const { data: activity } = canViewAdminUsers");
   });
+
+  it("gates the 'Open wp-admin' link on the same permission as the rest of this page, not an isClient role check", () => {
+    // Finding 9 of the final whole-branch review: this was the last
+    // instance of the `isClient` pattern on this page. A developer whose
+    // sites.view_all was unticked kept the link, and on a site with a
+    // renamed admin path that discloses it. `isClient` must not appear on
+    // this page at all now.
+    expect(source).not.toMatch(/isClient/);
+    expect(source).toContain("{canViewAdminUsers && (");
+    expect(source.split("{canViewAdminUsers && (").length - 1).toBeGreaterThanOrEqual(3);
+  });
+
+  it("gates the Recent activity card the same way as the Administrators card beside it", () => {
+    // Finding 9: Recent activity used to always render, showing a generic
+    // empty state to anyone lacking sites.view_all while Administrators hid
+    // itself under that same condition -- the two cards must agree.
+    const recentActivityIndex = source.indexOf("Recent activity");
+    const guardIndex = source.lastIndexOf("{canViewAdminUsers && (", recentActivityIndex);
+    expect(guardIndex).toBeGreaterThan(-1);
+    // No unrelated closing of the JSX conditional between the guard and the
+    // card's own title -- i.e. the guard actually wraps this card.
+    expect(source.slice(guardIndex, recentActivityIndex)).not.toContain(")}");
+  });
 });

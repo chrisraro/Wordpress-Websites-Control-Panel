@@ -32,6 +32,7 @@ export const CLIENT_CROSS_TENANT_PERMISSIONS: readonly AppPermission[] = [
   "sites.manage",
   "wp_toolkit.manage",
   "users.manage",
+  "queue.process",
 ];
 
 export interface ClientGrantWarning {
@@ -62,19 +63,38 @@ export const CLIENT_GRANT_WARNINGS: Partial<Record<AppPermission, ClientGrantWar
       "request, with no further confirmation.",
   },
   "sites.manage": {
-    title: "Give every Client account write access to every site?",
+    title: "Give every Client account site-management access?",
     description:
       "Every account with the Client role -- an external customer, not staff -- would be able " +
-      "to connect, edit, or disable any OTHER customer's site, including its credentials, not " +
-      "only sites granted to them. This takes effect on each affected client's next request.",
+      "to connect a brand new site to the panel: createSite (sites/new/actions.ts) checks only " +
+      "this permission, with no per-site scoping, since a site being connected for the first " +
+      "time has no grant yet to check. Testing an existing site's connection is narrower -- it " +
+      "still requires a grant on that specific site -- so this alone does not let a client edit " +
+      "or disable a site they hold no grant on at all. This takes effect on each affected " +
+      "client's next request.",
   },
   "wp_toolkit.manage": {
-    title: "Give every Client account WP Toolkit on every site?",
+    title: "Give every Client account WP Toolkit access?",
     description:
-      "Every account with the Client role -- an external customer, not staff -- would be able " +
-      "to install, update, or remove plugins, themes, and WordPress core, and run maintenance " +
-      "or bulk actions, on every OTHER customer's site, not only sites granted to them. This " +
-      "takes effect on each affected client's next request.",
+      "manageAction and refreshInventoryAction both also require a manage-level grant on the " +
+      "specific site being acted on, and canGrantSiteAccess already refuses a manage-level grant " +
+      "onto a Client account -- so this alone does not reach every OTHER customer's site. The " +
+      "real danger is a stray manage-level grant a staff account already held before being " +
+      "changed to Client (changeUserRole refuses that too, but only going forward), or one added " +
+      "directly via SQL: turning this on removes the one remaining check standing between that " +
+      "external customer and installing, updating, or removing plugins, themes, and WordPress " +
+      "core, or running maintenance and bulk actions, on that site. This takes effect on each " +
+      "affected client's next request.",
+  },
+  "queue.process": {
+    title: "Let every Client account drain the entire job queue?",
+    description:
+      "processQueueNowAction (queue-actions.ts) is the only action in the codebase gated on a " +
+      "permission with no site scoping at all. Every account with the Client role -- an " +
+      "external customer, not staff -- would be able to drain the global job queue on demand, " +
+      "executing every OTHER customer's pending snapshot_refresh and security_scan jobs, which " +
+      "run PHP against those customers' live WordPress sites. This takes effect on each affected " +
+      "client's next request.",
   },
   "users.manage": {
     title: "Give every Client account the whole user directory?",
