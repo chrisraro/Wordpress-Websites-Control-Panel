@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useActionState } from "react";
 import { login } from "./actions";
 import { buttonClass, cardClass, hintClass, inputClass, labelClass } from "@/components/ui/styles";
@@ -11,7 +12,14 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-heading-sm font-semibold text-ink">WP Control Panel</h1>
+          <Image
+            src="/brand/icon-64.png"
+            alt=""
+            width={40}
+            height={40}
+            className="mx-auto mb-3"
+          />
+          <h1 className="text-heading-sm font-semibold text-ink">OCS Wordpress Control Panel</h1>
           <p className="mt-1 text-body text-mid-gray">Sign in to manage your WordPress sites.</p>
         </div>
 

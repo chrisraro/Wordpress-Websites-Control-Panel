@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -87,9 +88,10 @@ function SidebarBody({
       <Link
         href="/dashboard"
         onClick={onNavigate}
-        className="px-3 text-body font-semibold tracking-[-0.02em] text-ink"
+        className="flex items-center gap-2 px-3 text-body font-semibold leading-tight tracking-[-0.02em] text-ink"
       >
-        WP Control Panel
+        <Image src="/brand/icon-64.png" alt="" width={24} height={24} className="shrink-0" />
+        <span>OCS Wordpress Control Panel</span>
       </Link>
 
       {showConnectSite && (
@@ -168,8 +170,12 @@ export function Sidebar({
         >
           <IconMenu size={20} />
         </button>
-        <Link href="/dashboard" className="text-body font-semibold tracking-[-0.02em] text-ink">
-          WP Control Panel
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 text-body font-semibold tracking-[-0.02em] text-ink"
+        >
+          <Image src="/brand/icon-64.png" alt="" width={24} height={24} className="shrink-0" />
+          <span>OCS Wordpress Control Panel</span>
         </Link>
       </header>
 
