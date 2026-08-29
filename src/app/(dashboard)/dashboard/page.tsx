@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { requireViewer } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
-import { can } from "@/lib/authz/decide";
+import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -13,7 +14,9 @@ import { siteAttention, isStaging, SEVERITY_RANK, type Severity } from "@/servic
 import type { SiteRow } from "@/services/sites/types";
 import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
-import { IconAlert, IconCheck, IconChevronRight, IconPlus, IconSites } from "@/components/ui/icons";
+import { IconAlert, IconCheck, IconChevronRight, IconPlus, IconRefresh, IconSites } from "@/components/ui/icons";
+import { ManageForm } from "../sites/[id]/action-form";
+import { refreshAllInventoryAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -138,8 +141,22 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
 export default async function DashboardPage() {
   const viewer = await requireViewer();
   const db = await readDbFor(viewer);
-  const sites = await listSitesForViewer({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, viewer);
+  const sites = await listSitesForViewer(
+    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) },
+    viewer,
+  );
   const canConnectSite = can(viewer, "sites.manage");
+
+  // refreshAllInventoryAction (./actions.ts) checks both wp_toolkit.manage
+  // and, per site, a "manage" grant -- the same pair refreshInventoryAction
+  // (../sites/[id]/manage-actions.ts) enforces for a single site. This has
+  // to mirror both checks and the "skip disabled sites" rule the nightly
+  // fan-out uses (src/app/api/cron/enqueue/route.ts), or the button renders
+  // (or promises a count) the action would not actually honour.
+  const refreshTargets = sites.filter(
+    (s) => s.status !== "disabled" && canAccessSite(viewer, s.id, "manage"),
+  );
+  const canRefreshAll = can(viewer, "wp_toolkit.manage") && refreshTargets.length > 0;
 
   const snapshots = supabaseSnapshotsRepo(db);
   const securityRepo = supabaseSecurityRepo(db);
@@ -191,11 +208,34 @@ export default async function DashboardPage() {
         title="Sites"
         subtitle={subtitle}
         actions={
-          total > 0 && canConnectSite && (
-            <Link href="/sites/new" className={buttonClass("primary")}>
-              <IconPlus size={16} />
-              Connect site
-            </Link>
+          total > 0 && (
+            <>
+              {canRefreshAll && (
+                <ManageForm
+                  action={refreshAllInventoryAction}
+                  label="Refresh all inventory"
+                  pendingLabel="Queuing…"
+                  variant="outline"
+                  icon={<IconRefresh size={16} />}
+                  showInlineError={false}
+                  confirm={{
+                    title: `Refresh inventory for ${refreshTargets.length} site${refreshTargets.length === 1 ? "" : "s"}?`,
+                    description:
+                      `This queues a fresh inventory scan for ${refreshTargets.length} ` +
+                      `site${refreshTargets.length === 1 ? "" : "s"} — each one means connecting to the live ` +
+                      "WordPress install and running code there. Jobs run in the background over the next " +
+                      "minute or so; this doesn't refresh anything immediately.",
+                    confirmLabel: "Queue refresh",
+                  }}
+                />
+              )}
+              {canConnectSite && (
+                <Link href="/sites/new" className={buttonClass("primary")}>
+                  <IconPlus size={16} />
+                  Connect site
+                </Link>
+              )}
+            </>
           )
         }
       />

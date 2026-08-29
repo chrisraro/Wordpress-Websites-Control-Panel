@@ -7,7 +7,17 @@ import { useToast } from "@/components/ui/toast";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "@/components/ui/styles";
 import { IconSpinner } from "@/components/ui/icons";
 
-export type ManageResult = { ok: boolean; error?: string } | null;
+export type ManageResult = {
+  ok: boolean;
+  error?: string;
+  /**
+   * Overrides the success toast's title with the actual outcome (e.g. "Queued
+   * inventory refresh for 8 sites") rather than the static `success` label,
+   * for actions whose result isn't known until the server runs — most
+   * actions don't set this and keep using `success`/`label`.
+   */
+  message?: string;
+} | null;
 export type ManageFormAction = (prevState: ManageResult, formData: FormData) => Promise<ManageResult>;
 
 export interface ConfirmSpec {
@@ -55,7 +65,7 @@ export function ManageForm({
     if (!state || state === lastReported.current) return;
     lastReported.current = state;
     if (state.ok) {
-      toast({ tone: "success", title: success ?? label });
+      toast({ tone: "success", title: state.message ?? success ?? label });
     } else {
       toast({
         tone: "error",
