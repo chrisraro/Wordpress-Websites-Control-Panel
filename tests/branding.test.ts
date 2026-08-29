@@ -58,3 +58,25 @@ describe("branding: the product name appears where a user actually sees it", () 
     expect(occurrences).toBe(2);
   });
 });
+
+describe("public metadata routes", () => {
+  // Regression pin for a defect that only appeared in production: the auth
+  // middleware 307'd /manifest.webmanifest to /login for signed-out visitors,
+  // because the matcher's exclusion list covered svg/png/jpg/ico but not
+  // webmanifest. Icon routes escaped only incidentally, by ending in .png.
+  const middleware = readFileSync(
+    join(process.cwd(), "src", "middleware.ts"),
+    "utf8",
+  );
+
+  it("exempts the PWA manifest from the auth middleware", () => {
+    const matcher = middleware.match(/matcher:\s*\[([^\]]*)\]/)?.[1];
+    expect(matcher, "middleware config.matcher not found").toBeTruthy();
+    expect(matcher).toContain("webmanifest");
+  });
+
+  it("still exempts the raster and vector icon extensions", () => {
+    const matcher = middleware.match(/matcher:\s*\[([^\]]*)\]/)?.[1] ?? "";
+    for (const ext of ["svg", "png", "ico"]) expect(matcher).toContain(ext);
+  });
+});

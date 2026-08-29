@@ -54,5 +54,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico)$).*)"],
+  // `webmanifest` is not optional here: the App Router serves the PWA manifest
+  // at /manifest.webmanifest, and without this exclusion the auth middleware
+  // 307s it to /login for signed-out visitors, which breaks install prompts and
+  // icon metadata. icon.png and apple-icon.png escape only because they happen
+  // to end in .png — do not rely on that for a future metadata route.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|ico|webmanifest)$).*)"],
 };
