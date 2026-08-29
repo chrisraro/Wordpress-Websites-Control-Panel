@@ -1,6 +1,7 @@
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secrets";
 import { McpAuthError, McpConnectionError } from "@/lib/mcp/errors";
 import type { McpFactory } from "@/lib/mcp/client";
+import { visibleSiteIds, type Viewer } from "@/lib/authz/decide";
 import type { SitesRepo } from "./repo";
 import type { NewSiteInput, SiteRow, SiteStatus } from "./types";
 
@@ -47,6 +48,15 @@ export async function addSite(
 
 export async function listSites(deps: SitesDeps): Promise<SiteRow[]> {
   return deps.repo.listSites();
+}
+
+/** Sites this viewer may see: all of them, or exactly their grants. */
+export async function listSitesForViewer(
+  deps: SitesDeps, viewer: Viewer,
+): Promise<SiteRow[]> {
+  const all = await deps.repo.listSites();
+  const visible = visibleSiteIds(viewer, all.map((s) => s.id));
+  return visible === "all" ? all : all.filter((s) => visible.includes(s.id));
 }
 
 export async function getSite(deps: SitesDeps, id: string): Promise<SiteRow | null> {

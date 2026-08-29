@@ -5,6 +5,7 @@ import { processJobs, recoverStaleAwaiting } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { buildJobHandlers } from "@/services/jobs/handlers";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, isDenied } from "@/lib/authz/server";
 
 const ROUNDS = 5;          // up to 15 jobs per click
 const BUDGET_MS = 120_000; // stay well inside the route's duration limit
@@ -18,13 +19,15 @@ export async function processQueueNowAction(
   revalidate?: string,
 ): Promise<{ ok: boolean; done?: number; failed?: number; claimed?: number; error?: string }> {
   await requireUser();
-  const db = createServiceSupabase();
-  const repo = supabaseJobsRepo(db);
-  const handlers = buildJobHandlers(db);
+  const gate = await checkPermission("queue.process");
+  if (isDenied(gate)) return gate;
   const started = Date.now();
   const totals = { claimed: 0, done: 0, failed: 0 };
 
   try {
+    const db = createServiceSupabase();
+    const repo = supabaseJobsRepo(db);
+    const handlers = buildJobHandlers(db);
     await recoverStaleAwaiting(repo, 30 * 60 * 1000);
     for (let round = 0; round < ROUNDS; round++) {
       if (Date.now() - started > BUDGET_MS) break;

@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { listSites } from "@/services/sites/service";
+import { listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireViewer } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -30,8 +32,10 @@ function seoTone(score: number): StatusTone {
 }
 
 export default async function DashboardPage() {
-  const db = createServiceSupabase();
-  const sites = await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient });
+  const viewer = await requireViewer();
+  const db = await readDbFor(viewer);
+  const sites = await listSitesForViewer({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, viewer);
+  const canConnectSite = can(viewer, "sites.manage");
   const snapshots = supabaseSnapshotsRepo(db);
   const securityRepo = supabaseSecurityRepo(db);
   const updates = new Map<string, number>();
@@ -60,7 +64,7 @@ export default async function DashboardPage() {
             : undefined
         }
         actions={
-          sites.length > 0 && (
+          sites.length > 0 && canConnectSite && (
             <Link href="/sites/new" className={buttonClass("primary")}>
               <IconPlus size={16} />
               Connect site
@@ -71,19 +75,25 @@ export default async function DashboardPage() {
 
       {sites.length === 0 ? (
         <Card>
-          <EmptyState
-            icon={<IconSites size={28} />}
-            title="No sites connected yet"
-            action={
-              <Link href="/sites/new" className={`${buttonClass("primary")} mt-1`}>
-                <IconPlus size={16} />
-                Connect your first site
-              </Link>
-            }
-          >
-            Connect a WordPress site running the Novamira plugin to manage its plugins and
-            themes, scan it for vulnerabilities, and report on its search visibility.
-          </EmptyState>
+          {canConnectSite ? (
+            <EmptyState
+              icon={<IconSites size={28} />}
+              title="No sites connected yet"
+              action={
+                <Link href="/sites/new" className={`${buttonClass("primary")} mt-1`}>
+                  <IconPlus size={16} />
+                  Connect your first site
+                </Link>
+              }
+            >
+              Connect a WordPress site running the Novamira plugin to manage its plugins and
+              themes, scan it for vulnerabilities, and report on its search visibility.
+            </EmptyState>
+          ) : (
+            <EmptyState icon={<IconSites size={28} />} title="No sites shared with you yet">
+              Once someone on your team grants you access to a site, it will show up here.
+            </EmptyState>
+          )}
         </Card>
       ) : (
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

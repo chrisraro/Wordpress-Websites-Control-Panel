@@ -160,8 +160,10 @@ create or replace function authorize(requested_permission app_permission)
 returns boolean language plpgsql stable security definer
 set search_path = '' as $$
 declare
-  v_role app_role;
-  v_effect override_effect;
+  -- Types must be schema-qualified too: with search_path = '' a bare
+  -- `app_role` does not resolve, and the function fails to define.
+  v_role public.app_role;
+  v_effect public.override_effect;
 begin
   select role into v_role from public.user_roles where user_id = (select auth.uid());
   if v_role is null then return false; end if;
@@ -231,8 +233,9 @@ Every surface, and what it requires. This table is the phase's checklist.
 | `bulkAction` | `wp_toolkit.manage` + site access (manage) |
 | `createChildThemeAction` | `wp_toolkit.manage` + site access (manage) |
 | `installThemeAction`, `prepareThemeUploadAction` | `wp_toolkit.manage` + site access (manage) |
+| `prepareUploadAction` | `wp_toolkit.manage` **only** — see note |
 | `searchWpThemesAction` | authenticated only (proxies a public API) |
-| `createInstallBatchAction`, `prepareUploadAction` | `wp_toolkit.manage` + site access on **every** target site |
+| `createInstallBatchAction` | `wp_toolkit.manage` + site access on **every** target site |
 | `runSecurityScanAction` | `security.run` + site access |
 | `runSeoScanAction` | `seo.run` + site access |
 | `saveGeoGridConfigAction`, `runGeoGridAction` | `geogrid.manage` + site access |
@@ -241,6 +244,16 @@ Every surface, and what it requires. This table is the phase's checklist.
 | `processQueueNowAction`, `drainQueueAction` | `queue.process` |
 
 `createInstallBatchAction` takes a **list** of site ids. It must check access to each one and reject the whole request if any fails — a partial check there is a cross-tenant hole.
+
+`prepareUploadAction` is deliberately permission-only. The marketplace upload
+has no site at prepare time — the operator picks targets afterwards — so there
+is nothing to scope against. The site check lives in `createInstallBatchAction`,
+where the uploaded path is actually consumed and every target id is verified.
+That makes the consumer's check load-bearing for both actions, so it is pinned
+by a regression test whose comment says so; deleting it would turn this action
+into a way to reach sites the caller cannot access. `prepareThemeUploadAction`
+is the opposite case — it already lives under a site route and takes a `siteId`,
+so it is site-checked directly.
 
 `refreshInventoryAction` requires site access at **manage** level, not read. It is
 read-only with respect to WordPress, so "site access" looks sufficient — but it
@@ -304,6 +317,15 @@ create policy sites_write on sites
 Child tables (`site_snapshots`, `security_checks`, `seo_snapshots`, `geogrid_*`, `reports`, `uptime_checks`, `site_vulnerabilities`) scope by `has_site_access(site_id)`. `jobs` and `activity_log` are staff-only. `vuln_feed` is shared reference data, readable by any authenticated user.
 
 The four new tables get their own policies, with `user_site_access`'s self-read written as a bare predicate to avoid the recursion noted in §3.
+
+The four new tables have RLS **enabled from the migration that creates them**,
+with policies arriving here. That ordering matters: Supabase serves every
+public-schema table over PostgREST to any holder of a session JWT and the anon
+key, and this app already ships a browser anon client. A table with RLS off is
+governed only by Supabase's default grants, so leaving `user_roles` unprotected
+even briefly would let any authenticated user set their own role to `admin` over
+the REST API, with no application code involved. RLS on with no policies is
+default-deny; the service-role key carries `bypassrls`, so the app is unaffected.
 
 RLS is enabled and correct on every table **regardless of which client path reads it** — it is the backstop for the next engineer's missed check, and Supabase's own security advisor expects it.
 

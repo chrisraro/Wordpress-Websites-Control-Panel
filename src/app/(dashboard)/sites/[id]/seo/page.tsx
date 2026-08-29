@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can } from "@/lib/authz/decide";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { trendPoints } from "@/services/seo/types";
 import type {
@@ -45,7 +47,8 @@ function ScoreBadge({ score }: { score: number | null }) {
 
 export default async function SeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
 
@@ -99,20 +102,22 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
           </div>
           <Sparkline points={trend} label="SEO audit score" />
         </div>
-        <ManageForm
-          action={scan}
-          label="Run SEO scan"
-          pendingLabel="Scanning…"
-          success="SEO scan complete"
-          variant="primary"
-          icon={<IconSearch size={16} />}
-          confirm={{
-            title: "Run a full SEO scan?",
-            description: `Collects the Rank Math audit, per-page scores, Search Console keywords, AI visibility, and PageSpeed data for ${site.name}. It reads only, and can take a few minutes.`,
-            confirmLabel: "Run scan",
-          }}
-          showInlineError={false}
-        />
+        {can(viewer, "seo.run") && (
+          <ManageForm
+            action={scan}
+            label="Run SEO scan"
+            pendingLabel="Scanning…"
+            success="SEO scan complete"
+            variant="primary"
+            icon={<IconSearch size={16} />}
+            confirm={{
+              title: "Run a full SEO scan?",
+              description: `Collects the Rank Math audit, per-page scores, Search Console keywords, AI visibility, and PageSpeed data for ${site.name}. It reads only, and can take a few minutes.`,
+              confirmLabel: "Run scan",
+            }}
+            showInlineError={false}
+          />
+        )}
       </div>
 
       {psi && (

@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can } from "@/lib/authz/decide";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { averageRank, coverage } from "@/services/geogrid/types";
 import { SiteTabs } from "../tabs";
@@ -13,7 +15,7 @@ import { drainQueueAction } from "../../../queue-actions";
 import { GeoGridConfigForm } from "./config-form";
 import { GridMap } from "./grid-map";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
-import { Card, CardTitle, Stat, StatusBadge } from "@/components/ui/primitives";
+import { Card, CardTitle, EmptyState, Stat, StatusBadge } from "@/components/ui/primitives";
 import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
 import { IconMap } from "@/components/ui/icons";
 
@@ -24,9 +26,13 @@ export default async function GeoGridPage({
 }: { params: Promise<{ id: string }>; searchParams: Promise<{ k?: string }> }) {
   const { id } = await params;
   const { k } = await searchParams;
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
+
+  const canManageGeoGrid = can(viewer, "geogrid.manage");
+  const canProcessQueue = can(viewer, "queue.process");
 
   const geogrid = supabaseGeoGridRepo(db);
   const config = await geogrid.getConfigBySite(id);
@@ -102,24 +108,26 @@ export default async function GeoGridPage({
               <p className="text-body text-mid-gray">{keyword}</p>
             )}
 
-            <ManageForm
-              action={run}
-              label={`Run scan (${config.keywords.length} keyword${config.keywords.length === 1 ? "" : "s"})`}
-              pendingLabel="Queueing…"
-              success="Scan queued"
-              variant="primary"
-              icon={<IconMap size={16} />}
-              confirm={{
-                title: "Queue a GeoGrid scan?",
-                description: `One run per keyword (${config.keywords.length} total) will be queued using the ${config.provider} provider. ${
-                  config.provider === "n8n"
-                    ? "Your n8n workflow performs the lookups and posts ranks back, which may take a few minutes."
-                    : "The stub provider returns sample ranks immediately — useful for checking the grid before spending on live lookups."
-                }`,
-                confirmLabel: "Queue scan",
-              }}
-              showInlineError={false}
-            />
+            {canManageGeoGrid && (
+              <ManageForm
+                action={run}
+                label={`Run scan (${config.keywords.length} keyword${config.keywords.length === 1 ? "" : "s"})`}
+                pendingLabel="Queueing…"
+                success="Scan queued"
+                variant="primary"
+                icon={<IconMap size={16} />}
+                confirm={{
+                  title: "Queue a GeoGrid scan?",
+                  description: `One run per keyword (${config.keywords.length} total) will be queued using the ${config.provider} provider. ${
+                    config.provider === "n8n"
+                      ? "Your n8n workflow performs the lookups and posts ranks back, which may take a few minutes."
+                      : "The stub provider returns sample ranks immediately — useful for checking the grid before spending on live lookups."
+                  }`,
+                  confirmLabel: "Queue scan",
+                }}
+                showInlineError={false}
+              />
+            )}
           </div>
 
           {openRuns.length > 0 && (
@@ -137,13 +145,15 @@ export default async function GeoGridPage({
                     : "Queued. The scheduler runs these automatically once pg_cron is wired; run them now if you are impatient."}
                 </p>
               </div>
-              <ManageForm
-                action={drainQueue}
-                label="Process queue now"
-                pendingLabel="Processing…"
-                success="Queue processed"
-                showInlineError={false}
-              />
+              {canProcessQueue && (
+                <ManageForm
+                  action={drainQueue}
+                  label="Process queue now"
+                  pendingLabel="Processing…"
+                  success="Queue processed"
+                  showInlineError={false}
+                />
+              )}
             </div>
           )}
 
@@ -235,17 +245,28 @@ export default async function GeoGridPage({
         </>
       )}
 
-      <section>
-        <h2 className="mb-1 text-body font-medium text-ink">
-          {config ? "Configuration" : "Set up GeoGrid"}
-        </h2>
-        <p className="mb-3 max-w-prose text-body text-mid-gray">
-          {config
-            ? "Changing the centre or spacing changes what future runs measure; past snapshots keep the grid they were taken on."
-            : "Enter the business, the keywords to track, and the centre of the area to measure. Start with the stub provider to see how the grid looks, then switch to n8n for live ranks."}
-        </p>
-        <GeoGridConfigForm siteId={id} config={config} />
-      </section>
+      {canManageGeoGrid ? (
+        <section>
+          <h2 className="mb-1 text-body font-medium text-ink">
+            {config ? "Configuration" : "Set up GeoGrid"}
+          </h2>
+          <p className="mb-3 max-w-prose text-body text-mid-gray">
+            {config
+              ? "Changing the centre or spacing changes what future runs measure; past snapshots keep the grid they were taken on."
+              : "Enter the business, the keywords to track, and the centre of the area to measure. Start with the stub provider to see how the grid looks, then switch to n8n for live ranks."}
+          </p>
+          <GeoGridConfigForm siteId={id} config={config} />
+        </section>
+      ) : (
+        !config && (
+          <Card>
+            <EmptyState icon={<IconMap size={28} />} title="Local ranking hasn't been set up yet">
+              Once this site is configured for GeoGrid tracking, its local pack ranks will show up
+              here.
+            </EmptyState>
+          </Card>
+        )
+      )}
     </main>
   );
 }

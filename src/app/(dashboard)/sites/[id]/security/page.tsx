@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can } from "@/lib/authz/decide";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
@@ -40,7 +42,8 @@ const CHECK_LABELS: Record<string, string> = {
 
 export default async function SecurityPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
   const security = supabaseSecurityRepo(db);
@@ -51,8 +54,9 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   const checks = (latest?.checks ?? []).filter((c) => c.check_id !== "grade");
   const failing = checks.filter((c) => c.result === "fail").length;
   const scan = runSecurityScanAction.bind(null, id);
+  const canRunScan = can(viewer, "security.run");
 
-  const scanButton = (
+  const scanButton = canRunScan ? (
     <ManageForm
       action={scan}
       label="Run security scan"
@@ -67,7 +71,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
       }}
       showInlineError={false}
     />
-  );
+  ) : null;
 
   return (
     <main>
@@ -109,7 +113,9 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
           <div>
             <p className="text-body font-medium text-ink">Not scanned yet</p>
             <p className="mt-0.5 text-body text-mid-gray">
-              The first scan builds the grade, the vulnerability list, and the checklist below.
+              {canRunScan
+                ? "The first scan builds the grade, the vulnerability list, and the checklist below."
+                : "This site hasn't been scanned yet. The grade, vulnerability list, and checklist will appear here once someone on your team runs one."}
             </p>
           </div>
         )}

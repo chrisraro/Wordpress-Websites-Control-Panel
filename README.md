@@ -93,3 +93,14 @@ page and the file 404 immediately.
 On the 1st of each month the nightly enqueue queues one report per site
 automatically (marked "Monthly" in the table). Requires migration
 `0004_storage_reports.sql` for the private `reports` bucket.
+
+## Authorization
+
+Four roles (`admin`, `developer`, `content_writer`, `client`), an editable
+permission matrix, and per-site grants for clients — every server action,
+page, and RLS policy checks against the same rules. A client sees only the
+sites explicitly granted to them, read-only, with credential-adjacent fields
+hidden. Requires migrations `0006`–`0008` and `npm run bootstrap:admin` before
+enforcement goes live — see `docs/ops/authorization.md` for the role matrix,
+how to change a role or grant by SQL, and how to re-run the live database
+check (`npm run verify:rls`).

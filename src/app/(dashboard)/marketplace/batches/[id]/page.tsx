@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requirePermission } from "@/lib/authz/server";
 import { BatchPoller } from "./poller";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 
@@ -7,6 +8,7 @@ export const maxDuration = 300;
 
 export default async function BatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await requirePermission("wp_toolkit.manage");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
   return (
     <main>

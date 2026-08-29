@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
@@ -24,9 +26,15 @@ const STATUS_TONE: Record<SiteStatus, StatusTone> = {
 
 export default async function SitePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
+
+  const isClient = viewer.role === "client";
+  const canTestConnection = can(viewer, "sites.manage");
+  const canRefresh = canAccessSite(viewer, id, "manage");
+  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
@@ -76,38 +84,48 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-start gap-2">
-            <ManageForm
-              action={refresh}
-              label="Refresh inventory"
-              pendingLabel="Refreshing…"
-              success="Inventory refreshed"
-              icon={<IconRefresh size={16} />}
-              showInlineError={false}
-            />
-            <ManageForm
-              action={testConnection}
-              label="Test connection"
-              pendingLabel="Testing…"
-              success="Connection is healthy"
-              showInlineError={false}
-            />
-            <a
-              href={inv?.admin_url ?? `${site.url.replace(/\/+$/, "")}/wp-admin/`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonClass("outline")}
-            >
-              <IconExternal size={16} />
-              Open wp-admin
-            </a>
+            {canRefresh && (
+              <ManageForm
+                action={refresh}
+                label="Refresh inventory"
+                pendingLabel="Refreshing…"
+                success="Inventory refreshed"
+                icon={<IconRefresh size={16} />}
+                showInlineError={false}
+              />
+            )}
+            {canTestConnection && (
+              <ManageForm
+                action={testConnection}
+                label="Test connection"
+                pendingLabel="Testing…"
+                success="Connection is healthy"
+                showInlineError={false}
+              />
+            )}
+            {!isClient && (
+              <a
+                href={inv?.admin_url ?? `${site.url.replace(/\/+$/, "")}/wp-admin/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={buttonClass("outline")}
+              >
+                <IconExternal size={16} />
+                Open wp-admin
+              </a>
+            )}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <CopyValueButton value={site.wp_username} label="Copy WP username" />
-          </div>
-          <p className="max-w-72 text-right text-caption tracking-normal text-mid-gray">
-            Application passwords can’t sign in to wp-admin — sign in with your usual WordPress
-            password once there.
-          </p>
+          {!isClient && (
+            <>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <CopyValueButton value={site.wp_username} label="Copy WP username" />
+              </div>
+              <p className="max-w-72 text-right text-caption tracking-normal text-mid-gray">
+                Application passwords can’t sign in to wp-admin — sign in with your usual WordPress
+                password once there.
+              </p>
+            </>
+          )}
         </div>
       </div>
 
@@ -124,19 +142,21 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               This site is running {inv.wp_version}.
             </p>
           </div>
-          <ManageForm
-            action={updateCore}
-            label="Update core"
-            pendingLabel="Updating…"
-            success={`WordPress updated to ${inv.core_update}`}
-            variant="primary"
-            confirm={{
-              title: "Update WordPress core?",
-              description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
-              confirmLabel: "Update core",
-            }}
-            showInlineError={false}
-          />
+          {canManageToolkit && (
+            <ManageForm
+              action={updateCore}
+              label="Update core"
+              pendingLabel="Updating…"
+              success={`WordPress updated to ${inv.core_update}`}
+              variant="primary"
+              confirm={{
+                title: "Update WordPress core?",
+                description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
+                confirmLabel: "Update core",
+              }}
+              showInlineError={false}
+            />
+          )}
         </div>
       )}
 
@@ -145,8 +165,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
           <CardTitle>Connection</CardTitle>
           <dl className="divide-y divide-hairline px-5 text-body">
             {[
-              { term: "MCP endpoint", value: site.mcp_endpoint, truncate: true },
-              { term: "WP user", value: site.wp_username },
+              ...(isClient ? [] : [{ term: "MCP endpoint", value: site.mcp_endpoint, truncate: true }]),
+              ...(isClient ? [] : [{ term: "WP user", value: site.wp_username }]),
               { term: "Abilities", value: String(site.capabilities?.abilities?.length ?? 0) },
               { term: "Connected", value: new Date(site.created_at).toLocaleDateString() },
               ...(snapshot
@@ -200,6 +220,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
           )}
         </Card>
 
+        {canManageToolkit && (
         <Card>
           <CardTitle>Tools</CardTitle>
           <div className="flex flex-wrap gap-2 p-5">
@@ -239,7 +260,9 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             />
           </div>
         </Card>
+        )}
 
+        {!isClient && (
         <Card>
           <CardTitle>Administrators</CardTitle>
           {!inv?.admin_users?.length ? (
@@ -257,6 +280,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             </ul>
           )}
         </Card>
+        )}
       </div>
     </main>
   );

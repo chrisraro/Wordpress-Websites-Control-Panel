@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
-import { createServerSupabase, createServiceSupabase } from "@/lib/supabase/server";
+import { createServiceSupabase } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/authz/server";
+import { visibleSiteIds } from "@/lib/authz/decide";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const supabase = await createServerSupabase();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // getViewer(), not requireViewer(). notFound() *is* supported in Route
+  // Handlers on this Next version — it is caught and turned into a 404 — but
+  // that 404 has an empty body, which would break this route's JSON contract
+  // with the poller that consumes it. So the decision is made here and the
+  // response is written explicitly, matching every other reply from this route.
+  const viewer = await getViewer();
+  if (!viewer) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const { id } = await ctx.params;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
@@ -19,8 +25,26 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     supabaseJobsRepo(db).batchJobs(id),
     supabaseSitesRepo(db).listSites(),
   ]);
+
+  // A batch's jobs may span sites the caller cannot see. Filter to visible
+  // sites before anything about the batch — including site names — reaches
+  // the response. If nothing remains, 404 rather than an empty list: an
+  // empty `jobs: []` with `done: true` would still confirm the batch id
+  // exists to someone who should not know that.
+  //
+  // This 404s a genuinely empty batch too, including for a viewer who can see
+  // every site. That is unreachable today — createInstallBatchAction inserts
+  // every job before it returns a batch id — and distinguishing the two cases
+  // would mean answering "does this batch exist?" separately from "may you see
+  // it?", which is the disclosure this guard exists to prevent.
+  const visible = visibleSiteIds(viewer, sites.map((s) => s.id));
+  const visibleJobs = visible === "all" ? jobs : jobs.filter((j) => j.site_id && visible.includes(j.site_id));
+  if (visibleJobs.length === 0) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
   const names = new Map(sites.map((s) => [s.id, s.name]));
-  const rows = jobs.map((j) => {
+  const rows = visibleJobs.map((j) => {
     const siteName = j.site_id ? names.get(j.site_id) ?? j.site_id : "—";
     const payload = j.payload as { label?: unknown; kind?: unknown; target?: unknown; activate?: unknown };
     const payloadLabel = payload.label;

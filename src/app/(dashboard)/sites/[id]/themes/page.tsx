@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
@@ -19,12 +21,16 @@ export const maxDuration = 300;
 
 export default async function ThemesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const themes = snapshot?.payload.themes ?? [];
   const activeTheme = themes.find((t) => t.status === "active");
+
+  const canRefresh = canAccessSite(viewer, id, "manage");
+  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const createChild = createChildThemeAction.bind(null, id, false);
@@ -56,14 +62,16 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
             "No inventory yet — refresh to load themes."
           )}
         </p>
-        <ManageForm
-          action={refresh}
-          label="Refresh inventory"
-          pendingLabel="Refreshing…"
-          success="Inventory refreshed"
-          icon={<IconRefresh size={16} />}
-          showInlineError={false}
-        />
+        {canRefresh && (
+          <ManageForm
+            action={refresh}
+            label="Refresh inventory"
+            pendingLabel="Refreshing…"
+            success="Inventory refreshed"
+            icon={<IconRefresh size={16} />}
+            showInlineError={false}
+          />
+        )}
       </div>
 
       {!snapshot ? (
@@ -79,13 +87,16 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           </EmptyState>
         </Card>
       ) : (
-        <ThemeTable siteId={id} siteName={site.name} themes={themes} />
+        <ThemeTable siteId={id} siteName={site.name} themes={themes} canManage={canManageToolkit} />
       )}
 
-      <div className="mt-4">
-        <InstallPanel siteId={id} siteName={site.name} />
-      </div>
+      {canManageToolkit && (
+        <div className="mt-4">
+          <InstallPanel siteId={id} siteName={site.name} />
+        </div>
+      )}
 
+      {canManageToolkit && (
       <Card className="mt-4">
         <CardTitle>Child theme</CardTitle>
         <div className="p-5">
@@ -125,6 +136,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       </Card>
+      )}
     </main>
   );
 }

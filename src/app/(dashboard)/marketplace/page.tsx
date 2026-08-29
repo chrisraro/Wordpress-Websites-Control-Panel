@@ -2,7 +2,8 @@ import { searchPlugins, popularPlugins, type WpOrgSearchResult } from "@/lib/ada
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
 import { InstallPanel } from "./install-panel";
 import { UploadCard } from "./upload-card";
 import { MarketplaceTabs } from "./marketplace-tabs";
@@ -22,7 +23,8 @@ export default async function MarketplacePage({
   searchParams,
 }: { searchParams: Promise<{ q?: string }> }) {
   const { q } = await searchParams;
-  const db = createServiceSupabase();
+  const viewer = await requirePermission("wp_toolkit.manage");
+  const db = await readDbFor(viewer);
   const sites = (await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }))
     .filter((s) => s.status !== "disabled")
     .map((s) => ({ id: s.id, name: s.name }));

@@ -1,6 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// This middleware refreshes the Supabase session and redirects anonymous
+// visitors. It performs NO authorization, and must never be given any.
+// Next.js CVE-2025-29927 let a crafted x-middleware-subrequest header convince
+// the framework middleware had already run, skipping it entirely — every app
+// whose only gate lived here was fully exposed. Middleware is an optimisation
+// the framework can short-circuit, not a security boundary. Authorization
+// belongs in each page, server action and route handler. See
+// docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md §4.2.
+
 const PUBLIC_EXACT = ["/login"];
 const PUBLIC_PREFIXES = ["/r/", "/api/cron/", "/api/webhooks/"];
 

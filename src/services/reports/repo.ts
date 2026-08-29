@@ -19,7 +19,7 @@ export interface ReportsRepo {
   }): Promise<ReportRow>;
   listForSite(siteId: string, limit?: number): Promise<ReportRow[]>;
   getByToken(token: string): Promise<ReportRow | null>;
-  revoke(id: string): Promise<void>;
+  revoke(id: string, siteId: string): Promise<void>;
   autoExistsSince(siteId: string, sinceIso: string): Promise<boolean>;
 }
 
@@ -45,8 +45,14 @@ export function supabaseReportsRepo(db: SupabaseClient): ReportsRepo {
       if (error) throw new Error(`reports.getByToken failed: ${error.message}`, { cause: error });
       return (data as ReportRow) ?? null;
     },
-    async revoke(id) {
-      const { error } = await db.from("reports").update({ share_token: null }).eq("id", id);
+    async revoke(id, siteId) {
+      // Scoped to both id and site_id: revokeReportAction checks the caller's
+      // access to `siteId`, not to whatever site the report at `id` actually
+      // belongs to. Without this second predicate, a caller holding access to
+      // one site could pass a reportId belonging to a different site and have
+      // it revoked anyway.
+      const { error } = await db.from("reports").update({ share_token: null })
+        .eq("id", id).eq("site_id", siteId);
       if (error) throw new Error(`reports.revoke failed: ${error.message}`, { cause: error });
     },
     async autoExistsSince(siteId, sinceIso) {

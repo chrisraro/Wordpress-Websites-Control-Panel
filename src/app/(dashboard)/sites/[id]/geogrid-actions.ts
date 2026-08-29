@@ -6,6 +6,7 @@ import { parseGeoGridConfigForm } from "@/services/geogrid/config-input";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 
 /**
  * useActionState calls the action as (prevState, formData); binding siteId puts
@@ -18,6 +19,10 @@ export async function saveGeoGridConfigAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("geogrid.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
   const parsed = parseGeoGridConfigForm(formData);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
@@ -45,6 +50,10 @@ export async function runGeoGridAction(
   _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string; queued?: number }> {
   const user = await requireUser();
+  const gate = await checkPermission("geogrid.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
   const db = createServiceSupabase();
   const config = await supabaseGeoGridRepo(db).getConfigBySite(siteId);
   if (!config) return { ok: false, error: "Save a GeoGrid configuration first" };

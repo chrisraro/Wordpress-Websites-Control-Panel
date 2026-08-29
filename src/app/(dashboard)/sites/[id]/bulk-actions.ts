@@ -7,6 +7,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 
 export async function bulkAction(
   siteId: string, kind: BulkKind, target: BulkTarget, ids: string[],
@@ -14,6 +15,10 @@ export async function bulkAction(
   _formData?: FormData,
 ): Promise<{ ok: boolean; batchId?: string; queued?: number; skipped?: number; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
   if (ids.length === 0) return { ok: false, error: "Nothing selected" };
   if (ids.length > 50) return { ok: false, error: "Select 50 items or fewer" };
 
