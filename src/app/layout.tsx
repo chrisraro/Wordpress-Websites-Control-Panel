@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     images: [{ url: "/brand/icon-512.png", width: 512, height: 512, alt: PRODUCT_NAME }],
   },
   // `icon` and `apple` are intentionally left to the file-based conventions
-  // (src/app/icon.svg, src/app/apple-icon.png, src/app/manifest.ts) — Next
+  // (src/app/icon.png, src/app/apple-icon.png, src/app/manifest.ts) — Next
   // uses whichever of a file convention or this `icons` field it finds, and
   // declaring both for the same keys means the file convention silently
   // stops being used. `shortcut` isn't covered by either file convention, so

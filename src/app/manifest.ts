@@ -2,7 +2,9 @@ import type { MetadataRoute } from "next";
 
 // App Router web manifest convention — served at /manifest.webmanifest and
 // linked into <head> automatically. Icons point at the pre-rendered PNGs in
-// public/brand (generated from public/brand/mark.svg); the maskable entry
+// public/brand. Every icon is cropped straight from the original artwork
+// (ocs-logo.jpg) — a circular alpha mask over the measured badge, never a
+// redrawn or traced substitute; the maskable entry
 // uses the variant already inset to the platform's 80% safe zone rather than
 // asking the OS to crop the plain mark itself.
 export default function manifest(): MetadataRoute.Manifest {
