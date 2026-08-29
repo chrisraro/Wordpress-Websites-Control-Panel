@@ -153,6 +153,49 @@ describe("POST /api/webhooks/n8n/geogrid — error retry ladder", () => {
     expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
     expect(completeGeoGridRunMock).not.toHaveBeenCalled();
   });
+
+  it("retries a whole-run outage reported per-point instead of recording a zero-coverage snapshot", async () => {
+    // The shape the n8n workflow's per-point error handling produces for a
+    // total outage: `hasRanks` alone is true (81 entries), but every one of
+    // them is unmeasured, so this must not be indistinguishable from a real
+    // "confirmed doesn't rank anywhere" run.
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    const ranks = Array.from({ length: 9 }, (_, idx) => ({ idx, rank: null, measured: false }));
+    const res = await POST(req({ run_id: "job-1", error: "quota exceeded", ranks }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    const [, msg] = retryMock.mock.calls[0] as [string, string, string];
+    expect(msg).toMatch(/quota exceeded/);
+    expect(completeGeoGridRunMock).not.toHaveBeenCalled();
+    expect(markDoneMock).not.toHaveBeenCalled();
+  });
+
+  it("retries the same all-unmeasured shape even with no top-level error field at all", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    const ranks = Array.from({ length: 9 }, (_, idx) => ({ idx, rank: null, measured: false }));
+    const res = await POST(req({ run_id: "job-1", ranks }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
+    expect(completeGeoGridRunMock).not.toHaveBeenCalled();
+    expect(markDoneMock).not.toHaveBeenCalled();
+  });
+
+  it("fails an all-unmeasured run once the retry ladder is exhausted, same as an explicit error", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 3 }));
+    const ranks = Array.from({ length: 9 }, (_, idx) => ({ idx, rank: null, measured: false }));
+    const res = await POST(req({ run_id: "job-1", error: "quota exceeded", ranks }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "error" });
+    expect(markFailedMock).toHaveBeenCalledTimes(1);
+    expect(completeGeoGridRunMock).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a genuine partial success (some points measured) as a total failure", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    const res = await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 3, measured: true }] }));
+    expect(await res.json()).toMatchObject({ ok: true, points: 9 });
+    expect(retryMock).not.toHaveBeenCalled();
+    expect(completeGeoGridRunMock).toHaveBeenCalledTimes(1);
+    expect(markDoneMock).toHaveBeenCalledWith("job-1");
+  });
 });
 
 describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
@@ -172,7 +215,13 @@ describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
 
   it("honours an explicit measured: false and discards any rank sent alongside it", async () => {
     getJobMock.mockResolvedValue(baseJob());
-    await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 5, measured: false }] }));
+    // idx 1 carries a real measurement so this body isn't itself the
+    // whole-grid-unmeasured case covered separately above — this test is
+    // only about how idx 0's own entry is parsed.
+    await POST(req({
+      run_id: "job-1",
+      ranks: [{ idx: 0, rank: 5, measured: false }, { idx: 1, rank: 2, measured: true }],
+    }));
     const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
     expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: null, measured: false });
   });
@@ -183,7 +232,10 @@ describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
     // corruption this branch exists to prevent: a failed lookup would land
     // as {rank: null, measured: true} — a confirmed non-rank.
     getJobMock.mockResolvedValue(baseJob());
-    await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 5, measured: "false" }] }));
+    await POST(req({
+      run_id: "job-1",
+      ranks: [{ idx: 0, rank: 5, measured: "false" }, { idx: 1, rank: 2, measured: true }],
+    }));
     const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
     expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: null, measured: false });
   });

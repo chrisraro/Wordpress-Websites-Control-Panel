@@ -6,7 +6,7 @@ import { computeRetryDelayMs } from "@/services/jobs/service";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { completeGeoGridRun } from "@/services/geogrid/run";
 import { buildGrid } from "@/services/geogrid/grid";
-import type { RankPoint } from "@/services/geogrid/types";
+import { measuredCount, type RankPoint } from "@/services/geogrid/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -135,6 +135,34 @@ export async function POST(req: Request) {
     const entry = byIdx.get(p.idx);
     return entry ? { ...p, rank: entry.rank, measured: entry.measured } : { ...p, rank: null, measured: false };
   });
+
+  // `hasRanks` above only checks that ranks[] is non-empty, not that any of
+  // it is real data. A whole-run outage reported per-point (the shape the
+  // n8n workflow's per-point error handling produces, e.g.
+  // {error: "quota exceeded", ranks: [81 x {idx, measured:false}]} — or the
+  // same with no top-level `error` at all) would otherwise take the success
+  // path below: a snapshot with zero measured points, `markDone`, no retry,
+  // no failed-run alert. Route a zero-measured body through the same retry
+  // ladder as an explicit total-failure `error` with no ranks, regardless of
+  // which shape n8n sent it in.
+  if (typeof body.error === "string" && body.error) {
+    // Discarded otherwise: a body carrying both `ranks` and `error` never
+    // reaches the early "no ranks" branch above, so without this the reason
+    // a lookup failed is unrecoverable even though ranks[] shows the damage.
+    console.error(`GeoGrid callback for job ${jobId} included error alongside ranks: ${body.error}`);
+  }
+  if (grid.length > 0 && measuredCount(ranks) === 0) {
+    const msg = typeof body.error === "string" && body.error
+      ? `n8n reported: ${body.error}`
+      : `n8n posted ${ranks.length} point(s), none measured`;
+    const delay = computeRetryDelayMs(job.attempts);
+    if (delay === null) {
+      await jobs.markFailed(jobId, msg);
+      return NextResponse.json({ ok: true, recorded: "error" });
+    }
+    await jobs.retry(jobId, msg, new Date(Date.now() + delay).toISOString());
+    return NextResponse.json({ ok: true, recorded: "retry" });
+  }
 
   await completeGeoGridRun(geogrid, payload.config_id, payload.keyword, ranks);
   await jobs.markDone(jobId);
