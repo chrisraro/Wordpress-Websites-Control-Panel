@@ -72,9 +72,13 @@ behaves as expected, then delete.
 
 ## Bulk actions run through the job queue
 
-Selecting multiple rows and choosing an action (Update, Activate, Deactivate,
-Delete) does not run inline. It enqueues one `bulk_manage` job **per selected
-item**, all sharing a single `batch_id`. That means:
+Selecting multiple rows and choosing an action does not run inline. It
+enqueues one `bulk_manage` job **per selected item**, all sharing a single
+`batch_id`. Plugins offer all four bulk actions (Update, Activate,
+Deactivate, Delete); themes offer only **Update and Delete**
+(`theme-table.tsx`'s `BULK_KINDS`) — themes are switched, not deactivated,
+and bulk-activating many themes at once is meaningless since only one theme
+can be active at a time. That means:
 
 - A failure in one item retries independently on the normal job backoff
   (60s/300s/fail-at-3) without blocking or aborting its siblings.
@@ -109,9 +113,11 @@ The site header has a button that opens the site's `admin_url` (collected
 from WordPress's own `admin_url()`, not constructed by concatenating
 `/wp-admin` onto the stored site URL, which breaks for subdirectory installs)
 in a new tab with `rel="noopener noreferrer"`. No credentials are sent by the
-panel; the site's own login — including its 2FA — still applies. The site's
-WordPress username is shown next to the button with a copy control so a
-password manager has what it needs to fill in the password.
+panel; the site's own login — including its 2FA — still applies. Next to the
+button is a "Copy WP username" control (`CopyValueButton`) — it copies the
+username to the clipboard on click but does not display it inline; the
+username itself is shown as plain text further down the page, in the site's
+details list (the "WP user" field).
 
 **Application passwords cannot be used to log in there.** Measured on
 WordPress 7.1 by minting a real application password and forcing

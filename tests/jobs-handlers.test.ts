@@ -16,12 +16,19 @@ import { buildJobHandlers, resolveInstallKind } from "@/services/jobs/handlers";
 // right bucket, rather than re-testing their internals.
 const installPluginMock = vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true, output: "Installed" }));
 const installThemeMock = vi.fn((..._args: unknown[]) => Promise.resolve({ ok: true, output: "Installed" }));
+const manageSiteMock = vi.fn(
+  (..._args: unknown[]): Promise<{ ok: boolean; output?: string; error?: string }> =>
+    Promise.resolve({ ok: true, output: "Done" }),
+);
 
 vi.mock("@/services/marketplace/install", () => ({
   installPlugin: (...args: unknown[]) => installPluginMock(...args),
 }));
 vi.mock("@/services/themes/install", () => ({
   installTheme: (...args: unknown[]) => installThemeMock(...args),
+}));
+vi.mock("@/services/manage/service", () => ({
+  manageSite: (...args: unknown[]) => manageSiteMock(...args),
 }));
 
 function fakeDb(signedUrl = "https://signed.example/pkg.zip") {
@@ -47,11 +54,12 @@ function fakeDb(signedUrl = "https://signed.example/pkg.zip") {
   return { db, storageCalls };
 }
 
-function jobRow(payload: Record<string, unknown>): JobRow {
+function jobRow(payload: Record<string, unknown>, overrides: Partial<JobRow> = {}): JobRow {
   return {
     id: "job-1", type: "plugin_install", site_id: "site-1", batch_id: null,
     payload, status: "running", attempts: 0,
     scheduled_for: new Date(0).toISOString(), last_error: null,
+    ...overrides,
   };
 }
 
@@ -128,5 +136,119 @@ describe("plugin_install handler dispatch", () => {
     expect(storageCalls).toEqual(["plugins"]);
     expect(installPluginMock).toHaveBeenCalledTimes(1);
     expect(installPluginMock.mock.calls[0][3]).toEqual({ kind: "url", url: "https://signed.example/plugin.zip" });
+  });
+});
+
+// bulk_manage turns one queued item from a bulk update/activate/deactivate/
+// delete selection into a manageSite() call. It was previously untested:
+// none of the guards below, nor the throw-on-!result.ok contract the whole
+// retry ladder depends on (a thrown error is what puts the job back on the
+// retry ladder in services/jobs/service.ts; a failing item must never abort
+// its batch siblings, which are separate jobs).
+describe("bulk_manage handler", () => {
+  beforeEach(() => {
+    manageSiteMock.mockClear();
+  });
+
+  it("throws on a malformed payload (missing kind/target/id/actor)", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    const job = jobRow({ kind: "delete", target: "plugin" }, { type: "bulk_manage" }); // no id, no actor
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("bulk_manage payload malformed");
+    expect(manageSiteMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when the job has no site_id", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
+      { type: "bulk_manage", site_id: null },
+    );
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("bulk_manage requires a site_id");
+    expect(manageSiteMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates toManageAction's throw for an invalid kind/target combination", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    // Themes are switched, never deactivated — toManageAction rejects this
+    // combination before manageSite is ever reached.
+    const job = jobRow(
+      { kind: "deactivate", target: "theme", id: "storefront", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("Themes cannot be deactivated");
+    expect(manageSiteMock).not.toHaveBeenCalled();
+  });
+
+  it("throws with the underlying error when manageSite reports !ok, so the job retries", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Deactivate the plugin before deleting it" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("Deactivate the plugin before deleting it");
+  });
+
+  it("treats a retried plugin delete that reports 'Plugin is not installed' as idempotent success", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).resolves.toBeUndefined();
+  });
+
+  it("treats a retried theme delete that reports 'Theme is not installed' as idempotent success", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Theme is not installed" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "theme", id: "storefront", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).resolves.toBeUndefined();
+  });
+
+  it("still fails a non-delete kind that reports 'not installed' (genuine failure, not a retry)", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("Plugin is not installed");
+  });
+
+  it("does not treat a mismatched target's 'not installed' text as idempotent (theme id, plugin error text)", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "theme", id: "storefront", actor: "user-1" },
+      { type: "bulk_manage" },
+    );
+    await expect(handlers.bulk_manage!({ job })).rejects.toThrow("Plugin is not installed");
+  });
+
+  it("routes a successful plugin delete to the delete_plugin ManageAction", async () => {
+    const { db } = fakeDb();
+    manageSiteMock.mockResolvedValueOnce({ ok: true, output: "Plugin deleted" });
+    const handlers = buildJobHandlers(db);
+    const job = jobRow(
+      { kind: "delete", target: "plugin", id: "akismet/akismet.php", label: "Akismet", actor: "user-1" },
+      { type: "bulk_manage", site_id: "site-1" },
+    );
+    await expect(handlers.bulk_manage!({ job })).resolves.toBeUndefined();
+    expect(manageSiteMock).toHaveBeenCalledTimes(1);
+    expect(manageSiteMock.mock.calls[0]).toMatchObject([
+      expect.anything(), "site-1", "user-1", { kind: "delete_plugin", file: "akismet/akismet.php" },
+    ]);
   });
 });

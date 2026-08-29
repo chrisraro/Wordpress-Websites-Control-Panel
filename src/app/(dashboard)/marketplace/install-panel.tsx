@@ -15,7 +15,13 @@ export function InstallPanel({
 }: { slug: string; name: string; sites: SiteOption[]; target?: "plugin" | "theme" }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [activate, setActivate] = useState(true);
+  // Plugins: default on — activating one plugin on a site is low-stakes.
+  // Themes: default OFF — checking this on N selected sites switches every
+  // one of those sites' live front-end appearance, with nothing else in this
+  // modal warning about it otherwise. Compare the per-row theme "Activate"
+  // action and "Create and activate" child theme, which both carry a confirm
+  // dialog naming the consequence before it happens.
+  const [activate, setActivate] = useState(target !== "theme");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -118,6 +124,13 @@ export function InstallPanel({
           />
           <span className="text-body text-ink">Activate after install</span>
         </label>
+
+        {target === "theme" && activate && (
+          <p className="mt-2 flex items-start gap-2 text-body text-ember">
+            <IconAlert size={16} className="mt-0.5 shrink-0" />
+            This switches the live theme immediately on every site selected above.
+          </p>
+        )}
 
         {error && (
           <p aria-live="polite" className="mt-3 flex items-start gap-2 text-body text-ember">

@@ -21,6 +21,23 @@ require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 global $wp_filesystem; WP_Filesystem();
 `;
 
+// Same parentage check `buildPhp("activate_theme")` uses in
+// src/services/manage/service.ts, duplicated here rather than shared because
+// the two live in separate PHP snippet builders with no common runtime.
+// `var` names the PHP variable holding the stylesheet slug to check; the
+// activation is skipped (not failed) so a successful install is never
+// reported as having failed just because the operator also asked to
+// activate — see the "Installed (activation skipped: ...)" precedent right
+// below for the same shape used when the stylesheet itself is unknown.
+function skipActivationIfParentMissing(varName: string, installedMessage: string): string {
+  return `
+$__t = wp_get_theme(${varName});
+$__parent = $__t->get_template();
+if ($__parent && $__parent !== ${varName} && !wp_get_theme($__parent)->exists()) {
+  return json_encode(array('ok' => true, 'message' => '${installedMessage} (activation skipped: parent theme ' . $__parent . ' is not installed)', 'slug' => ${varName}));
+}`;
+}
+
 export function buildThemeInstallPhp(source: InstallSource, activate: boolean): string {
   const activatePhp = activate
     ? `
@@ -28,6 +45,7 @@ $theme = $up->theme_info();
 $stylesheet = $theme ? $theme->get_stylesheet() : null;
 if (!$stylesheet) { return json_encode(array('ok' => true, 'message' => 'Installed (activation skipped: stylesheet unknown)')); }
 if (get_stylesheet() === $stylesheet) { return json_encode(array('ok' => true, 'message' => 'Installed (already active)', 'slug' => $stylesheet)); }
+${skipActivationIfParentMissing("$stylesheet", "Installed")}
 switch_theme($stylesheet);
 return json_encode(array('ok' => true, 'message' => 'Installed and activated', 'slug' => $stylesheet));`
     : `
@@ -39,6 +57,7 @@ return json_encode(array('ok' => true, 'message' => 'Theme installed'));`;
     const existingPhp = activate
       ? `
 if (get_stylesheet() === $slug) { return json_encode(array('ok' => true, 'message' => 'Already installed and active', 'slug' => $slug)); }
+${skipActivationIfParentMissing("$slug", "Already installed")}
 switch_theme($slug);
 return json_encode(array('ok' => true, 'message' => 'Already installed — activated', 'slug' => $slug));`
       : `

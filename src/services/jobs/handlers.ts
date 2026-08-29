@@ -155,7 +155,25 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       );
       // Throwing puts the job on the retry ladder; a failing item must never
       // abort its siblings, which are separate jobs.
-      if (!result.ok) throw new Error(result.error ?? "Bulk action failed");
+      if (!result.ok) {
+        // A slow bulk run can be killed by the platform's function time
+        // limit mid-item. The job is left `running`, gets re-claimed ~15
+        // minutes later by the retry ladder, and re-runs — but the delete
+        // already succeeded, so the item is already gone. The PHP in
+        // services/manage/service.ts then returns exactly "Plugin is not
+        // installed" / "Theme is not installed" for delete_plugin/
+        // delete_theme. Without this, that retry turns a *successful*
+        // delete into a reported failure, and the operator concludes the
+        // plugin/theme is still on the site when it is not. Scoped to
+        // delete kinds only: for every other kind, "not installed" is a
+        // genuine failure (e.g. the item was deleted out from under an
+        // update/activate job) and must still throw.
+        const deletedAlready = p.kind === "delete" && (
+          (p.target === "plugin" && result.error === "Plugin is not installed") ||
+          (p.target === "theme" && result.error === "Theme is not installed")
+        );
+        if (!deletedAlready) throw new Error(result.error ?? "Bulk action failed");
+      }
     },
   };
 }

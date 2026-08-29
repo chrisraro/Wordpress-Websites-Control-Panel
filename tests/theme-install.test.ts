@@ -44,6 +44,46 @@ describe("buildThemeInstallPhp", () => {
     expect(php).toContain("switch_theme");
   });
 
+  // A child theme whose parent isn't installed produces a broken site if we
+  // switch_theme() to it unconditionally — WordPress falls back to a bundled
+  // default (unexplained branding change) or wp_die()s. Both switch_theme()
+  // call sites (the fresh-install activation path, and the already-installed
+  // wp.org short-circuit) must be guarded, not just one of them — a weak
+  // assertion that "switch_theme appears somewhere" would pass even if only
+  // one site were fixed, which is exactly what let this regress originally.
+  it("guards the fresh-install activation path against a missing parent theme", () => {
+    const php = buildThemeInstallPhp({ kind: "url", url: "https://x/child.zip" }, true);
+    const guardIndex = php.indexOf("get_template()");
+    const switchIndex = php.indexOf("switch_theme($stylesheet)");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(switchIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(switchIndex);
+    expect(php).toContain("wp_get_theme($__parent)->exists()");
+    expect(php).toContain("activation skipped: parent theme");
+    // Skipping activation must not fail the install that already succeeded.
+    expect(php).toMatch(/'ok' => true, 'message' => 'Installed \(activation skipped: parent theme/);
+  });
+
+  it("guards the already-installed wp.org short-circuit against a missing parent theme", () => {
+    const php = buildThemeInstallPhp({ kind: "wporg", slug: "child-theme" }, true);
+    const existingBlockStart = php.indexOf("if (wp_get_theme($slug)->exists())");
+    const guardIndex = php.indexOf("get_template()");
+    const switchIndex = php.indexOf("switch_theme($slug)");
+    expect(existingBlockStart).toBeGreaterThan(-1);
+    expect(guardIndex).toBeGreaterThan(existingBlockStart);
+    expect(switchIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(switchIndex);
+    expect(php).toContain("wp_get_theme($__parent)->exists()");
+    expect(php).toMatch(/'ok' => true, 'message' => 'Already installed \(activation skipped: parent theme/);
+  });
+
+  it("does not add the parent-theme guard when activation was not requested", () => {
+    const fresh = buildThemeInstallPhp({ kind: "url", url: "https://x/t.zip" }, false);
+    expect(fresh).not.toContain("get_template()");
+    const existing = buildThemeInstallPhp({ kind: "wporg", slug: "storefront" }, false);
+    expect(existing).not.toContain("get_template()");
+  });
+
   it("surfaces the real upgrader failure reason instead of a generic message", () => {
     // Theme_Upgrader::install() returning false means the skin captured the
     // actual reason (bad permissions, expired URL, corrupt zip); read it

@@ -11,9 +11,9 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
   return (
     <main>
       <Breadcrumbs
-        items={[{ label: "Marketplace", href: "/marketplace" }, { label: "Install batch" }]}
+        items={[{ label: "Marketplace", href: "/marketplace" }, { label: "Batch" }]}
       />
-      <h1 className="text-heading-sm font-semibold text-ink">Install batch</h1>
+      <h1 className="text-heading-sm font-semibold text-ink">Batch</h1>
       <p className="mb-6 mt-1 break-all text-caption tracking-normal text-mid-gray">{id}</p>
       <BatchPoller batchId={id} />
     </main>
