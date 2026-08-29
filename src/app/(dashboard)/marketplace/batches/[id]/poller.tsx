@@ -137,10 +137,11 @@ export function BatchPoller({ batchId }: { batchId: string }) {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-body">
+          <table className="w-full min-w-[720px] text-body">
             <thead>
               <tr className={tableHeadClass}>
                 <th className="px-5 py-3 font-medium">Item</th>
+                <th className="px-5 py-3 font-medium">Site</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Attempts</th>
                 <th className="px-5 py-3 font-medium">Error</th>
@@ -150,6 +151,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
               {jobs.map((j) => (
                 <tr key={j.id} className={tableRowClass}>
                   <td className={`${tableCellClass} font-medium text-ink`}>{j.label}</td>
+                  <td className={`${tableCellClass} text-mid-gray`}>{j.site_name}</td>
                   <td className={tableCellClass}>
                     <StatusBadge tone={STATUS_TONE[j.status] ?? "idle"}>
                       {j.status.replace("_", " ")}

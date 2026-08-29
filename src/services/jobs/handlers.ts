@@ -48,6 +48,23 @@ interface BulkManagePayload extends BulkJobPayload {
   actor: string;
 }
 
+export type InstallKind = "plugin" | "theme";
+
+/**
+ * Pure dispatch decision for the plugin_install handler: which installer to
+ * run and which storage bucket an uploaded package's signed URL comes from.
+ * Extracted so the theme/plugin branch — and its backward-compatible
+ * "no target field at all" default to plugin — has direct test coverage
+ * without standing up the handler's full Supabase + MCP scaffolding.
+ */
+export function resolveInstallKind(target: PluginInstallPayload["target"]): {
+  kind: InstallKind;
+  bucket: "plugins" | "themes";
+} {
+  const kind: InstallKind = target === "theme" ? "theme" : "plugin";
+  return { kind, bucket: kind === "theme" ? "themes" : "plugins" };
+}
+
 export function buildJobHandlers(db: SupabaseClient): JobHandlers {
   const sites = supabaseSitesRepo(db);
   const snapshots = supabaseSnapshotsRepo(db);
@@ -75,10 +92,10 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("plugin_install requires site_id");
       const p = job.payload as unknown as PluginInstallPayload;
       if (!p?.source || typeof p.actor !== "string") throw new Error("plugin_install payload malformed");
-      const isTheme = p.target === "theme";
+      const { kind, bucket } = resolveInstallKind(p.target);
+      const isTheme = kind === "theme";
       let source: InstallSource;
       if (p.source.kind === "upload") {
-        const bucket = isTheme ? "themes" : "plugins";
         const { data, error } = await db.storage.from(bucket).createSignedUrl(p.source.path, 3600);
         if (error || !data?.signedUrl) {
           throw new Error(`Could not sign uploaded ${isTheme ? "theme" : "plugin"} URL: ${error?.message ?? "unknown"}`);

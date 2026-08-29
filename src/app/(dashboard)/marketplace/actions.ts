@@ -29,10 +29,17 @@ export async function createInstallBatchAction(input: {
     return { ok: false, error: "Invalid upload path" };
   }
   const db = createServiceSupabase();
+  // Install batches are one item across many sites, so the batch table's
+  // "Item" column needs the thing being installed, not the (per-row) site
+  // name the API falls back to when a payload carries no label.
+  const label =
+    input.source.kind === "wporg"
+      ? input.source.slug
+      : input.source.path.split("/").pop() || "Uploaded package";
   try {
     const { batchId } = await enqueueBatch(supabaseJobsRepo(db), "plugin_install", input.siteIds, {
       source: input.source, activate: Boolean(input.activate), actor: user.id,
-      target: input.target ?? "plugin",
+      target: input.target ?? "plugin", label,
     });
     return { ok: true, batchId };
   } catch (e) {
