@@ -117,6 +117,17 @@ describe("measuredCount / coverage with unmeasured points", () => {
     expect(coverage(pts)).toBe(0);
   });
 
+  it("never lets a rank on an unmeasured point feed the average, even if one is present", () => {
+    // A stale/partial rank sent alongside measured:false is not data — see
+    // averageRank's `measured !== false` filter, which must reject the rank
+    // itself, not just rely on the writer having already nulled it out.
+    const pts: RankPoint[] = [
+      { idx: 0, lat: 0, lng: 0, rank: 1 },
+      { idx: 1, lat: 0, lng: 0, rank: 5, measured: false },
+    ];
+    expect(averageRank(pts)).toBe(1);
+  });
+
   it("treats every point as measured on a pre-existing snapshot with no measured field at all", () => {
     const legacy: RankPoint[] = [
       { idx: 0, lat: 0, lng: 0, rank: 2 },

@@ -190,7 +190,7 @@ export default async function GeoGridPage({
                     confirm={{
                       title: "Dismiss failed runs?",
                       description:
-                        "This dismisses all failed runs for this site, not just the ones shown above — the runs stay in the record for diagnosis, this only clears the alert.",
+                        "This dismisses all failed GeoGrid runs for this site, not just the ones shown above — the runs stay in the record for diagnosis, this only clears the alert.",
                       confirmLabel: "Dismiss",
                     }}
                     showInlineError={false}
@@ -292,11 +292,21 @@ export default async function GeoGridPage({
                           <td className={tableCellClass}>{new Date(snap.run_at).toLocaleString()}</td>
                           <td className={tableCellClass}>{averageRank(snap.points) ?? "—"}</td>
                           <td className={tableCellClass}>
-                            {coverage(snap.points)}%
-                            {measured < total && (
-                              <span className="ml-1.5 text-caption tracking-normal text-mid-gray">
-                                ({measured}/{total} measured)
-                              </span>
+                            {measured === 0 ? (
+                              // Matches the "Coverage" stat card above, which
+                              // also reads "—" rather than "0%" when nothing
+                              // was measured — a coverage percentage implies
+                              // there was something to compute it over.
+                              "—"
+                            ) : (
+                              <>
+                                {coverage(snap.points)}%
+                                {measured < total && (
+                                  <span className="ml-1.5 text-caption tracking-normal text-mid-gray">
+                                    ({measured}/{total} measured)
+                                  </span>
+                                )}
+                              </>
                             )}
                           </td>
                         </tr>

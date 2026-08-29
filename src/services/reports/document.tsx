@@ -88,7 +88,7 @@ export function geoGridKeywordLine(k: {
     return `${rank}, not enough data — 0 of ${k.total} locations could be measured (${when})`;
   }
   if (k.measured < k.total) {
-    return `${rank}, visible at ${k.coverage}% of locations (only ${k.measured} of ${k.total} could be measured) (${when})`;
+    return `${rank}, visible at ${k.coverage}% of locations — only ${k.measured} of ${k.total} could be measured (${when})`;
   }
   return `${rank}, visible at ${k.coverage}% of locations (${when})`;
 }
