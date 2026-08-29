@@ -134,7 +134,14 @@
 -- this check would run require_one_admin() on that call regardless,
 -- coupling the very statement that grants an environment's first
 -- administrator to a check written to catch an admin being taken away,
--- not one being granted. Row-level has no such coupling: an AFTER UPDATE
+-- not one being granted. On bootstrap-admin's own call that coupling is
+-- harmless -- the row it inserts IS the admin, so the check passes -- but
+-- the same shape refuses outright one step to the side: seeding any
+-- non-admin role first into an empty user_roles (inviting a developer
+-- before anyone has been bootstrapped) fires the statement-level trigger,
+-- finds no admin after the statement, and raises, blocking a perfectly
+-- reasonable order of operations on a fresh environment. Row-level has no
+-- such coupling: an AFTER UPDATE
 -- row-level trigger only fires for rows that actually took the DO UPDATE
 -- branch -- documented Postgres behaviour for `insert ... on conflict do
 -- update` -- so a statement made up entirely of fresh inserts never
