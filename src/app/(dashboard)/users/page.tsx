@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/authz/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseUsersRepo } from "@/services/users/repo";
@@ -7,7 +8,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui/primitives";
 import { tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
-import { IconUsers } from "@/components/ui/icons";
+import { IconChevronRight, IconUsers } from "@/components/ui/icons";
 import { InviteDialog } from "./invite-dialog";
 import type { AppRole } from "@/lib/authz/types";
 
@@ -68,6 +69,9 @@ export default async function UsersPage() {
                   <th className="px-5 py-3 font-medium">Sites</th>
                   <th className="px-5 py-3 font-medium">Last sign-in</th>
                   <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3">
+                    <span className="sr-only">Manage</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -98,6 +102,16 @@ export default async function UsersPage() {
                       ) : (
                         <StatusBadge tone="good">Active</StatusBadge>
                       )}
+                    </td>
+                    <td className={`${tableCellClass} text-right`}>
+                      <Link
+                        href={`/users/${u.id}`}
+                        className="inline-flex items-center gap-1 text-body text-ink underline-offset-2
+                          transition-colors duration-150 hover:underline"
+                      >
+                        Manage
+                        <IconChevronRight size={14} className="shrink-0" />
+                      </Link>
                     </td>
                   </tr>
                 ))}
