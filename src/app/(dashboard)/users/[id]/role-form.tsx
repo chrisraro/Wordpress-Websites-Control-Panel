@@ -116,7 +116,7 @@ export function RoleForm({
           >
             {currentRole === null && (
               <option value="" disabled>
-                No role — cannot sign in
+                No role — sees nothing
               </option>
             )}
             {APP_ROLES.map((r) => (
