@@ -7,14 +7,25 @@
  * seed.sql is not an option either — it never runs against a linked project.
  */
 import { createClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-  if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+if (existsSync(".env.local")) {
+  for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (!m || process.env[m[1]]) continue;
+    let value = m[2].trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[m[1]] = value;
+  }
 }
 
-const email = process.env.BOOTSTRAP_ADMIN_EMAIL;
+const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim();
 if (!email) throw new Error("Set BOOTSTRAP_ADMIN_EMAIL");
 
 const db = createClient(
@@ -23,10 +34,19 @@ const db = createClient(
   { auth: { persistSession: false } },
 );
 
+async function findUserByEmail(target: string) {
+  const perPage = 50;
+  for (let page = 1; ; page++) {
+    const { data: list, error: listErr } = await db.auth.admin.listUsers({ page, perPage });
+    if (listErr) throw listErr;
+    const match = list.users.find((u) => u.email?.toLowerCase() === target.toLowerCase());
+    if (match) return match;
+    if (list.users.length < perPage) return undefined;
+  }
+}
+
 async function main() {
-  const { data: list, error: listErr } = await db.auth.admin.listUsers();
-  if (listErr) throw listErr;
-  let user = list.users.find((u) => u.email?.toLowerCase() === email!.toLowerCase());
+  let user = await findUserByEmail(email!);
 
   if (!user) {
     // No password is ever set here — the invite link lets them choose one.
@@ -46,4 +66,7 @@ async function main() {
   console.log(`admin: ${email} (${user!.id})`);
 }
 
-void main();
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exitCode = 1;
+});
