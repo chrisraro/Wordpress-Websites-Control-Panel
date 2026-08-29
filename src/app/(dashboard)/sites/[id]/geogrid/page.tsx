@@ -8,13 +8,15 @@ import { requireSiteAccess } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
 import { can } from "@/lib/authz/decide";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
-import { averageRank, coverage, measuredCount } from "@/services/geogrid/types";
+import { averageRank, coverage, measuredCount, resolveRunPreview } from "@/services/geogrid/types";
+import { isOpenJobStatus } from "@/services/jobs/service";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
 import { runGeoGridAction, dismissFailedGeoGridRunsAction } from "../geogrid-actions";
 import { drainQueueAction } from "../../../queue-actions";
 import { GeoGridConfigForm } from "./config-form";
 import { GridMap } from "./grid-map";
+import { GeoGridRunPoller } from "./run-poller";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, EmptyState, Stat, StatusBadge } from "@/components/ui/primitives";
 import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
@@ -24,9 +26,9 @@ export const dynamic = "force-dynamic";
 
 export default async function GeoGridPage({
   params, searchParams,
-}: { params: Promise<{ id: string }>; searchParams: Promise<{ k?: string }> }) {
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ k?: string; run?: string }> }) {
   const { id } = await params;
-  const { k } = await searchParams;
+  const { k, run } = await searchParams;
   const viewer = await requireSiteAccess(id);
   const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, id);
@@ -58,23 +60,31 @@ export default async function GeoGridPage({
   if (runJobsError) {
     console.error(`GeoGrid page: failed to load run jobs for site ${id}`, runJobsError);
   }
-  const openRuns = (runJobs ?? []).filter(
-    (j) => j.status === "pending" || j.status === "running" || j.status === "awaiting_callback",
-  );
+  const openRuns = (runJobs ?? []).filter((j) => isOpenJobStatus(j.status));
   // Dismissed failures stay in the table (and in runJobs above, for anything
   // that ever inspects the raw rows) — they are just left out of this alert.
   const failedRuns = (runJobs ?? []).filter((j) => j.status === "failed" && !j.dismissed_at);
 
-  const run = runGeoGridAction.bind(null, id);
+  const runAction = runGeoGridAction.bind(null, id);
   const dismissFailed = dismissFailedGeoGridRunsAction.bind(null, id);
   const drainQueue = drainQueueAction.bind(null, `/sites/${id}/geogrid`);
-  const avg = current ? averageRank(current.points) : null;
-  const cov = current ? coverage(current.points) : 0;
-  const currentMeasured = current ? measuredCount(current.points) : 0;
-  const currentTotal = current ? current.points.length : 0;
-  const currentHasGap = current !== undefined && currentMeasured < currentTotal;
-  const previous = history[1];
-  const prevAvg = previous ? averageRank(previous.points) : null;
+
+  // Which run the map and stats below show: the `run` query param (a
+  // snapshot id) if it resolves against this keyword's loaded history,
+  // otherwise the latest — see resolveRunPreview for why an unrecognised id
+  // falls back rather than erroring. The stats derive from `previewed`
+  // throughout so they can never show one run's numbers over another run's
+  // map (see isPreviewingPast below).
+  const preview = resolveRunPreview(history, run);
+  const previewed = preview.snapshot ?? current;
+  const previousSnap = history[preview.index + 1];
+  const isPreviewingPast = preview.isPast;
+  const avg = previewed ? averageRank(previewed.points) : null;
+  const cov = previewed ? coverage(previewed.points) : 0;
+  const currentMeasured = previewed ? measuredCount(previewed.points) : 0;
+  const currentTotal = previewed ? previewed.points.length : 0;
+  const currentHasGap = previewed !== undefined && currentMeasured < currentTotal;
+  const prevAvg = previousSnap ? averageRank(previousSnap.points) : null;
   const delta = avg !== null && prevAvg !== null ? Math.round((prevAvg - avg) * 10) / 10 : null;
 
   return (
@@ -125,7 +135,7 @@ export default async function GeoGridPage({
 
             {canManageGeoGrid && (
               <ManageForm
-                action={run}
+                action={runAction}
                 label={`Run scan (${config.keywords.length} keyword${config.keywords.length === 1 ? "" : "s"})`}
                 pendingLabel="Queueing…"
                 success="Scan queued"
@@ -204,6 +214,27 @@ export default async function GeoGridPage({
             </div>
           )}
 
+          {/* Renders nothing — see run-poller.tsx. Refreshes this page and
+              toasts the outcome once every open run for this site settles,
+              so the tab never needs a manual reload to find out. */}
+          <GeoGridRunPoller siteId={id} active={openRuns.length > 0} />
+
+          {isPreviewingPast && previewed && (
+            <div className={`${cardClass} mb-4 flex flex-wrap items-center gap-3 p-4`}>
+              <StatusBadge tone="info">Past run</StatusBadge>
+              <p className="text-body text-mid-gray">
+                Showing {keyword} from {new Date(previewed.run_at).toLocaleString()} — not the
+                latest scan. The map and stats below are scoped to this run.
+              </p>
+              <Link
+                href={`/sites/${id}/geogrid?k=${encodeURIComponent(keyword ?? "")}`}
+                className="ml-auto text-body font-medium text-ink underline underline-offset-2"
+              >
+                View latest
+              </Link>
+            </div>
+          )}
+
           <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat
               label="Average rank"
@@ -243,14 +274,14 @@ export default async function GeoGridPage({
 
           <div className="mb-4">
             <GridMap
-              points={current?.points ?? []}
+              points={previewed?.points ?? []}
               center={{ lat: config.center_lat, lng: config.center_lng }}
               businessName={config.business_name}
             />
-            {current ? (
+            {previewed ? (
               <p className="mt-2 flex flex-wrap items-center gap-x-2 text-caption tracking-normal text-mid-gray">
                 <span>{keyword}</span>
-                <span>· scanned {new Date(current.run_at).toLocaleString()}</span>
+                <span>· scanned {new Date(previewed.run_at).toLocaleString()}</span>
                 <span className="inline-flex items-center gap-1.5">
                   ·
                   <span aria-hidden className="size-1.5 rounded-full bg-status-good" />
@@ -275,6 +306,9 @@ export default async function GeoGridPage({
           {history.length > 1 && (
             <Card className="mb-4 overflow-hidden">
               <CardTitle>Run history — {keyword}</CardTitle>
+              <p className="px-5 pb-2 pt-4 text-caption tracking-normal text-mid-gray sm:hidden">
+                Tap a run to preview it on the map above.
+              </p>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[420px] text-body">
                   <thead>
@@ -285,13 +319,53 @@ export default async function GeoGridPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((snap) => {
+                    {history.map((snap, i) => {
                       const measured = measuredCount(snap.points);
                       const total = snap.points.length;
+                      const isSelected = snap.id === preview.snapshot?.id;
+                      const runDate = new Date(snap.run_at).toLocaleString();
                       return (
-                        <tr key={snap.id} className={tableRowClass}>
-                          <td className={tableCellClass}>{new Date(snap.run_at).toLocaleString()}</td>
-                          <td className={tableCellClass}>{averageRank(snap.points) ?? "—"}</td>
+                        // `relative` on the row is what a plain absolutely-
+                        // positioned link inside one cell can anchor to,
+                        // stretching that link to cover the full row — a big
+                        // click target built from a real, keyboard-reachable
+                        // <a>, not a `<tr onClick>` (which is neither).
+                        <tr
+                          key={snap.id}
+                          // A deeper fill than the hover state (surface-alt)
+                          // so a selected row still reads as selected once
+                          // the pointer moves away — colour is a supporting
+                          // cue here, not the only one; aria-current and the
+                          // "(showing)" text carry the state itself.
+                          className={`relative ${tableRowClass} ${isSelected ? "bg-canvas" : ""}`}
+                        >
+                          <td className={tableCellClass}>
+                            <Link
+                              href={`/sites/${id}/geogrid?k=${encodeURIComponent(keyword ?? "")}&run=${snap.id}`}
+                              // `aria-current`, not colour alone, is the
+                              // selected state assistive tech gets — matches
+                              // the keyword tabs above, which mark their own
+                              // active tab the same way.
+                              aria-current={isSelected ? "true" : undefined}
+                              // A bare date is not enough context once this
+                              // link is the only thing a screen reader
+                              // announces for the row: name the keyword and
+                              // whether it's the latest run too.
+                              aria-label={`Preview the ${i === 0 ? "latest " : ""}${keyword} run from ${runDate} on the map${isSelected ? " (currently shown)" : ""}`}
+                              className="absolute inset-0 rounded-2xl focus-visible:outline
+                                focus-visible:outline-2 focus-visible:outline-offset-[-2px]
+                                focus-visible:outline-ink"
+                            />
+                            <span>{runDate}</span>
+                            {isSelected && (
+                              <span className="ml-2 text-caption tracking-normal text-mid-gray">
+                                (showing)
+                              </span>
+                            )}
+                          </td>
+                          <td className={tableCellClass}>
+                            {averageRank(snap.points) ?? "—"}
+                          </td>
                           <td className={tableCellClass}>
                             {measured === 0 ? (
                               // Matches the "Coverage" stat card above, which

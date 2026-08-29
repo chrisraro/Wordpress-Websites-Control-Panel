@@ -80,3 +80,32 @@ export function coverage(points: RankPoint[]): number {
   const found = measured.filter((p) => typeof p.rank === "number").length;
   return Math.round((found / measured.length) * 100);
 }
+
+export interface RunPreview {
+  /** The run to draw and report stats for. `undefined` only when `history`
+   * is itself empty — there is nothing to preview yet. */
+  snapshot: GeoGridSnapshot | undefined;
+  /** Index of `snapshot` within `history` (0 = latest), or -1 when `history`
+   * is empty. */
+  index: number;
+  /** True when the resolved run is anything other than the latest — this is
+   * what the GeoGrid page's "previewing a past run" banner keys off. */
+  isPast: boolean;
+}
+
+/**
+ * Resolves which run in `history` (already sorted newest-first, as
+ * GeoGridRepo.historyForKeyword returns it) a `run` query-param id selects.
+ * An absent id, or one that does not appear in `history` at all — including
+ * a stale bookmark for a run that has since scrolled out of the kept
+ * window, or an id copied from a different keyword's history — falls back
+ * to the latest run exactly as if no selection had been made, rather than
+ * erroring or silently rendering nothing.
+ */
+export function resolveRunPreview(history: GeoGridSnapshot[], requestedId: string | undefined): RunPreview {
+  const requestedIndex = requestedId ? history.findIndex((h) => h.id === requestedId) : -1;
+  if (requestedIndex === -1) {
+    return { snapshot: history[0], index: history.length > 0 ? 0 : -1, isPast: false };
+  }
+  return { snapshot: history[requestedIndex], index: requestedIndex, isPast: requestedIndex > 0 };
+}
