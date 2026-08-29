@@ -70,17 +70,19 @@ export async function installThemeAction(
 }
 
 /** Mirrors `prepareUploadAction` in the marketplace, but signs into the
- *  `themes` bucket rather than `plugins`. */
+ *  `themes` bucket rather than `plugins`. Unlike the marketplace version,
+ *  this one is per-site (it lives under sites/[id]/themes and its caller
+ *  always has a siteId in scope), so it checks site access here rather than
+ *  deferring to a later consumer. */
 export async function prepareThemeUploadAction(
+  siteId: string,
   filename: string,
 ): Promise<{ ok: boolean; path?: string; token?: string; error?: string }> {
   await requireUser();
-  // No siteId travels with this call — it only stages a signed upload URL
-  // in a shared bucket, so there is no per-site access to check here. The
-  // site-scoped check happens where the resulting path is actually used
-  // (installThemeAction).
   const gate = await checkPermission("wp_toolkit.manage");
   if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
   const safe = filename.replace(/[^A-Za-z0-9._-]/g, "_");
   if (!/\.zip$/i.test(safe)) return { ok: false, error: "Only .zip files are supported" };
   const path = `uploads/${randomUUID()}/${safe}`;

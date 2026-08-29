@@ -112,8 +112,7 @@ describe("runConnectionTest (exported helper)", () => {
   it("is refused on its own when sites.manage is missing, without calling testSiteConnection", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
     const result = await runConnectionTest("site-1");
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe(DENIED.error);
+    expect(result).toEqual({ ok: false, status: "disabled", error: DENIED.error });
     expect(checkSiteAccessMock).not.toHaveBeenCalled();
   });
 
@@ -121,8 +120,7 @@ describe("runConnectionTest (exported helper)", () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     checkSiteAccessMock.mockResolvedValue(DENIED);
     const result = await runConnectionTest("site-1");
-    expect(result.ok).toBe(false);
-    expect(result.error).toBe(DENIED.error);
+    expect(result).toEqual({ ok: false, status: "disabled", error: DENIED.error });
   });
 });
 
@@ -213,10 +211,19 @@ describe("installThemeAction", () => {
 });
 
 describe("prepareThemeUploadAction", () => {
-  it("is refused without wp_toolkit.manage (no siteId travels with this call)", async () => {
+  it("is refused without wp_toolkit.manage", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
-    const result = await prepareThemeUploadAction("theme.zip");
+    const result = await prepareThemeUploadAction("site-1", "theme.zip");
     expect(result).toEqual(DENIED);
+    expect(checkSiteAccessMock).not.toHaveBeenCalled();
+  });
+
+  it("is refused when the permission holds but there is no site access", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockResolvedValue(DENIED);
+    const result = await prepareThemeUploadAction("site-1", "theme.zip");
+    expect(result).toEqual(DENIED);
+    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1", "manage");
   });
 });
 
@@ -238,6 +245,12 @@ describe("createInstallBatchAction", () => {
     expect(checkSiteAccessMock).not.toHaveBeenCalled();
   });
 
+  // This is the invariant that keeps `prepareUploadAction` (below) safe to
+  // leave permission-only: that action mints an upload URL with no siteId at
+  // all, on the assumption that every site named in a later
+  // `createInstallBatchAction` call is checked before the uploaded path is
+  // consumed. Deleting this test removes the only thing pinning that
+  // assumption in place.
   it("rejects the whole batch when one of two site ids is not granted, and enqueues nothing", async () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     checkSiteAccessMock.mockImplementation((siteId: string) =>

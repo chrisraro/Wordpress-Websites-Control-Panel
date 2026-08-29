@@ -56,14 +56,22 @@ export async function createInstallBatchAction(input: {
   }
 }
 
+/**
+ * Deliberately NOT site-scoped: at prepare time the operator has not picked
+ * a target site yet (that happens in the marketplace UI after the upload
+ * completes), so there is nothing here for `checkSiteAccess` to check. This
+ * is safe only because the site check lives downstream in
+ * `createInstallBatchAction`, which validates every id in `siteIds` before
+ * the uploaded path is ever consumed. If that check is ever removed or
+ * weakened, this action becomes a way for anyone holding `wp_toolkit.manage`
+ * to reach sites they otherwise have no access to — permission alone would
+ * no longer be a safe gate for it. See the "rejects the whole batch..." test
+ * in tests/authz-actions-toolkit.test.ts, which pins that invariant.
+ */
 export async function prepareUploadAction(
   filename: string,
 ): Promise<{ ok: boolean; path?: string; token?: string; error?: string }> {
   await requireUser();
-  // No siteId travels with this call — it only stages a signed upload URL in
-  // a shared bucket, so there is no per-site access to check here. The
-  // site-scoped check happens where the resulting path is actually used
-  // (createInstallBatchAction).
   const gate = await checkPermission("wp_toolkit.manage");
   if (isDenied(gate)) return gate;
   const safe = filename.replace(/[^A-Za-z0-9._-]/g, "_");

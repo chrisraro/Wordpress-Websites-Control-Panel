@@ -87,7 +87,7 @@ export function InstallPanel({ siteId, siteName }: { siteId: string; siteName: s
 
     startTransition(async () => {
       setUploadStatus("Preparing…");
-      const prep = await prepareThemeUploadAction(file.name);
+      const prep = await prepareThemeUploadAction(siteId, file.name);
       if (!prep.ok || !prep.path || !prep.token) {
         setUploadStatus(null);
         setError(prep.error ?? "Upload preparation failed");
