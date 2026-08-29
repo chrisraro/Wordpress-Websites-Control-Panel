@@ -56,6 +56,9 @@ export function splitEligible(
     const t = inv.themes.find((x) => x.name === id);
     const label = t?.title || t?.name || id;
     if (!t) { split.excluded.push({ id, label, reason: "No longer installed." }); continue; }
+    if (kind === "deactivate") {
+      split.excluded.push({ id, label, reason: "Themes are switched, not deactivated." }); continue;
+    }
     if (kind === "update" && t.update !== "available") {
       split.excluded.push({ id, label, reason: "Already up to date." }); continue;
     }
