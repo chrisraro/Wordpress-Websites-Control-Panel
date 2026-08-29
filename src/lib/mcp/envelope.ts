@@ -10,9 +10,19 @@ export function unwrapAbility(result: unknown): unknown {
     const r = result as { success: unknown; data?: unknown; error?: unknown };
     if (r.success === true && "data" in r) return r.data;
     if (r.success === false) {
-      throw new McpToolError(
-        typeof r.error === "string" ? r.error : `Ability failed: ${JSON.stringify(r.error ?? result)}`,
-      );
+      if (typeof r.error === "string") {
+        // Ability-authored message (e.g. "plugin not found"): bounded, useful,
+        // and not derived from response payload data. Safe to surface as-is.
+        throw new McpToolError(r.error);
+      }
+      // Unbounded fallback: r.error/result here is the raw envelope, which for
+      // callers like runPhp (src/lib/wpphp.ts) can carry admin_users and other
+      // site-sensitive data (see collectInventory). manage-actions.ts returns
+      // thrown messages verbatim to any client holding a `manage` grant, so
+      // never let this fallback embed response content in the thrown message
+      // -- log it server-side instead.
+      console.error("ability reported failure with a non-string error", r.error ?? result);
+      throw new McpToolError("Ability failed");
     }
   }
   return result;

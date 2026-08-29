@@ -248,30 +248,45 @@ is being addressed in phase 9b (see below), but is not fully closed yet:
 
 1. `site_snapshots.payload` contains every WordPress administrator's login
    and email, readable by any client with a grant on that site over
-   PostgREST (RLS is row-level and cannot filter inside a JSONB column) —
-   **closed by `0011_site_admin_users.sql`, once applied, for the write
-   path; closed for every already-scanned site only once 0011's
-   `update site_snapshots set payload = payload - 'admin_users' ...`
-   statement runs.** Right now, in production, neither has happened: every
-   historical `site_snapshots` row still carries `payload.admin_users`, and
-   any client holding a grant on that site can still read it out. An
-   on-call engineer must not read this section and conclude the leak is
-   already closed — it closes only when `0011` is applied, and even then
-   only because that migration's `update` statement specifically rewrites
-   every existing row; the table and its RLS policy alone would only stop
-   *new* leakage.
+   PostgREST (RLS is row-level and cannot filter inside a JSONB column).
+   **This closes only after all three of the following have happened, in
+   this order — no single one of them closes it alone:**
 
-   Once `0011` is applied, WordPress administrator identities live in their
-   own table, `site_admin_users` (one row per site, replaced wholesale on
-   each inventory refresh), with its own RLS policy, `site_admin_users_read`,
-   granting `select` to holders of `sites.view_all` only. `collectInventory`
-   (`src/services/inventory/service.ts`) pulls `admin_users` off the raw MCP
-   response before it ever reaches the `InventoryPayload` that gets written
-   to `site_snapshots.payload`. `0013_snapshot_no_admin_users.sql` — applied
-   separately, only after this code is deployed (see the migration ledger
-   above) — adds the database-level backstop: a check constraint,
-   `site_snapshots_no_admin_users`, that rejects any insert or update whose
-   `payload` still carries an `admin_users` key, so a revert of the
+   1. **`0011_site_admin_users.sql` applied.** Creates the staff-only
+      `site_admin_users` table and its RLS policy, and strips
+      `payload.admin_users` from every `site_snapshots` row that exists at
+      the moment it runs. It does **not** stop new leakage: the
+      still-deployed old `collectInventory` keeps writing
+      `payload.admin_users` on every refresh until the code below ships,
+      and `site_snapshots` is insert-only history (`insertSnapshot` in
+      `src/services/inventory/repo.ts` never updates a row after the fact,
+      and multiple rows per site are kept) — so those new rows accumulate
+      rather than getting overwritten.
+   2. **This branch's code deployed.** `collectInventory` pulls
+      `admin_users` off the raw MCP response before it ever reaches the
+      `InventoryPayload` written to `site_snapshots.payload`. This is the
+      step that actually stops new writes; `0011` alone does not.
+   3. **`0013_snapshot_no_admin_users.sql` applied.** Re-runs the same strip
+      as `0011` — this time to clean up whatever the old collector wrote
+      into new rows during the gap between steps 1 and 2 — then adds the
+      `site_snapshots_no_admin_users` check constraint as a permanent,
+      database-level backstop. The strip must run again here because
+      `alter table ... add constraint` with no `not valid` clause validates
+      every existing row, and the gap rows from step 1's window would
+      otherwise abort the migration.
+
+   An on-call engineer must not read "`0011` applied" and conclude the leak
+   is closed — it isn't, until step 2 has also shipped and step 3 has also
+   run. Right now, in production, none of the three have happened: every
+   historical `site_snapshots` row still carries `payload.admin_users`, and
+   any client holding a grant on that site can still read it out.
+
+   Once all three steps above are complete, WordPress administrator
+   identities live in their own table, `site_admin_users` (one row per
+   site, replaced wholesale on each inventory refresh), with its own RLS
+   policy, `site_admin_users_read`, granting `select` to holders of
+   `sites.view_all` only. The `site_snapshots_no_admin_users` check
+   constraint added in step 3 then stands permanently, so a revert of the
    application code fails loudly at write time instead of silently
    re-publishing admin logins to every client with a grant. The site
    overview page's Administrators card reads `site_admin_users` gated on

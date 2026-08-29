@@ -26,8 +26,32 @@
 -- 0012_revoke_site_credential_columns.sql. It is numbered after 0012
 -- because 0012 is already claimed by that column revoke; this one has no
 -- ordering dependency on 0012 itself, only on this branch's deploy.
+--
+-- The strip below is a second, deliberate run of 0011's `update ... payload
+-- - 'admin_users'` statement, not a leftover. `alter table ... add
+-- constraint` with no `not valid` clause makes Postgres validate every
+-- existing row before the constraint is allowed to exist -- so this
+-- migration cannot add the constraint at all unless every row already
+-- satisfies it. The documented sequence is 0011 -> (gap) -> deploy this
+-- branch's code -> 0013. 0011's strip only cleans the rows that existed at
+-- the moment 0011 ran; during the gap that follows, the still-deployed old
+-- collectInventory keeps inserting *new* site_snapshots rows carrying
+-- payload.admin_users (site_snapshots is insert-only history --
+-- insertSnapshot in src/services/inventory/repo.ts never updates a row
+-- after the fact, and multiple rows per site are kept). Those gap rows are
+-- never touched by 0011's strip and would otherwise abort this migration's
+-- `add constraint` with a check-constraint violation on the very database
+-- it is written for, leaving the backstop unlanded and an operator
+-- debugging a validation failure with no strip statement in either
+-- migration to guide them. Running the strip again here, immediately
+-- before the constraint, closes exactly that gap: 0011's strip cleans
+-- history up to its own run, this strip cleans whatever the old code wrote
+-- after that and before the new code went live, and only once both have
+-- run can every row in the table satisfy the constraint being added.
 
 set local search_path = public;
+
+update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';
 
 alter table site_snapshots
   drop constraint if exists site_snapshots_no_admin_users;

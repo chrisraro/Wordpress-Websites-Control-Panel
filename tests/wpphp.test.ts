@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { unwrapAbility } from "@/lib/mcp/envelope";
 import { runPhp, phpString } from "@/lib/wpphp";
 import { MockMcpClient } from "@/lib/mcp/mock";
@@ -11,6 +11,16 @@ describe("unwrapAbility", () => {
   it("throws McpToolError on {success:false}", () => {
     expect(() => unwrapAbility({ success: false, error: "nope" })).toThrow(McpToolError);
     expect(() => unwrapAbility({ success: false, error: "nope" })).toThrow("nope");
+  });
+  it("does not serialise a non-string error (or the envelope) into the thrown message", () => {
+    const sensitive = { admin_users: [{ user_login: "root-admin" }] };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(() => unwrapAbility({ success: false, error: sensitive })).toThrow(McpToolError);
+      expect(() => unwrapAbility({ success: false, error: sensitive })).not.toThrow(/root-admin/);
+    } finally {
+      spy.mockRestore();
+    }
   });
   it("passes through unwrapped results", () => {
     expect(unwrapAbility({ abilities: [] })).toEqual({ abilities: [] });
@@ -56,5 +66,22 @@ describe("runPhp", () => {
   it("throws McpToolError when the adapter envelope reports failure", async () => {
     const mock = new MockMcpClient({ handler: () => ({ success: false, error: "ability blew up" }) });
     await expect(runPhp(mock, "return 1;")).rejects.toThrow("ability blew up");
+  });
+
+  it("never lets a non-string adapter error embed response content in the thrown message", async () => {
+    // unwrapAbility is called before runPhp's own hardening ever sees the
+    // result -- a non-string r.error means the fallback branch would
+    // otherwise JSON.stringify the whole envelope, including admin_users and
+    // other site-sensitive data, into a message manage-actions.ts returns
+    // verbatim to any client holding a `manage` grant.
+    const sensitive = { admin_users: [{ user_login: "root-admin", user_email: "root@example.com" }] };
+    const mock = new MockMcpClient({ handler: () => ({ success: false, error: sensitive }) });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(runPhp(mock, "return 1;")).rejects.toThrow(McpToolError);
+      await expect(runPhp(mock, "return 1;")).rejects.not.toThrow(/root-admin|root@example\.com/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

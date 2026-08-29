@@ -108,6 +108,24 @@ describe("0013_snapshot_no_admin_users.sql", () => {
     expect(SQL).toMatch(/check \(not \(payload \? 'admin_users'\)\)/);
   });
 
+  it("re-runs the admin_users strip immediately before adding the constraint", () => {
+    // `add constraint` with no `not valid` clause makes Postgres validate
+    // every existing row. 0011's strip is one-shot and only cleans rows
+    // present when 0011 ran; the still-deployed old collectInventory keeps
+    // inserting new admin_users-carrying rows into this insert-only history
+    // table (site_snapshots) during the gap between 0011 and this branch's
+    // deploy. Without a second strip here, `add constraint` aborts on those
+    // gap rows against the very database this migration is written for.
+    const stripIndex = SQL.indexOf(
+      "update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';",
+    );
+    const dropIndex = SQL.indexOf("drop constraint if exists site_snapshots_no_admin_users");
+    const addIndex = SQL.indexOf("add constraint site_snapshots_no_admin_users");
+    expect(stripIndex).toBeGreaterThan(-1);
+    expect(stripIndex).toBeLessThan(dropIndex);
+    expect(dropIndex).toBeLessThan(addIndex);
+  });
+
   it("documents that it must be applied only after this branch's code is deployed", () => {
     expect(SQL).toMatch(/applied only after|apply this (constraint|migration) (only )?after/i);
   });
