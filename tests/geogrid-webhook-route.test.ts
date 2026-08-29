@@ -108,6 +108,51 @@ describe("POST /api/webhooks/n8n/geogrid — error retry ladder", () => {
     expect(markFailedMock.mock.calls[0][1]).toMatch(/n8n reported: timeout exceeded/);
     expect(retryMock).not.toHaveBeenCalled();
   });
+
+  it("walks the whole ladder across three callbacks: retry, retry, fail — never fails on attempt 1 or 2", async () => {
+    // Regression guard: a test that only checks "fails at attempt 3" passes
+    // identically against code that always calls markFailed and never
+    // retries. Asserting all three attempts in one test closes that gap.
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    let res = await POST(req({ run_id: "job-1", error: "timeout exceeded" }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
+    expect(retryMock).toHaveBeenCalledTimes(1);
+    expect(markFailedMock).not.toHaveBeenCalled();
+
+    getJobMock.mockResolvedValue(baseJob({ attempts: 2 }));
+    res = await POST(req({ run_id: "job-1", error: "timeout exceeded" }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
+    expect(retryMock).toHaveBeenCalledTimes(2);
+    expect(markFailedMock).not.toHaveBeenCalled();
+
+    getJobMock.mockResolvedValue(baseJob({ attempts: 3 }));
+    res = await POST(req({ run_id: "job-1", error: "timeout exceeded" }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "error" });
+    expect(markFailedMock).toHaveBeenCalledTimes(1);
+    expect(retryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not discard a partial result: ranks[] alongside error is treated as the partial success it is", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    const res = await POST(req({
+      run_id: "job-1",
+      error: "Serper lookup failed for 1 of 9 grid points",
+      ranks: [{ idx: 0, rank: 3 }],
+    }));
+    expect(await res.json()).toMatchObject({ ok: true, points: 9 });
+    expect(retryMock).not.toHaveBeenCalled();
+    expect(markFailedMock).not.toHaveBeenCalled();
+    expect(completeGeoGridRunMock).toHaveBeenCalledTimes(1);
+    const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
+    expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: 3, measured: true });
+  });
+
+  it("still retries on the ladder when ranks[] is present but empty", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 1 }));
+    const res = await POST(req({ run_id: "job-1", error: "timeout exceeded", ranks: [] }));
+    expect(await res.json()).toMatchObject({ ok: true, recorded: "retry" });
+    expect(completeGeoGridRunMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
@@ -132,6 +177,35 @@ describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
     expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: null, measured: false });
   });
 
+  it("treats a stringified \"false\" as unmeasured rather than failing open to true", async () => {
+    // n8n Set/Code nodes routinely stringify booleans. Failing open here
+    // (treating anything not literally `false` as measured) is exactly the
+    // corruption this branch exists to prevent: a failed lookup would land
+    // as {rank: null, measured: true} — a confirmed non-rank.
+    getJobMock.mockResolvedValue(baseJob());
+    await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 5, measured: "false" }] }));
+    const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
+    expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: null, measured: false });
+  });
+
+  it("keeps only the first entry for a duplicate idx", async () => {
+    getJobMock.mockResolvedValue(baseJob());
+    await POST(req({
+      run_id: "job-1",
+      ranks: [{ idx: 0, rank: 3, measured: true }, { idx: 0, measured: false }],
+    }));
+    const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
+    expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: 3, measured: true });
+  });
+
+  it("skips a null entry in ranks[] instead of throwing", async () => {
+    getJobMock.mockResolvedValue(baseJob());
+    const res = await POST(req({ run_id: "job-1", ranks: [null, { idx: 0, rank: 4 }] }));
+    expect(res.status).toBe(200);
+    const points = completeGeoGridRunMock.mock.calls[0][3] as Point[];
+    expect(points.find((p) => p.idx === 0)).toMatchObject({ rank: 4, measured: true });
+  });
+
   it("defaults measured to true when the field is absent, for the current n8n workflow", async () => {
     getJobMock.mockResolvedValue(baseJob());
     await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 2 }] }));
@@ -143,5 +217,43 @@ describe("POST /api/webhooks/n8n/geogrid — measured contract", () => {
     getJobMock.mockResolvedValue(baseJob());
     await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 1 }] }));
     expect(markDoneMock).toHaveBeenCalledWith("job-1");
+  });
+});
+
+describe("POST /api/webhooks/n8n/geogrid — attempt identity", () => {
+  it("looks up the job by the id portion and marks it done with the bare job id", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 2 }));
+    const res = await POST(req({ run_id: "job-1:2", ranks: [{ idx: 0, rank: 1 }] }));
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(getJobMock).toHaveBeenCalledWith("job-1");
+    expect(markDoneMock).toHaveBeenCalledWith("job-1");
+  });
+
+  it("rejects a callback whose attempt does not match the job's current attempt", async () => {
+    // Simulates a late callback from a superseded execution: the job was
+    // retried (now on attempt 2) but this callback belongs to attempt 1's
+    // dispatch, which a re-dispatched attempt 2 has since raced.
+    getJobMock.mockResolvedValue(baseJob({ attempts: 2 }));
+    const res = await POST(req({ run_id: "job-1:1", ranks: [{ idx: 0, rank: 1 }] }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ ok: false, error: "stale attempt" });
+    expect(completeGeoGridRunMock).not.toHaveBeenCalled();
+    expect(markDoneMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale-attempt error callback the same way, so it cannot retry a superseded attempt", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 2 }));
+    const res = await POST(req({ run_id: "job-1:1", error: "timeout exceeded" }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ ok: false, error: "stale attempt" });
+    expect(retryMock).not.toHaveBeenCalled();
+    expect(markFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a bare job id with no :attempt suffix as attempt-agnostic, for runs dispatched by older code", async () => {
+    getJobMock.mockResolvedValue(baseJob({ attempts: 2 }));
+    const res = await POST(req({ run_id: "job-1", ranks: [{ idx: 0, rank: 1 }] }));
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(completeGeoGridRunMock).toHaveBeenCalledTimes(1);
   });
 });

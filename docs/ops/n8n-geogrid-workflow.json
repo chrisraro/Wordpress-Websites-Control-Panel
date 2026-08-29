@@ -1,5 +1,5 @@
 {
-  "name": "WP Control Panel \u00e2\u20ac\u201d GeoGrid",
+  "name": "WP Control Panel — GeoGrid",
   "nodes": [
     {
       "parameters": {
@@ -33,7 +33,8 @@
     },
     {
       "parameters": {
-        "jsCode": "// Replace this node with a real rank lookup (DataForSEO, SerpApi, ...).\n// It must output { idx, rank } per item; rank is 1-20 or null.\nreturn $input.all().map((item) => ({\n  json: { idx: item.json.idx, rank: null },\n}));"
+        "onError": "continueRegularOutput",
+        "jsCode": "// Replace this node with a real rank lookup (DataForSEO, SerpApi, ...).\n//\n// Contract (fix/geogrid-partial-runs): each item must output\n// { idx, rank, measured }. `rank` is 1-20 or null. `measured` is true when\n// the lookup for this point actually completed (regardless of whether it\n// ranked) and false when it failed for this point alone -- a per-point\n// failure must NOT throw out of this node, because that would fail the\n// whole run for one bad point. Catch per-point errors here and emit\n// { idx, rank: null, measured: false } for that point instead.\n//\n// `error` at the top level (see \"Post ranks back\" below) is reserved for a\n// total failure -- nothing could be measured at all (e.g. the ranking API\n// was unreachable for the whole run). Do not set it when even one point\n// succeeded; a body carrying both `ranks` and `error` is treated upstream as\n// the partial result it is, but every point you *can* report should be\n// reported via `ranks` rather than folded into `error`.\nreturn $input.all().map((item) => {\n  try {\n    // ... real lookup for item.json.idx / item.json.lat / item.json.lng ...\n    const rank = null;\n    return { json: { idx: item.json.idx, rank, measured: true } };\n  } catch (e) {\n    return { json: { idx: item.json.idx, rank: null, measured: false } };\n  }\n});"
       },
       "id": "lookup",
       "name": "Rank lookup (replace me)",
@@ -47,7 +48,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Collect every per-point result into a single ranks array.\nreturn [{ json: { data: $input.all().map((i) => ({ idx: i.json.idx, rank: i.json.rank ?? null })) } }];"
+        "jsCode": "// Collect every per-point result into a single ranks array. Each entry\n// keeps its idx, rank, and measured flag -- see the contract note on the\n// lookup node above.\nreturn [{\n  json: {\n    data: $input.all().map((i) => ({\n      idx: i.json.idx,\n      rank: i.json.rank ?? null,\n      measured: i.json.measured !== false,\n    })),\n  },\n}];"
       },
       "id": "aggregate",
       "name": "Collect ranks",
@@ -83,6 +84,34 @@
       "position": [
         880,
         0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('GeoGrid request').first().json.body.callback_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-secret",
+              "value": "={{ $env.WP_PANEL_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ run_id: $('GeoGrid request').first().json.body.run_id, error: $json.error?.message || 'GeoGrid run failed before any point could be measured' }) }}",
+        "options": {}
+      },
+      "id": "callback-error",
+      "name": "Post total failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "notes": "Wired from the error output of a node upstream of any per-point result (e.g. the split/lookup step throwing before any item completes). Reserved for a total failure -- see the contract note on the lookup node. A partial failure must go through \"Post ranks back\" instead, with measured:false on the points that failed.",
+      "position": [
+        440,
+        220
       ]
     }
   ],

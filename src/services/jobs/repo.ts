@@ -52,8 +52,14 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       if (error) throw new Error(`jobs.markDone failed: ${error.message}`, { cause: error });
     },
     async retry(id, err, retryAtIso) {
+      // Clears any prior dismissal: `failed` is terminal today so this path
+      // isn't reachable for a dismissed job yet, but a future `failed ->
+      // pending` retry path must not resurrect a job that was born dismissed
+      // — a job back on the ladder should reappear in the failed-runs alert
+      // if it fails again.
       const { error } = await db.from("jobs")
-        .update({ status: "pending", last_error: err, scheduled_for: retryAtIso }).eq("id", id);
+        .update({ status: "pending", last_error: err, scheduled_for: retryAtIso, dismissed_at: null })
+        .eq("id", id);
       if (error) throw new Error(`jobs.retry failed: ${error.message}`, { cause: error });
     },
     async markFailed(id, err) {
@@ -103,7 +109,8 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       const service = createServiceSupabase();
       const { error } = await service.from("jobs")
         .update({ dismissed_at: new Date().toISOString() })
-        .eq("site_id", siteId).eq("type", type).eq("status", "failed");
+        .eq("site_id", siteId).eq("type", type).eq("status", "failed")
+        .is("dismissed_at", null);
       if (error) throw new Error(`jobs.dismissFailed failed: ${error.message}`, { cause: error });
     },
   };

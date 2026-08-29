@@ -141,7 +141,9 @@ describe("gatherReportData", () => {
     expect(data.seo!.brands[0]).toMatchObject({ name: "El Nido Guide", score: 41 });
 
     expect(data.geogrid).toMatchObject({ businessName: "El Nido Guide" });
-    expect(data.geogrid!.keywords[0]).toMatchObject({ keyword: "tours", averageRank: 6, coverage: 67 });
+    expect(data.geogrid!.keywords[0]).toMatchObject({
+      keyword: "tours", averageRank: 6, coverage: 67, measured: 3, total: 3,
+    });
 
     expect(data.inventory).toMatchObject({
       wpVersion: "6.7.1", phpVersion: "8.2", pluginCount: 2, coreUpdate: "6.8",
@@ -181,5 +183,34 @@ describe("gatherReportData", () => {
 
   it("throws for an unknown site", async () => {
     await expect(gatherReportData(deps(), "nope", ["security"], 30)).rejects.toThrow(/not found/i);
+  });
+
+  // Review finding #1: the client-facing PDF must be able to tell "measured
+  // everything, ranked nowhere" apart from "measured almost nothing" —
+  // coverage() alone returns a bare percentage that can't distinguish them
+  // (80 of 81 lookups failed, the 1 survivor ranked #3 -> coverage() = 100).
+  it("carries measured/total alongside coverage so a near-total failure isn't reported as full visibility", async () => {
+    const points = [
+      { idx: 0, lat: 1, lng: 1, rank: 3, measured: true },
+      ...Array.from({ length: 80 }, (_, i) => ({ idx: i + 1, lat: 1, lng: 1, rank: null, measured: false })),
+    ];
+    const data = await gatherReportData(
+      deps({
+        geogrid: {
+          async getConfigBySite() {
+            return { id: "cfg", site_id: "site-1", business_name: "El Nido Guide", place_ref: null,
+              keywords: ["tours"], grid_size: 9, spacing_m: 1000, center_lat: 11, center_lng: 119,
+              provider: "n8n" as const, created_at: "" };
+          },
+          async latestPerKeyword() {
+            return { tours: { id: "s1", config_id: "cfg", run_at: "2026-08-22T00:00:00Z", keyword: "tours", points } };
+          },
+        } as unknown as GeoGridRepo,
+      }),
+      "site-1", ["geogrid"], 30,
+    );
+    expect(data.geogrid!.keywords[0]).toMatchObject({
+      averageRank: 3, coverage: 100, measured: 1, total: 81,
+    });
   });
 });

@@ -43,7 +43,16 @@ export interface SeoSection {
 
 export interface GeoGridSection {
   businessName: string | null;
-  keywords: Array<{ keyword: string; averageRank: number | null; coverage: number; runAt: string }>;
+  keywords: Array<{
+    keyword: string;
+    averageRank: number | null;
+    coverage: number;
+    /** Grid points that returned a real lookup result, whether or not they ranked. */
+    measured: number;
+    /** Total grid points in the run. `measured < total` is a coverage gap the PDF must disclose. */
+    total: number;
+    runAt: string;
+  }>;
 }
 
 export interface InventorySection {

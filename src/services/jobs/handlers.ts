@@ -123,7 +123,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
           providers: { stub: stubProvider, n8n: createN8nProvider() },
           appUrl: getOptionalEnv("APP_URL") ?? "http://localhost:3000",
         },
-        job.id, p.config_id, p.keyword,
+        job.id, job.attempts, p.config_id, p.keyword,
       );
       if (awaiting) return { awaitingCallback: true };
     },

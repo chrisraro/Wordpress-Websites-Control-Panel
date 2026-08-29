@@ -51,7 +51,13 @@ export interface GeoGridProvider {
 }
 
 export function averageRank(points: RankPoint[]): number | null {
-  const found = points.filter((p) => typeof p.rank === "number").map((p) => p.rank as number);
+  // `measured !== false` mirrors coverage()'s filter below: an unmeasured
+  // point must never carry a rank into the average even if one is somehow
+  // present on the object, so the two functions agree on what counts as data
+  // by construction rather than by each writer independently getting it right.
+  const found = points
+    .filter((p) => p.measured !== false && typeof p.rank === "number")
+    .map((p) => p.rank as number);
   if (found.length === 0) return null;
   const mean = found.reduce((a, b) => a + b, 0) / found.length;
   return Math.round(mean * 10) / 10;

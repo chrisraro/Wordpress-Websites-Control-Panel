@@ -11,11 +11,16 @@
 -- only from the service-role client because jobs carries no write policy
 -- (0008_rls_scoped.sql).
 --
--- No deploy-order dependency, the same class of change as
--- 0014_require_one_admin.sql: this adds a column no old build's queries
--- reference, so it is safe to apply before, during or after this branch's
--- code goes live, in any order relative to 0001-0014. `add column if not
--- exists` makes the migration itself safely re-runnable too.
+-- Deploy-order dependency: apply this BEFORE or WITH the code deploy that
+-- introduces it, not after. The GeoGrid page's query already selects
+-- `dismissed_at` as of that deploy; running the new code against the old
+-- schema makes PostgREST 400 (undefined column, 42703) on every request to
+-- that page, which the page's error handling turns into a silent loss of
+-- both the in-progress and failed-run alerts (see review of
+-- fix/geogrid-partial-runs, item 4) rather than a visible failure. The
+-- reverse order is safe: old code against this new column ignores the
+-- column it doesn't select, the same as any other additive migration.
+-- `add column if not exists` makes the migration itself safely re-runnable.
 
 set local search_path = public;
 

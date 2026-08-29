@@ -67,6 +67,32 @@ function Bullets({ items, empty }: { items: string[]; empty: string }) {
   );
 }
 
+/**
+ * One line of the client-facing "Average rank by keyword" list. `coverage()`
+ * returns 0 both for "measured everything, ranked nowhere" and "measured
+ * nothing" — this function is what keeps the PDF from conflating those two
+ * very different situations, and from ever printing a percentage computed
+ * over a handful of surviving points as if it described the whole grid.
+ */
+export function geoGridKeywordLine(k: {
+  keyword: string;
+  averageRank: number | null;
+  coverage: number;
+  measured: number;
+  total: number;
+  runAt: string;
+}): string {
+  const rank = `${k.keyword} — average rank ${k.averageRank ?? "not ranked"}`;
+  const when = fmtDate(k.runAt);
+  if (k.measured === 0) {
+    return `${rank}, not enough data — 0 of ${k.total} locations could be measured (${when})`;
+  }
+  if (k.measured < k.total) {
+    return `${rank}, visible at ${k.coverage}% of locations (only ${k.measured} of ${k.total} could be measured) (${when})`;
+  }
+  return `${rank}, visible at ${k.coverage}% of locations (${when})`;
+}
+
 // The element type must be ReactElement<DocumentProps>: renderToBuffer only
 // accepts a <Document>, and a bare ReactElement fails to type-check at the call site.
 export function ReportDocument(data: ReportData): React.ReactElement<DocumentProps> {
@@ -158,8 +184,7 @@ export function ReportDocument(data: ReportData): React.ReactElement<DocumentPro
               <Row label="Business" value={geogrid.businessName ?? "Not configured"} />
               <Text style={{ marginTop: 8, marginBottom: 2 }}>Average rank by keyword</Text>
               <Bullets
-                items={geogrid.keywords.map((k) =>
-                  `${k.keyword} — average rank ${k.averageRank ?? "not ranked"}, visible at ${k.coverage}% of locations (${fmtDate(k.runAt)})`)}
+                items={geogrid.keywords.map(geoGridKeywordLine)}
                 empty="No GeoGrid scans recorded yet."
               />
             </View>

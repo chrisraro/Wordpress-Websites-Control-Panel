@@ -17,6 +17,21 @@ interface CallbackBody {
   error?: unknown;
 }
 
+/**
+ * `run_id` is dispatched as `${jobId}:${attempt}` (see services/geogrid/run.ts)
+ * so a callback can be tied to the specific attempt that produced it, not
+ * just the job. A bare id with no `:attempt` suffix is accepted as
+ * attempt-agnostic — that is what runs dispatched by older code (before this
+ * suffix existed) still send, and they must keep landing.
+ */
+function parseRunId(raw: string): { jobId: string; attempt: number | null } {
+  const i = raw.lastIndexOf(":");
+  if (i === -1) return { jobId: raw, attempt: null };
+  const attemptPart = raw.slice(i + 1);
+  if (!/^\d+$/.test(attemptPart)) return { jobId: raw, attempt: null };
+  return { jobId: raw.slice(0, i), attempt: Number(attemptPart) };
+}
+
 export async function POST(req: Request) {
   const raw = await req.text();
   if (!verifyN8nRequest(raw, req.headers)) {
@@ -29,12 +44,13 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: "invalid JSON" }, { status: 400 });
   }
-  const runId = typeof body.run_id === "string" ? body.run_id : null;
-  if (!runId) return NextResponse.json({ ok: false, error: "run_id required" }, { status: 400 });
+  const rawRunId = typeof body.run_id === "string" ? body.run_id : null;
+  if (!rawRunId) return NextResponse.json({ ok: false, error: "run_id required" }, { status: 400 });
+  const { jobId, attempt } = parseRunId(rawRunId);
 
   const db = createServiceSupabase();
   const jobs = supabaseJobsRepo(db);
-  const job = await jobs.getJob(runId);
+  const job = await jobs.getJob(jobId);
   // "running" is accepted too: n8n acks instantly and can call back before the
   // job has been parked. markAwaiting is guarded on status="running", so a
   // callback that wins the race is not overwritten.
@@ -42,33 +58,45 @@ export async function POST(req: Request) {
   if (!job || job.type !== "geogrid_run" || !open) {
     return NextResponse.json({ ok: false, error: "no run awaiting this id" }, { status: 404 });
   }
+  // A callback from a superseded attempt (e.g. a late HTTP retry from an
+  // execution that was itself already retried by the job ladder) must not be
+  // allowed to complete or fail a job that has since moved on to a newer
+  // attempt — that races a fresh dispatch and can overwrite its result or
+  // double-count Serper spend. See fix/geogrid-partial-runs review, item 6.
+  if (attempt !== null && attempt !== job.attempts) {
+    return NextResponse.json({ ok: false, error: "stale attempt" }, { status: 404 });
+  }
 
-  if (typeof body.error === "string" && body.error) {
-    // n8n posts this only when no point at all could be measured (e.g. a
-    // transient Serper timeout hit the whole run). That is retryable the same
-    // way any other job failure is: back off on the normal ladder
-    // (60s, then 300s) and only give up permanently once it's exhausted —
-    // mirroring processJobs' own catch block in services/jobs/service.ts.
+  const hasRanks = Array.isArray(body.ranks) && body.ranks.length > 0;
+  if (!hasRanks && typeof body.error === "string" && body.error) {
+    // n8n posts `error` only when no point at all could be measured (e.g. a
+    // transient Serper timeout hit the whole run) — never alongside a usable
+    // `ranks[]`. `hasRanks` defends that contract: a body carrying both is
+    // treated as the partial result it is, not discarded wholesale.
+    // The error itself is retryable the same way any other job failure is:
+    // back off on the normal ladder (60s, then 300s) and only give up
+    // permanently once it's exhausted — mirroring processJobs' own catch
+    // block in services/jobs/service.ts.
     const msg = `n8n reported: ${body.error}`;
     const delay = computeRetryDelayMs(job.attempts);
     if (delay === null) {
-      await jobs.markFailed(runId, msg);
+      await jobs.markFailed(jobId, msg);
       return NextResponse.json({ ok: true, recorded: "error" });
     }
-    await jobs.retry(runId, msg, new Date(Date.now() + delay).toISOString());
+    await jobs.retry(jobId, msg, new Date(Date.now() + delay).toISOString());
     return NextResponse.json({ ok: true, recorded: "retry" });
   }
 
   const payload = job.payload as { config_id?: string; keyword?: string };
   if (!payload.config_id || !payload.keyword) {
-    await jobs.markFailed(runId, "job payload malformed");
+    await jobs.markFailed(jobId, "job payload malformed");
     return NextResponse.json({ ok: false, error: "job payload malformed" }, { status: 400 });
   }
 
   const geogrid = supabaseGeoGridRepo(db);
   const config = await geogrid.getConfig(payload.config_id);
   if (!config) {
-    await jobs.markFailed(runId, "GeoGrid config no longer exists");
+    await jobs.markFailed(jobId, "GeoGrid config no longer exists");
     return NextResponse.json({ ok: false, error: "config missing" }, { status: 404 });
   }
 
@@ -80,11 +108,22 @@ export async function POST(req: Request) {
   // yet, and every entry it does post is a real lookup. `measured: false`
   // means that point's lookup failed and its rank must be ignored even if one
   // was sent alongside it (a partial/stale value from n8n is not data).
+  //
+  // Only *absent* means measured: n8n Set/Code nodes routinely stringify
+  // booleans, so a strict `=== true` check (rather than `!== false`) is the
+  // only direction that fails safe against `measured: "false"` — the unsafe
+  // alternative silently promotes an unmeasured point to "confirmed doesn't
+  // rank".
   const byIdx = new Map<number, { rank: number | null; measured: boolean }>();
   for (const entry of Array.isArray(body.ranks) ? body.ranks : []) {
+    if (!entry || typeof entry !== "object") continue;
     const e = entry as { idx?: unknown; rank?: unknown; measured?: unknown };
     if (typeof e.idx !== "number") continue;
-    const measured = typeof e.measured === "boolean" ? e.measured : true;
+    // A duplicate idx keeps its first entry; a later duplicate (e.g. a
+    // trailing `{idx, measured:false}` appended after the real measurement)
+    // is ignored rather than silently overwriting a good result.
+    if (byIdx.has(e.idx)) continue;
+    const measured = e.measured === undefined ? true : e.measured === true;
     const rank = measured && typeof e.rank === "number" && e.rank >= 1 && e.rank <= 20
       ? Math.round(e.rank)
       : null;
@@ -98,6 +137,6 @@ export async function POST(req: Request) {
   });
 
   await completeGeoGridRun(geogrid, payload.config_id, payload.keyword, ranks);
-  await jobs.markDone(runId);
+  await jobs.markDone(jobId);
   return NextResponse.json({ ok: true, points: ranks.length });
 }

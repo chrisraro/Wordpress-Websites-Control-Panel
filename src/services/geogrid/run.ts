@@ -9,7 +9,7 @@ export interface GeoGridRunDeps {
 }
 
 export async function runGeoGrid(
-  deps: GeoGridRunDeps, jobId: string, configId: string, keyword: string,
+  deps: GeoGridRunDeps, jobId: string, attempt: number, configId: string, keyword: string,
 ): Promise<{ awaiting: boolean }> {
   const config = await deps.geogrid.getConfig(configId);
   if (!config) throw new Error(`GeoGrid config not found: ${configId}`);
@@ -24,8 +24,13 @@ export async function runGeoGrid(
   }
 
   const points = buildGrid(config.center_lat, config.center_lng, config.grid_size, config.spacing_m);
+  // The dispatched run_id carries the attempt number (`jobId:attempt`) so the
+  // callback route can tell this attempt's result apart from a late callback
+  // belonging to a superseded attempt of the same job (job ids are reused
+  // across retries — see the callback route's parseRunId). n8n treats run_id
+  // as opaque and echoes it back unchanged, so this needs no workflow change.
   const outcome = await provider.run({
-    runId: jobId,
+    runId: `${jobId}:${attempt}`,
     keyword,
     businessName: config.business_name,
     placeRef: config.place_ref,

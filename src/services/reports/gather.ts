@@ -4,7 +4,7 @@ import type { SeoRepo } from "@/services/seo/repo";
 import type { GeoGridRepo } from "@/services/geogrid/repo";
 import type { SnapshotsRepo } from "@/services/inventory/repo";
 import { pendingUpdates, type InventoryPayload } from "@/services/inventory/types";
-import { averageRank, coverage } from "@/services/geogrid/types";
+import { averageRank, coverage, measuredCount } from "@/services/geogrid/types";
 import type {
   GeoGridSection, InventorySection, ReportData, ReportSection,
   SecuritySection, SeoSection,
@@ -84,6 +84,8 @@ async function buildGeoGrid(deps: GatherDeps, siteId: string): Promise<GeoGridSe
       keyword: snap.keyword,
       averageRank: averageRank(snap.points),
       coverage: coverage(snap.points),
+      measured: measuredCount(snap.points),
+      total: snap.points.length,
       runAt: snap.run_at,
     })),
   };

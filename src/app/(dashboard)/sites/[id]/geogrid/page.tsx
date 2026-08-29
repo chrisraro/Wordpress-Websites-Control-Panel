@@ -43,12 +43,20 @@ export default async function GeoGridPage({
 
   // Surface in-flight and failed runs: without this a stuck n8n callback looks
   // identical to "never scanned".
-  const { data: runJobs } = await db
+  const { data: runJobs, error: runJobsError } = await db
     .from("jobs")
     .select("status,attempts,last_error,payload,scheduled_for,dismissed_at")
     .eq("site_id", id).eq("type", "geogrid_run")
     .order("scheduled_for", { ascending: false })
     .limit(20);
+  // A deploy of this query ahead of migration 0015 (adds `dismissed_at`)
+  // makes PostgREST 400 on the unknown column, `data` comes back null, and
+  // both alerts below silently vanish through the `?? []` fallbacks — the
+  // exact "stuck run looks like never scanned" failure the comment above
+  // says this block exists to prevent. Surface it instead of swallowing it.
+  if (runJobsError) {
+    console.error(`GeoGrid page: failed to load run jobs for site ${id}`, runJobsError);
+  }
   const openRuns = (runJobs ?? []).filter(
     (j) => j.status === "pending" || j.status === "running" || j.status === "awaiting_callback",
   );
@@ -180,9 +188,9 @@ export default async function GeoGridPage({
                     success="Failed runs dismissed"
                     size="sm"
                     confirm={{
-                      title: "Dismiss these failed runs?",
+                      title: "Dismiss failed runs?",
                       description:
-                        "The runs stay in the record for diagnosis — this only clears the alert above, it does not delete anything.",
+                        "This dismisses all failed runs for this site, not just the ones shown above — the runs stay in the record for diagnosis, this only clears the alert.",
                       confirmLabel: "Dismiss",
                     }}
                     showInlineError={false}
@@ -203,10 +211,22 @@ export default async function GeoGridPage({
             />
             <Stat
               label="Coverage"
-              value={`${cov}%`}
-              tone={cov >= 70 ? "good" : cov >= 30 ? "warn" : "bad"}
+              value={currentMeasured === 0 ? "—" : `${cov}%`}
+              // No tone when there's no data to assert a reading over, and no
+              // tone when there's a gap either: a coloured figure is the
+              // loudest thing on the card, and both "0% because nothing was
+              // measured" and "100% from 1 of 81 points" read as confident
+              // signal at a glance if this were still coloured. The hint
+              // carries the meaning in both cases instead.
+              tone={
+                currentMeasured === 0 || currentHasGap
+                  ? undefined
+                  : cov >= 70 ? "good" : cov >= 30 ? "warn" : "bad"
+              }
               hint={
-                currentHasGap
+                currentMeasured === 0
+                  ? "Not enough data"
+                  : currentHasGap
                   ? `Points in the top 20 · ${currentMeasured} of ${currentTotal} measured`
                   : "Points in the top 20"
               }

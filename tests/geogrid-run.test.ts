@@ -32,7 +32,7 @@ function deps(repo: GeoGridRepo, n8n?: GeoGridProvider): GeoGridRunDeps {
 describe("runGeoGrid", () => {
   it("writes a snapshot immediately for the stub provider", async () => {
     const f = fakeRepo();
-    const res = await runGeoGrid(deps(f.repo), "job-1", "cfg-1", "coffee shop");
+    const res = await runGeoGrid(deps(f.repo), "job-1", 1, "cfg-1", "coffee shop");
     expect(res).toEqual({ awaiting: false });
     expect(f.snapshots).toHaveLength(1);
     expect(f.snapshots[0].points).toHaveLength(9);
@@ -46,18 +46,29 @@ describe("runGeoGrid", () => {
       name: "n8n",
       async run(req) { received = { runId: req.runId, callbackUrl: req.callbackUrl }; return { kind: "awaiting" }; },
     };
-    const res = await runGeoGrid(deps(f.repo, spy), "job-9", "cfg-1", "coffee shop");
+    const res = await runGeoGrid(deps(f.repo, spy), "job-9", 1, "cfg-1", "coffee shop");
     expect(res).toEqual({ awaiting: true });
     expect(f.snapshots).toHaveLength(0);
     expect(received).toEqual({
-      runId: "job-9",
+      runId: "job-9:1",
       callbackUrl: "https://panel.test/api/webhooks/n8n/geogrid",
     });
   });
 
+  it("encodes the attempt number into the dispatched run_id, so a retry gets a distinct id", async () => {
+    const f = fakeRepo({ ...CONFIG, provider: "n8n" });
+    let received: string | null = null;
+    const spy: GeoGridProvider = {
+      name: "n8n",
+      async run(req) { received = req.runId; return { kind: "awaiting" }; },
+    };
+    await runGeoGrid(deps(f.repo, spy), "job-9", 3, "cfg-1", "coffee shop");
+    expect(received).toBe("job-9:3");
+  });
+
   it("throws when the config is gone", async () => {
     const f = fakeRepo(null);
-    await expect(runGeoGrid(deps(f.repo), "job-1", "missing", "x")).rejects.toThrow(/config/i);
+    await expect(runGeoGrid(deps(f.repo), "job-1", 1, "missing", "x")).rejects.toThrow(/config/i);
   });
 });
 
