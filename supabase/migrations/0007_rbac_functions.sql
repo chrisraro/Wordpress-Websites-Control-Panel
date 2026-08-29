@@ -102,6 +102,13 @@ $$;
 -- check of their own, so only the trusted service-role client may call
 -- them. Leaving them callable by `authenticated` would let any signed-in
 -- user ask about any other user's permissions.
+-- The auth.uid() variants are called by RLS policies, which execute as the
+-- calling role, and by the app over RPC. They work today via Postgres's
+-- default PUBLIC execute grant; naming the grant explicitly means a future
+-- hardening step that revokes PUBLIC cannot silently switch authorization off.
+grant execute on function public.authorize(public.app_permission) to authenticated;
+grant execute on function public.has_site_access(uuid, public.site_access_level) to authenticated;
+
 revoke all on function public.authorize_for_user(uuid, public.app_permission) from public, anon, authenticated;
 grant execute on function public.authorize_for_user(uuid, public.app_permission) to service_role;
 

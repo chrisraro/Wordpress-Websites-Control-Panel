@@ -160,8 +160,10 @@ create or replace function authorize(requested_permission app_permission)
 returns boolean language plpgsql stable security definer
 set search_path = '' as $$
 declare
-  v_role app_role;
-  v_effect override_effect;
+  -- Types must be schema-qualified too: with search_path = '' a bare
+  -- `app_role` does not resolve, and the function fails to define.
+  v_role public.app_role;
+  v_effect public.override_effect;
 begin
   select role into v_role from public.user_roles where user_id = (select auth.uid());
   if v_role is null then return false; end if;
