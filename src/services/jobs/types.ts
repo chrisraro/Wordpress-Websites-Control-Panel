@@ -18,4 +18,12 @@ export interface JobRow {
   attempts: number;
   scheduled_for: string;
   last_error: string | null;
+  /**
+   * Requires migration 0015 (`alter table jobs add column dismissed_at`).
+   * Written by JobsRepo.retry (cleared to null) and JobsRepo.dismissFailed
+   * (set); read by dismissFailed's `.is("dismissed_at", null)` filter and by
+   * the GeoGrid page's `select`. All three are untyped — and, against a
+   * pre-0015 schema, broken — without this field.
+   */
+  dismissed_at: string | null;
 }

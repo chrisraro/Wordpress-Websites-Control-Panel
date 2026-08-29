@@ -11,16 +11,39 @@
 -- only from the service-role client because jobs carries no write policy
 -- (0008_rls_scoped.sql).
 --
--- Deploy-order dependency: apply this BEFORE or WITH the code deploy that
--- introduces it, not after. The GeoGrid page's query already selects
--- `dismissed_at` as of that deploy; running the new code against the old
--- schema makes PostgREST 400 (undefined column, 42703) on every request to
--- that page, which the page's error handling turns into a silent loss of
--- both the in-progress and failed-run alerts (see review of
--- fix/geogrid-partial-runs, item 4) rather than a visible failure. The
--- reverse order is safe: old code against this new column ignores the
--- column it doesn't select, the same as any other additive migration.
--- `add column if not exists` makes the migration itself safely re-runnable.
+-- HARD DEPLOY-ORDER DEPENDENCY -- read this before shipping the code that
+-- introduces this column. Apply this migration BEFORE or WITH that deploy,
+-- never after. Three call sites in that code depend on this column existing,
+-- and the worst of the three is not scoped to GeoGrid:
+--
+--   1. JobsRepo.retry() (src/services/jobs/repo.ts) unconditionally writes
+--      `dismissed_at: null` on every retry, for every job type. Against a
+--      schema without this column, PostgREST rejects the update and retry()
+--      throws. That throw happens inside processJobs' own catch block
+--      (src/services/jobs/service.ts), which is the catch block's *retry*
+--      path -- so the throw escapes the `for` loop entirely and aborts the
+--      rest of that drain call. One transient failure of ANY job type
+--      (snapshot_refresh, security_scan, plugin_install, ...) that lands on
+--      the retry path takes down queue processing for every other claimed
+--      job in that batch, which then sits in `running` until the 15-minute
+--      stale-job reclaim. recoverStaleAwaiting and the GeoGrid webhook route
+--      (src/app/api/webhooks/n8n/geogrid/route.ts) call the same retry() and
+--      inherit the same failure mode. This is a queue-wide outage risk, not
+--      a GeoGrid-only one -- size it accordingly.
+--   2. JobsRepo.dismissFailed()'s `.is("dismissed_at", null)` filter (and
+--      its `.update({ dismissed_at: ... })`) fails the same way: PostgREST
+--      rejects a filter/update referencing an unknown column.
+--   3. The GeoGrid page's `select` (src/app/(dashboard)/sites/[id]/geogrid/
+--      page.tsx) requests `dismissed_at` and turns the resulting PostgREST
+--      400 into a silently empty `runJobs` list -- both the in-progress and
+--      failed-run alerts vanish with no visible error on that one page.
+--
+-- (1) and (2) throw outright rather than degrading quietly, so deploying the
+-- code before this migration is applied is a queue-wide processing outage
+-- risk, not merely a page missing two alerts. The reverse order is safe: old
+-- code against this new column ignores the column it doesn't select, the
+-- same as any other additive migration. `add column if not exists` makes
+-- the migration itself safely re-runnable.
 
 set local search_path = public;
 

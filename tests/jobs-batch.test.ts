@@ -12,7 +12,7 @@ function memoryRepo() {
       rows.push({
         id, type: job.type, site_id: job.site_id ?? null, batch_id: job.batch_id ?? null,
         payload: job.payload ?? {}, status: "pending", attempts: 0,
-        scheduled_for: new Date(0).toISOString(), last_error: null,
+        scheduled_for: new Date(0).toISOString(), last_error: null, dismissed_at: null,
       });
       return { id };
     },

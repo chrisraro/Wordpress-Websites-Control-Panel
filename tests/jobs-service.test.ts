@@ -15,6 +15,7 @@ function memoryJobsRepo() {
         id, type: job.type, site_id: job.site_id ?? null, batch_id: null,
         payload: job.payload ?? {}, status: "pending", attempts: 0,
         scheduled_for: job.scheduled_for ?? new Date(0).toISOString(), last_error: null,
+        dismissed_at: null,
       });
       return { id };
     },
@@ -30,6 +31,10 @@ function memoryJobsRepo() {
     async retry(id, error, retryAtIso) {
       const r = rows.find((x) => x.id === id)!;
       r.status = "pending"; r.last_error = error; r.scheduled_for = retryAtIso;
+      // Mirrors JobsRepo.retry (src/services/jobs/repo.ts): a job going back
+      // on the ladder must not stay dismissed, so it can reappear in the
+      // failed-runs alert if it fails again.
+      r.dismissed_at = null;
     },
     async markFailed(id, error) {
       const r = rows.find((x) => x.id === id)!;
@@ -44,7 +49,7 @@ function memoryJobsRepo() {
     async dismissFailed(siteId, type) {
       rows
         .filter((r) => r.site_id === siteId && r.type === type && r.status === "failed")
-        .forEach((r) => { (r as JobRow & { dismissed_at?: string }).dismissed_at = new Date().toISOString(); });
+        .forEach((r) => { r.dismissed_at = new Date().toISOString(); });
     },
   };
   return { repo, rows };
@@ -105,6 +110,23 @@ describe("processJobs", () => {
     res = await processJobs(repo, boom);
     expect(res.failed).toBe(1);
     expect(rows[0].status).toBe("failed");
+  });
+
+  it("clears a prior dismissal when a job goes back on the retry ladder", async () => {
+    // A `failed` job is dismissable and terminal today, so this path isn't
+    // reachable yet in production — but JobsRepo.retry clears dismissed_at
+    // unconditionally so a future `failed -> pending` retry can't resurrect
+    // a job that was born dismissed. Model that here directly against the
+    // fake rather than waiting on that future path to exist.
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "snapshot_refresh", "site-1");
+    rows[0].dismissed_at = "2026-01-01T00:00:00Z";
+    const boom = { snapshot_refresh: async () => { throw new Error("nope"); } };
+
+    const res = await processJobs(repo, boom);
+    expect(res.retried).toBe(1);
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].dismissed_at).toBeNull();
   });
 
   it("fails a job with no registered handler permanently", async () => {
