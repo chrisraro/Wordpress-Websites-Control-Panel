@@ -3,6 +3,7 @@ import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz/server";
 import { InstallPanel } from "../install-panel";
 import { MarketplaceTabs } from "../marketplace-tabs";
 import { Card, EmptyState, PageHeader } from "@/components/ui/primitives";
@@ -21,6 +22,7 @@ export default async function MarketplaceThemesPage({
   searchParams,
 }: { searchParams: Promise<{ q?: string }> }) {
   const { q } = await searchParams;
+  await requirePermission("wp_toolkit.manage");
   const db = createServiceSupabase();
   const sites = (await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }))
     .filter((s) => s.status !== "disabled")

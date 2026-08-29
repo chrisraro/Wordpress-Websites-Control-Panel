@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { listSites } from "@/services/sites/service";
+import { listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireViewer } from "@/lib/authz/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -30,8 +31,9 @@ function seoTone(score: number): StatusTone {
 }
 
 export default async function DashboardPage() {
+  const viewer = await requireViewer();
   const db = createServiceSupabase();
-  const sites = await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient });
+  const sites = await listSitesForViewer({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, viewer);
   const snapshots = supabaseSnapshotsRepo(db);
   const securityRepo = supabaseSecurityRepo(db);
   const updates = new Map<string, number>();

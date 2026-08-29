@@ -4,6 +4,7 @@ import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { averageRank, coverage } from "@/services/geogrid/types";
 import { SiteTabs } from "../tabs";
@@ -24,6 +25,7 @@ export default async function GeoGridPage({
 }: { params: Promise<{ id: string }>; searchParams: Promise<{ k?: string }> }) {
   const { id } = await params;
   const { k } = await searchParams;
+  await requireSiteAccess(id);
   const db = createServiceSupabase();
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();

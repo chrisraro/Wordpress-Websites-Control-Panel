@@ -3,6 +3,7 @@ import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
+import { requireSiteAccess } from "@/lib/authz/server";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { trendPoints } from "@/services/seo/types";
 import type {
@@ -45,6 +46,7 @@ function ScoreBadge({ score }: { score: number | null }) {
 
 export default async function SeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await requireSiteAccess(id);
   const db = createServiceSupabase();
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();

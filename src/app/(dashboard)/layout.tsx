@@ -3,6 +3,12 @@ import { requireUser } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/shell/sidebar";
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  // requireUser() only confirms someone is signed in — it is authentication,
+  // not authorization. It says nothing about which sites or features this
+  // user may reach, and a layout runs once per navigation, not once per
+  // request a page could otherwise receive directly. Every page under this
+  // layout calls its own requireViewer()/requirePermission()/
+  // requireSiteAccess() rather than relying on this check.
   const user = await requireUser();
   return (
     <div className="min-h-screen lg:pl-60">
