@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { enqueueBulk } from "@/services/bulk/service";
-import type { BulkKind, BulkTarget } from "@/services/bulk/types";
+import type { BulkKind, BulkScope, BulkTarget } from "@/services/bulk/types";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
@@ -24,9 +24,12 @@ export async function bulkAction(
   if (!snapshot) return { ok: false, error: "Refresh the inventory first" };
 
   try {
+    const scope: BulkScope = target === "plugin"
+      ? { target: "plugin", plugins: snapshot.payload.plugins }
+      : { target: "theme", themes: snapshot.payload.themes };
     const { batchId, split } = await enqueueBulk(
       { jobs: supabaseJobsRepo(db), sites: supabaseSitesRepo(db) },
-      siteId, user.id, kind, target, snapshot.payload, ids,
+      siteId, user.id, kind, scope, ids,
     );
     revalidatePath(`/sites/${siteId}/${target === "plugin" ? "plugins" : "themes"}`);
     if (!batchId) {

@@ -15,8 +15,8 @@ import {
   BulkBar, RowCheckbox, SelectAllCheckbox, useSelection, type BulkAction,
 } from "@/components/ui/selection";
 import { splitEligible } from "@/services/bulk/service";
-import type { BulkKind } from "@/services/bulk/types";
-import type { InventoryPayload, PluginInfo } from "@/services/inventory/types";
+import type { BulkKind, BulkScope } from "@/services/bulk/types";
+import type { PluginInfo } from "@/services/inventory/types";
 import { ManageForm } from "../action-form";
 import { manageAction } from "../manage-actions";
 import { bulkAction } from "../bulk-actions";
@@ -51,25 +51,9 @@ export function PluginTable({
   const { selected, isSelected, toggle, toggleAll, clear, allChecked, someChecked } =
     useSelection(ids);
 
-  // splitEligible is typed against the full InventoryPayload, but for a
-  // "plugin" target it only ever reads `.plugins`. Filling the rest with
-  // inert placeholders (rather than casting) keeps this a real, type-checked
-  // value — the table only ever has the plugin list, not a whole snapshot.
-  const inv: InventoryPayload = useMemo(
-    () => ({
-      collected_at: "",
-      wp_version: "",
-      php_version: "",
-      admin_url: "",
-      core_update: null,
-      plugins,
-      themes: [],
-      admin_users: [],
-    }),
-    [plugins],
-  );
+  const scope: BulkScope = useMemo(() => ({ target: "plugin", plugins }), [plugins]);
 
-  const confirmSplit = confirmKind ? splitEligible(confirmKind, "plugin", inv, selected) : null;
+  const confirmSplit = confirmKind ? splitEligible(confirmKind, scope, selected) : null;
 
   function runBulk(kind: BulkKind) {
     setConfirmKind(null);
@@ -95,7 +79,7 @@ export function PluginTable({
   }
 
   const bulkActions: BulkAction[] = BULK_KINDS.map((kind) => {
-    const split = splitEligible(kind, "plugin", inv, selected);
+    const split = splitEligible(kind, scope, selected);
     const disabled = pending || split.included.length === 0;
     return {
       key: kind,

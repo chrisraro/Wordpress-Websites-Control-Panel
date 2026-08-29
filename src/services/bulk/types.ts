@@ -1,5 +1,13 @@
+import type { PluginInfo, ThemeInfo } from "@/services/inventory/types";
+
 export type BulkKind = "update" | "activate" | "deactivate" | "delete";
 export type BulkTarget = "plugin" | "theme";
+
+/** Exactly the inventory each target needs — so a caller holding only a
+ *  plugin list cannot be forced to fabricate a whole payload. */
+export type BulkScope =
+  | { target: "plugin"; plugins: PluginInfo[] }
+  | { target: "theme"; themes: ThemeInfo[] };
 
 export interface BulkItem { id: string; label: string }
 export interface BulkExclusion extends BulkItem { reason: string }

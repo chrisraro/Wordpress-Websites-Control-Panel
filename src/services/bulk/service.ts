@@ -1,9 +1,8 @@
-import type { InventoryPayload } from "@/services/inventory/types";
 import type { ManageAction } from "@/services/manage/types";
 import { canDeleteTheme } from "@/services/themes/safety";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { SitesRepo } from "@/services/sites/repo";
-import type { BulkKind, BulkSplit, BulkTarget } from "./types";
+import type { BulkKind, BulkScope, BulkSplit, BulkTarget } from "./types";
 
 export function toManageAction(kind: BulkKind, target: BulkTarget, id: string): ManageAction {
   if (target === "plugin") {
@@ -28,13 +27,13 @@ export function toManageAction(kind: BulkKind, target: BulkTarget, id: string): 
  * reason for every exclusion. A bulk action never silently drops items.
  */
 export function splitEligible(
-  kind: BulkKind, target: BulkTarget, inv: InventoryPayload, ids: string[],
+  kind: BulkKind, scope: BulkScope, ids: string[],
 ): BulkSplit {
   const split: BulkSplit = { included: [], excluded: [] };
 
   for (const id of ids) {
-    if (target === "plugin") {
-      const p = inv.plugins.find((x) => x.file === id);
+    if (scope.target === "plugin") {
+      const p = scope.plugins.find((x) => x.file === id);
       const label = p?.title || p?.name || id;
       if (!p) { split.excluded.push({ id, label, reason: "No longer installed." }); continue; }
       if (kind === "update" && p.update !== "available") {
@@ -53,7 +52,7 @@ export function splitEligible(
       continue;
     }
 
-    const t = inv.themes.find((x) => x.name === id);
+    const t = scope.themes.find((x) => x.name === id);
     const label = t?.title || t?.name || id;
     if (!t) { split.excluded.push({ id, label, reason: "No longer installed." }); continue; }
     if (kind === "deactivate") {
@@ -67,7 +66,7 @@ export function splitEligible(
     }
     if (kind === "delete") {
       // Reuse the gate rather than restating it — one definition of "safe".
-      const verdict = canDeleteTheme(inv.themes, id);
+      const verdict = canDeleteTheme(scope.themes, id);
       if (!verdict.allowed) {
         split.excluded.push({ id, label, reason: verdict.reason }); continue;
       }
@@ -83,9 +82,10 @@ export interface BulkDeps { jobs: JobsRepo; sites: SitesRepo }
 /** Enqueue one job per eligible item, all sharing a batch id. */
 export async function enqueueBulk(
   deps: BulkDeps, siteId: string, actorId: string,
-  kind: BulkKind, target: BulkTarget, inv: InventoryPayload, ids: string[],
+  kind: BulkKind, scope: BulkScope, ids: string[],
 ): Promise<{ batchId: string | null; split: BulkSplit }> {
-  const split = splitEligible(kind, target, inv, ids);
+  const target = scope.target;
+  const split = splitEligible(kind, scope, ids);
   if (split.included.length === 0) return { batchId: null, split };
 
   const batchId = crypto.randomUUID();
