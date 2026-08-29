@@ -8,10 +8,11 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  // getViewer(), not requireViewer(): the latter calls next/navigation's
-  // notFound(), which is meant for page renders and is not a supported way
-  // to produce a 404 Response from a bare Route Handler. Route handlers
-  // reply with an explicit NextResponse instead.
+  // getViewer(), not requireViewer(). notFound() *is* supported in Route
+  // Handlers on this Next version — it is caught and turned into a 404 — but
+  // that 404 has an empty body, which would break this route's JSON contract
+  // with the poller that consumes it. So the decision is made here and the
+  // response is written explicitly, matching every other reply from this route.
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -30,6 +31,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   // the response. If nothing remains, 404 rather than an empty list: an
   // empty `jobs: []` with `done: true` would still confirm the batch id
   // exists to someone who should not know that.
+  //
+  // This 404s a genuinely empty batch too, including for a viewer who can see
+  // every site. That is unreachable today — createInstallBatchAction inserts
+  // every job before it returns a batch id — and distinguishing the two cases
+  // would mean answering "does this batch exist?" separately from "may you see
+  // it?", which is the disclosure this guard exists to prevent.
   const visible = visibleSiteIds(viewer, sites.map((s) => s.id));
   const visibleJobs = visible === "all" ? jobs : jobs.filter((j) => j.site_id && visible.includes(j.site_id));
   if (visibleJobs.length === 0) {
