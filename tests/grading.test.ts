@@ -74,9 +74,10 @@ const FEED: FeedEntry[] = [
 function inv(over: Partial<InventoryPayload> = {}): InventoryPayload {
   return {
     collected_at: "2026-08-28T00:00:00Z", wp_version: "6.4.1", php_version: "8.2",
+    admin_url: "https://example.com/wp-admin/",
     core_update: null, admin_users: [],
     plugins: [{ file: "akismet/akismet.php", name: "akismet", version: "5.3", status: "active", update: "available", update_version: "5.4" }],
-    themes: [{ name: "generatepress", version: "3.4", status: "active", update: "none", update_version: null }],
+    themes: [{ name: "generatepress", template: "generatepress", version: "3.4", status: "active", update: "none", update_version: null }],
     ...over,
   };
 }
@@ -94,7 +95,7 @@ describe("matchInventory", () => {
     const m = matchInventory(FEED, inv({
       wp_version: "6.4.3",
       plugins: [{ file: "akismet/akismet.php", name: "akismet", version: "5.4", status: "active", update: "none", update_version: null }],
-      themes: [{ name: "generatepress", version: "3.0", status: "active", update: "none", update_version: null }],
+      themes: [{ name: "generatepress", template: "generatepress", version: "3.0", status: "active", update: "none", update_version: null }],
     }));
     expect(m).toEqual([]);
   });

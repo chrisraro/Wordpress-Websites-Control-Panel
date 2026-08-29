@@ -10,13 +10,14 @@ import { encryptSecret } from "@/lib/crypto/secrets";
 const RAW = {
   wp_version: "6.7.1",
   php_version: "8.2.20",
+  admin_url: "https://example.com/wp-admin/",
   core_update: "6.8",
   plugins: [
     { file: "akismet/akismet.php", name: "akismet", title: "Akismet", version: "5.3", status: "active", update: "available", update_version: "5.4" },
     { file: "hello.php", name: "hello", title: "Hello Dolly", version: "1.7", status: "inactive", update: "none", update_version: null },
   ],
   themes: [
-    { name: "generatepress", title: "GeneratePress", version: "3.4", status: "active", update: "none", update_version: null },
+    { name: "generatepress", template: "generatepress", title: "GeneratePress", version: "3.4", status: "active", update: "none", update_version: null },
   ],
   admin_users: [{ ID: 1, user_login: "admin", user_email: "a@b.co" }],
 };
@@ -38,9 +39,11 @@ describe("collectInventory", () => {
     const inv = await collectInventory(client);
     expect(inv.wp_version).toBe("6.7.1");
     expect(inv.php_version).toBe("8.2.20");
+    expect(inv.admin_url).toBe("https://example.com/wp-admin/");
     expect(inv.core_update).toBe("6.8");
     expect(inv.plugins[0]).toMatchObject({ file: "akismet/akismet.php", name: "akismet", update: "available" });
     expect(inv.themes[0].name).toBe("generatepress");
+    expect(inv.themes[0].template).toBe("generatepress");
     expect(inv.admin_users[0].user_login).toBe("admin");
     expect(inv.collected_at).toMatch(/^\d{4}-/);
     expect(client.calls).toHaveLength(1);
