@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { searchPlugins, popularPlugins } from "@/lib/adapters/wporg";
+import { searchPlugins, popularPlugins, authorName } from "@/lib/adapters/wporg";
 
 const API_RESPONSE = {
   info: { page: 1, pages: 3, results: 55 },
@@ -51,5 +51,13 @@ describe("popularPlugins", () => {
   it("uses browse=popular", async () => {
     const res = await popularPlugins(2, stub("request%5Bbrowse%5D=popular"));
     expect(res.plugins).toHaveLength(2);
+  });
+});
+
+describe("authorName", () => {
+  it("flattens the themes API author object to a string", () => {
+    expect(authorName({ display_name: "Automattic" })).toBe("Automattic");
+    expect(authorName({ user_nicename: "wordpressdotorg" })).toBe("wordpressdotorg");
+    expect(authorName("<a href='#'>Someone</a>")).toBe("Someone");
   });
 });
