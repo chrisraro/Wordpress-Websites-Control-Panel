@@ -35,13 +35,16 @@
  *
  * Assertions 7 and 8 verify the two exposures closed in Phase 9b (spec
  * §5.1/§5.2) -- see supabase/migrations/0011_site_admin_users.sql and
- * 0012_revoke_site_credential_columns.sql. Neither migration has been
- * applied to any database yet (the operator applies them by hand, later),
- * so this script must tell three outcomes apart, not two:
+ * 0012_revoke_site_credential_columns.sql. Those migrations are applied by
+ * hand, so this script may run before, between, or after them, and must
+ * tell three outcomes apart rather than two:
  *   - refused    -- the expected post-migration result.
  *   - allowed    -- the data came back. A real failure.
- *   - cannot verify -- the prerequisite migration is not applied, so the
- *     query that would prove or disprove the assertion never ran. Counting
+ *   - cannot verify -- a prerequisite could not be established, so the
+ *     query that would prove or disprove the assertion never ran. The
+ *     usual cause is a migration not yet applied, but it is not the only
+ *     one, and the script reports the raw error rather than asserting a
+ *     cause it cannot distinguish on the wire. Counting
  *     that as a pass would be exactly the vacuous check this script exists
  *     to avoid (a green result for the wrong reason); counting it as a
  *     failure would misreport an unmigrated database as broken. It is
@@ -159,12 +162,15 @@ function isRlsRefusal(error: { code?: string; message?: string } | null): boolea
 // fell through to Postgres and produced 42P01 ("undefined_table") instead.
 // A schema/table that exists but is simply not exposed to PostgREST's API
 // surface is a different case again -- PGRST106, not 42P01 -- and is not
-// what this helper is for. This function is used for labelling an
-// already-captured prerequisite failure only (see
-// `siteAdminUsersPrereqError` below) -- it must never be used to decide
-// whether to continue running the script, since guessing wrong about the
-// wire-protocol shape here is exactly what used to abort the whole run at
-// its very first setup step, before assertions 1-6 could ever execute.
+// what this helper is for. Two callers, both classifying an error that has
+// already happened: labelling a captured prerequisite failure (see
+// `siteAdminUsersPrereqError` below), and telling a vanished relation apart
+// from a real failure on assertion 7's own client query. It must never be
+// used to decide whether to continue running the script -- guessing wrong
+// about the wire-protocol shape here is exactly what used to abort the
+// whole run at its first setup step, before assertions 1-6 could execute.
+// Guessing wrong is survivable in both surviving callers: a leak returns
+// rows, not an error, so no branch below can turn one into a pass.
 function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   if (error.code === "42P01" || error.code === "PGRST205") return true;
@@ -472,7 +478,14 @@ async function main(): Promise<void> {
         // stranded row still degrades to that same correct empty state --
         // and unlike a bare `[]`, it still carries the same
         // `rls_verification_probe` marker every sibling fixture above
-        // uses, so a stranded row is greppable. `.select(...)` on the way
+        // uses, so a stranded row is greppable. The trade-off is deliberate
+        // and worth naming: `users` is typed `AdminUser[]` and every
+        // production writer fills it with an array, so this fixture stores
+        // a shape no real code produces. Verified harmless against the only
+        // consumer today, but a future `Array.isArray`, schema parse, or
+        // unguarded `.map()` would meet it -- at which point seed `[]` and
+        // find stranded rows by their all-zero `collected_at` instead.
+        // `.select(...)` on the way
         // back matches the convention every sibling fixture in this file
         // uses to read its own insert back, even though `error === null`
         // alone is adequate proof of commit here (there is no id column
@@ -516,7 +529,10 @@ async function main(): Promise<void> {
           "select site_admin_users (granted site) returns zero rows",
           siteAdminUsersPrereqError.message,
           isMissingRelation(siteAdminUsersPrereqError)
-            ? "likely cause: migration 0011 (site_admin_users) not yet applied -- re-run after applying it"
+            ? "the table is not there. If 0011 has not been applied yet, that is expected -- " +
+              "re-run after applying it. If it HAS been applied, this is a regression: the " +
+              "staff-only table has been dropped or renamed. The two are indistinguishable on " +
+              "the wire, so this script cannot tell you which"
             : "cause unclear -- if 0011 was already applied, this is a regression: the table may have been dropped, renamed, or had its grants altered",
         );
       } else {
@@ -532,7 +548,8 @@ async function main(): Promise<void> {
             recordUnverifiable(
               "select site_admin_users (granted site) returns zero rows",
               error.message,
-              "likely cause: migration 0011 (site_admin_users) not yet applied -- re-run after applying it",
+              "the table was there for the service-role seed a moment ago and is not there now -- " +
+                "treat this as a race or a concurrent schema change, not as 0011 being unapplied",
             );
           } else if (error.code === "42501") {
             // Stronger than the expected refusal: no SELECT grant on the
@@ -545,7 +562,7 @@ async function main(): Promise<void> {
             record(
               "select site_admin_users (granted site) returns zero rows",
               true,
-              `refused before any row-level policy ran (no table-level grant at all, not the expected silent zero-row filter): ${error.message}`,
+              `refused before any row-level policy ran (no table-level grant at all, not the expected silent zero-row filter): ${error.message} -- note that 0011's site_admin_users_read policy itself remains UNVERIFIED on this run: nothing reached it`,
             );
           } else {
             record(
@@ -589,18 +606,56 @@ async function main(): Promise<void> {
     // not just mcp_endpoint, and 500s every client page. The old version of
     // this assertion had no such control and would have recorded that state
     // as a PASS.
+    //
+    // The control selects every column 0012 grants, read out of the
+    // migration file itself rather than hardcoded here. Selecting a
+    // convenient couple (`id,name`) would prove only that those two
+    // survived: an operator who pastes an edited or stale copy of 0012, or
+    // hand-grants in the SQL editor and omits `capabilities`, leaves every
+    // client page 500ing on `listSites`/`getSite` while this script reports
+    // 13/13 and exits 0. Reading the list from the file ties the control to
+    // what is actually granted, and tests/sites-repo-columns.test.ts ties
+    // that same list to SITE_COLUMNS -- so the two checks together cover
+    // code-vs-migration drift and migration-vs-database drift.
     {
-      const { data: controlData, error: controlError } = await scoped
-        .from("sites")
-        .select("id,name")
-        .eq("id", granted.id);
-      if (controlError || !controlData || controlData.length !== 1) {
+      const grantSql = readFileSync(
+        "supabase/migrations/0012_revoke_site_credential_columns.sql",
+        "utf8",
+      );
+      const grantMatch = grantSql.match(
+        /grant select \(([\s\S]*?)\) on sites to authenticated;/,
+      );
+      const grantedColumns = grantMatch
+        ? grantMatch[1].split(",").map((c) => c.trim()).filter(Boolean).join(",")
+        : null;
+      const { data: controlData, error: controlError } = grantedColumns
+        ? await scoped.from("sites").select(grantedColumns).eq("id", granted.id)
+        : { data: null, error: null };
+      if (!grantedColumns) {
         record(
           "select sites.mcp_endpoint (granted site) is rejected",
           false,
-          `positive control failed -- select id,name for the granted site did not succeed (the signature of 0012's revoke being applied without its paired grant, which breaks every client page): ${
-            controlError ? `code ${controlError.code ?? "?"}: ${controlError.message}` : `got ${controlData?.length ?? 0} row(s)`
-          }`,
+          "could not parse the granted column list out of " +
+            "supabase/migrations/0012_revoke_site_credential_columns.sql -- " +
+            "the positive control cannot run, so a refusal below would prove nothing",
+        );
+      } else if (controlError) {
+        record(
+          "select sites.mcp_endpoint (granted site) is rejected",
+          false,
+          `positive control failed -- selecting 0012's granted columns (${grantedColumns}) ` +
+            `for the granted site errored, the signature of 0012's revoke having been applied ` +
+            `without its paired grant, which breaks every client page: ` +
+            `code ${controlError.code ?? "?"}: ${controlError.message}`,
+        );
+      } else if (!controlData || controlData.length !== 1) {
+        record(
+          "select sites.mcp_endpoint (granted site) is rejected",
+          false,
+          `positive control failed -- selecting 0012's granted columns (${grantedColumns}) ` +
+            `succeeded but returned ${controlData?.length ?? 0} row(s) rather than 1. That is ` +
+            `row filtering, not a grant problem: either the user_site_access fixture above did ` +
+            `not take, or the sites read policy has regressed`,
         );
       } else {
         const { data, error } = await scoped
