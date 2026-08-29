@@ -8,19 +8,27 @@ web
 
 ## Users
 
-A small internal team at **Online Creative Solutions (OCS)**, a web agency —
-roughly two to five people across the `admin`, `developer` and `content_writer`
-roles. Nobody outside the agency signs in today.
+Two audiences, one of them live today.
 
-The `client` role is built, tested and enforced end to end (own sites only,
-read plus report generation, no write), but **no external customer has an
-account yet**. Design work should treat the staff console as the live product
-and the client view as correct-but-unexercised; do not design the client
-experience as though it has users, and do not remove it.
+**Staff — live.** A small internal team at **Online Creative Solutions (OCS)**,
+a web agency: roughly two to five people across the `admin`, `developer` and
+`content_writer` roles. Because the team is more than one person, the console
+cannot assume its operator built it. Someone opening a screen for the first
+time has to be able to tell what a control does and what it will touch.
 
-Because the team is more than one person, the console cannot assume its
-operator built it. Someone opening a screen for the first time has to be able
-to tell what a control does and what it will touch.
+**Clients — intended, not yet live.** External customers of the agency will be
+given accounts. A client sees **only the sites granted to them**, can **read
+and generate reports**, and can do nothing else — no installs, updates,
+activations, or configuration. No external customer has an account yet, so
+there is no usage to reason from, but this is a confirmed audience rather than
+a role kept open speculatively: design the client experience as a product for
+someone who does not work at OCS and did not ask for a control panel.
+
+That framing matters more than the permission list. A client is not a member of
+staff with buttons hidden — they are a customer checking on work they are
+paying for. What reassures them is evidence the site is healthy and a report
+they can forward, not a denser console. The agency-grade bar recorded under
+constraints applies to everything a client can see, not only to the PDF.
 
 ## Product Purpose
 
@@ -94,9 +102,10 @@ dashboard.
   This is the single hardest constraint on future design work.
 - **It must work on a phone.** The team genuinely uses it away from a desk, so
   responsive behaviour is a primary target, not a checkbox.
-- **Client-facing output must look agency-grade.** The reports PDF and the
-  public share page are seen by paying clients and represent OCS; they carry a
-  higher polish bar than the internal console.
+- **Client-facing output must look agency-grade.** The reports PDF, the public
+  share page, and every screen a signed-in client can reach are seen by paying
+  customers and represent OCS; they carry a higher polish bar than the internal
+  console.
 - WP-CLI is unavailable; everything reaches WordPress through MCP `execute-php`.
 - Staff read through a service-role database client that bypasses row-level
   security, so on staff surfaces the application code is the access boundary.
@@ -136,7 +145,9 @@ surface, and none is planned — this is an internal tool.
    system disagrees.
 4. **Say what is not known.** Empty, unmeasured, failed and stale are different
    states from zero, and collapsing them has produced real defects here.
-5. **Client-facing artifacts represent the agency, not the tool.**
+5. **Client-facing artifacts represent the agency, not the tool.** A client's
+   view answers "is my site in good hands?" — not "here is the console with
+   most of it removed."
 
 ## Accessibility & Inclusion
 
