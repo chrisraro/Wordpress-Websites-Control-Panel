@@ -10,6 +10,7 @@ import { supabaseSeoRepo } from "@/services/seo/repo";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 
 function reportDeps(db: ReturnType<typeof createServiceSupabase>) {
   return {
@@ -29,6 +30,10 @@ export async function generateReportAction(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("reports.generate");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
   if (!formData || typeof formData.getAll !== "function") {
     return { ok: false, error: "Form data missing — please resubmit" };
   }
@@ -60,6 +65,10 @@ export async function revokeReportAction(
   _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("reports.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
   const db = createServiceSupabase();
   try {
     await supabaseReportsRepo(db).revoke(reportId);

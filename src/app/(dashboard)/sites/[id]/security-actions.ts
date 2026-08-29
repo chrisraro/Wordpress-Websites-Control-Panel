@@ -7,6 +7,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
+import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 
 export async function runSecurityScanAction(
   siteId: string,
@@ -14,6 +15,10 @@ export async function runSecurityScanAction(
   _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
+  const gate = await checkPermission("security.run");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
   const db = createServiceSupabase();
   try {
     await securityScan(
