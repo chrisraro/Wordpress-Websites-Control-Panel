@@ -10,6 +10,9 @@ const user = (id: string, role: AppRole | null): ManagedUser => ({
 
 const ONE_ADMIN = [user("a1", "admin"), user("d1", "developer")];
 const TWO_ADMINS = [user("a1", "admin"), user("a2", "admin"), user("d1", "developer")];
+// Same admin id appears twice, e.g. from a join fan-out upstream. There is
+// still only one distinct administrator, so the last-admin rule must fire.
+const DUPLICATED_ADMIN_ROW = [user("a1", "admin"), user("a1", "admin"), user("d1", "developer")];
 
 describe("canChangeRole", () => {
   it("refuses demoting the last admin", () => {
@@ -38,17 +41,31 @@ describe("canChangeRole", () => {
     // Changing admin -> admin must not trip the last-admin rule.
     expect(canChangeRole(ONE_ADMIN, "a1", "admin")).toEqual({ allowed: true });
   });
+
+  it("refuses demoting the last admin even when their row is duplicated in the list", () => {
+    // A naive `admins.length <= 1` would see 2 rows for one person and wrongly allow this.
+    const v = canChangeRole(DUPLICATED_ADMIN_ROW, "a1", "developer");
+    expect(v.allowed).toBe(false);
+    expect(v.allowed === false && v.reason).toMatch(/last admin/i);
+  });
 });
 
 describe("canDeleteUser", () => {
   it("refuses deleting yourself, even with other admins around", () => {
     const v = canDeleteUser(TWO_ADMINS, "a1", "a1");
     expect(v.allowed).toBe(false);
-    expect(v.allowed === false && v.reason).toMatch(/your own/i);
+    expect(v.allowed === false && v.reason).toMatch(/your own.*ask another admin/i);
   });
 
   it("refuses deleting the last admin", () => {
     const v = canDeleteUser(ONE_ADMIN, "d1", "a1");
+    expect(v.allowed).toBe(false);
+    expect(v.allowed === false && v.reason).toMatch(/last admin/i);
+  });
+
+  it("refuses deleting the last admin even when their row is duplicated in the list", () => {
+    // A naive `admins.length <= 1` would see 2 rows for one person and wrongly allow this.
+    const v = canDeleteUser(DUPLICATED_ADMIN_ROW, "d1", "a1");
     expect(v.allowed).toBe(false);
     expect(v.allowed === false && v.reason).toMatch(/last admin/i);
   });
