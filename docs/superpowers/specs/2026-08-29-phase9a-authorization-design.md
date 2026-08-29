@@ -233,8 +233,9 @@ Every surface, and what it requires. This table is the phase's checklist.
 | `bulkAction` | `wp_toolkit.manage` + site access (manage) |
 | `createChildThemeAction` | `wp_toolkit.manage` + site access (manage) |
 | `installThemeAction`, `prepareThemeUploadAction` | `wp_toolkit.manage` + site access (manage) |
+| `prepareUploadAction` | `wp_toolkit.manage` **only** — see note |
 | `searchWpThemesAction` | authenticated only (proxies a public API) |
-| `createInstallBatchAction`, `prepareUploadAction` | `wp_toolkit.manage` + site access on **every** target site |
+| `createInstallBatchAction` | `wp_toolkit.manage` + site access on **every** target site |
 | `runSecurityScanAction` | `security.run` + site access |
 | `runSeoScanAction` | `seo.run` + site access |
 | `saveGeoGridConfigAction`, `runGeoGridAction` | `geogrid.manage` + site access |
@@ -243,6 +244,16 @@ Every surface, and what it requires. This table is the phase's checklist.
 | `processQueueNowAction`, `drainQueueAction` | `queue.process` |
 
 `createInstallBatchAction` takes a **list** of site ids. It must check access to each one and reject the whole request if any fails — a partial check there is a cross-tenant hole.
+
+`prepareUploadAction` is deliberately permission-only. The marketplace upload
+has no site at prepare time — the operator picks targets afterwards — so there
+is nothing to scope against. The site check lives in `createInstallBatchAction`,
+where the uploaded path is actually consumed and every target id is verified.
+That makes the consumer's check load-bearing for both actions, so it is pinned
+by a regression test whose comment says so; deleting it would turn this action
+into a way to reach sites the caller cannot access. `prepareThemeUploadAction`
+is the opposite case — it already lives under a site route and takes a `siteId`,
+so it is site-checked directly.
 
 `refreshInventoryAction` requires site access at **manage** level, not read. It is
 read-only with respect to WordPress, so "site access" looks sufficient — but it
