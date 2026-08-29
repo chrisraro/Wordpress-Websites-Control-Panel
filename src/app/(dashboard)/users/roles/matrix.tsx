@@ -14,14 +14,24 @@
  *
  * Every other cell reverts to its prior value on failure rather than
  * leaving the checkbox disagreeing with the database, and toasts either way.
+ *
+ * Granting (never revoking) one of CLIENT_CROSS_TENANT_PERMISSIONS to the
+ * `client` role is additionally interrupted by a confirmation dialog naming
+ * the specific consequence -- see client-grant-warnings.ts. That dialog is
+ * friction against a mis-click in a 40-checkbox grid, not a second
+ * authorization boundary: canSetRolePermission in
+ * src/services/users/guards.ts (called by setRolePermissionAction on every
+ * request regardless of this component) remains the only real enforcement.
  */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setRolePermissionAction } from "../actions";
+import { ConfirmDialog } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { cardClass, cardFooterClass, hintClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
 import { IconInfo } from "@/components/ui/icons";
 import { APP_PERMISSIONS, APP_ROLES, type AppPermission, type AppRole } from "@/lib/authz/types";
+import { CLIENT_GRANT_WARNINGS, requiresClientGrantConfirmation } from "./client-grant-warnings";
 
 const ROLE_LABEL: Record<AppRole, string> = {
   admin: "Admin",
@@ -86,11 +96,29 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
     () => new Set(rolePermissions.map((r) => cellKey(r.role, r.permission))),
   );
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
+  const [confirmCell, setConfirmCell] = useState<RolePermissionCell | null>(null);
   const [, startTransition] = useTransition();
 
-  function toggle(role: AppRole, permission: AppPermission) {
+  function requestToggle(role: AppRole, permission: AppPermission) {
     if (isLocked(role, permission)) return;
 
+    const key = cellKey(role, permission);
+    const wasEnabled = enabled.has(key);
+    const next = !wasEnabled;
+
+    // Interrupt only the specific transition this guards against: granting
+    // (never revoking) a cross-tenant permission to the external `client`
+    // role. Nothing is written and the checkbox does not move yet -- the
+    // dialog decides, not this click.
+    if (requiresClientGrantConfirmation(role, permission, next)) {
+      setConfirmCell({ role, permission });
+      return;
+    }
+
+    applyToggle(role, permission);
+  }
+
+  function applyToggle(role: AppRole, permission: AppPermission) {
     const key = cellKey(role, permission);
     const wasEnabled = enabled.has(key);
     const next = !wasEnabled;
@@ -202,7 +230,7 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
                             type="checkbox"
                             checked={checked}
                             disabled={disabled}
-                            onChange={() => toggle(role, permission)}
+                            onChange={() => requestToggle(role, permission)}
                             aria-label={`${PERMISSION_LABEL[permission]} for ${ROLE_LABEL[role]}`}
                             aria-describedby={locked ? "admin-users-manage-note" : undefined}
                             className="size-4 shrink-0 rounded-md accent-ink disabled:opacity-60"
@@ -220,6 +248,39 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
           {ADMIN_USERS_MANAGE_REASON}
         </p>
       </div>
+
+      <ConfirmDialog
+        open={confirmCell !== null}
+        title={
+          confirmCell
+            ? (CLIENT_GRANT_WARNINGS[confirmCell.permission]?.title ??
+              `Grant ${PERMISSION_LABEL[confirmCell.permission]} to Client?`)
+            : ""
+        }
+        description={
+          confirmCell
+            ? // Every cell that can reach this dialog has an entry in
+              // CLIENT_GRANT_WARNINGS by construction (it is keyed off the
+              // same CLIENT_CROSS_TENANT_PERMISSIONS list requestToggle
+              // checks); this fallback only exists so a future drift
+              // between the two fails safe with real, if generic, copy
+              // instead of a blank dialog.
+              (CLIENT_GRANT_WARNINGS[confirmCell.permission]?.description ??
+                `${PERMISSION_LABEL[confirmCell.permission]} for the Client role reaches ` +
+                  "beyond a single customer's own sites. This takes effect on each affected " +
+                  "client's next request.")
+            : ""
+        }
+        confirmLabel="Grant permission"
+        tone="danger"
+        onCancel={() => setConfirmCell(null)}
+        onConfirm={() => {
+          if (!confirmCell) return;
+          const { role, permission } = confirmCell;
+          setConfirmCell(null);
+          applyToggle(role, permission);
+        }}
+      />
     </div>
   );
 }
