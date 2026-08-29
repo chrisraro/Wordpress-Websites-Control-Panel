@@ -21,6 +21,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         email={viewer.email ?? "Signed in"}
         showConnectSite={can(viewer, "sites.manage")}
         showMarketplace={can(viewer, "wp_toolkit.manage")}
+        showUsers={can(viewer, "users.manage")}
       />
       {/* Page max-width per DESIGN.md, measured inside the sidebar column. */}
       <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 sm:py-8">{children}</div>

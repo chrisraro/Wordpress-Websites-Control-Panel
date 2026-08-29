@@ -29,12 +29,21 @@ function findPageFiles(dir: string): string[] {
 
 const pageFiles = findPageFiles(DASHBOARD_DIR);
 
+// `/users` and its sub-routes are the one documented exception: they read
+// `last_sign_in_at` and other invite state via `auth.admin.*`, which only
+// exists on the service-role client, and the whole surface is staff-only,
+// gated in application code via requirePermission("users.manage") rather
+// than by RLS (see docs/superpowers/specs/2026-08-29-phase9b-user-management
+// -design.md §2.1 and §7). It is never reachable from a user's own session.
+const USERS_DIR = join(DASHBOARD_DIR, "users");
+const rlsGovernedPageFiles = pageFiles.filter((f) => !f.startsWith(USERS_DIR));
+
 describe("dashboard page reads stay on the RLS-governed path", () => {
   it("found at least one page.tsx to check (guards against a rotted glob)", () => {
     expect(pageFiles.length).toBeGreaterThan(0);
   });
 
-  it.each(pageFiles)("%s does not import createServiceSupabase", (file) => {
+  it.each(rlsGovernedPageFiles)("%s does not import createServiceSupabase", (file) => {
     const source = readFileSync(file, "utf8");
     expect(source).not.toMatch(/createServiceSupabase/);
   });

@@ -80,6 +80,15 @@ export const IconShield = (p: IconProps) => (
   </Icon>
 );
 
+export const IconUsers = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="8" r="3.25" />
+    <path d="M3.5 20c.6-3.6 3-5.5 5.5-5.5s4.9 1.9 5.5 5.5" />
+    <path d="M15.5 5.5A3.25 3.25 0 0 1 16 12" />
+    <path d="M15 14.5c2.2.4 3.9 2.2 4.5 5.5" />
+  </Icon>
+);
+
 export const IconSearch = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="7" />

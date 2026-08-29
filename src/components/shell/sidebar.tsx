@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
 import { buttonClass } from "@/components/ui/styles";
 import {
-  IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites,
+  IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
 } from "@/components/ui/icons";
 
 interface NavItem {
@@ -30,12 +30,22 @@ const NAV: NavItem[] = [
     Icon: IconMarketplace,
     match: (p) => p.startsWith("/marketplace"),
   },
+  {
+    href: "/users",
+    label: "Users",
+    Icon: IconUsers,
+    match: (p) => p.startsWith("/users"),
+  },
 ];
 
 function NavLinks({
-  pathname, onNavigate, showMarketplace,
-}: { pathname: string; onNavigate?: () => void; showMarketplace: boolean }) {
-  const items = NAV.filter((item) => showMarketplace || item.href !== "/marketplace");
+  pathname, onNavigate, showMarketplace, showUsers,
+}: { pathname: string; onNavigate?: () => void; showMarketplace: boolean; showUsers: boolean }) {
+  const items = NAV.filter((item) => {
+    if (item.href === "/marketplace") return showMarketplace;
+    if (item.href === "/users") return showUsers;
+    return true;
+  });
   return (
     <nav aria-label="Main" className="flex flex-col gap-1">
       {items.map(({ href, label, Icon, match }) => {
@@ -63,13 +73,14 @@ function NavLinks({
 }
 
 function SidebarBody({
-  email, pathname, onNavigate, showConnectSite, showMarketplace,
+  email, pathname, onNavigate, showConnectSite, showMarketplace, showUsers,
 }: {
   email: string;
   pathname: string;
   onNavigate?: () => void;
   showConnectSite: boolean;
   showMarketplace: boolean;
+  showUsers: boolean;
 }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
@@ -92,7 +103,12 @@ function SidebarBody({
         </Link>
       )}
 
-      <NavLinks pathname={pathname} onNavigate={onNavigate} showMarketplace={showMarketplace} />
+      <NavLinks
+        pathname={pathname}
+        onNavigate={onNavigate}
+        showMarketplace={showMarketplace}
+        showUsers={showUsers}
+      />
 
       <div className="mt-auto border-t border-hairline pt-4">
         <p className="truncate px-3 text-caption tracking-normal text-mid-gray" title={email}>
@@ -110,8 +126,8 @@ function SidebarBody({
 }
 
 export function Sidebar({
-  email, showConnectSite, showMarketplace,
-}: { email: string; showConnectSite: boolean; showMarketplace: boolean }) {
+  email, showConnectSite, showMarketplace, showUsers,
+}: { email: string; showConnectSite: boolean; showMarketplace: boolean; showUsers: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -137,6 +153,7 @@ export function Sidebar({
           pathname={pathname}
           showConnectSite={showConnectSite}
           showMarketplace={showMarketplace}
+          showUsers={showUsers}
         />
       </aside>
 
@@ -185,6 +202,7 @@ export function Sidebar({
             onNavigate={() => setOpen(false)}
             showConnectSite={showConnectSite}
             showMarketplace={showMarketplace}
+            showUsers={showUsers}
           />
         </div>
       </dialog>
