@@ -18,10 +18,23 @@ import { getOptionalEnv } from "@/lib/env";
 import { generateReport } from "@/services/reports/generate";
 import { supabaseReportsRepo, supabaseReportStorage } from "@/services/reports/repo";
 import { parseSections, REPORT_SECTIONS } from "@/services/reports/types";
+import { manageSite } from "@/services/manage/service";
+import { toManageAction } from "@/services/bulk/service";
+import type { BulkJobPayload } from "@/services/bulk/types";
 
 interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
   activate: boolean;
+  actor: string;
+}
+
+/**
+ * The payload the UI/API read (BulkJobPayload) doesn't carry who queued the
+ * batch — that's for the handler alone, so it rides along as an extra field
+ * rather than widening the shared contract. Same idea as PluginInstallPayload
+ * above: the job's actual payload is a superset of what other code needs.
+ */
+interface BulkManagePayload extends BulkJobPayload {
   actor: string;
 }
 
@@ -96,6 +109,20 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         Number(p.period_days) > 0 ? Number(p.period_days) : 30,
         true,
       );
+    },
+    bulk_manage: async ({ job }) => {
+      if (!job.site_id) throw new Error("bulk_manage requires a site_id");
+      const p = job.payload as unknown as BulkManagePayload;
+      if (!p?.kind || !p?.target || !p?.id || typeof p.actor !== "string") {
+        throw new Error("bulk_manage payload malformed");
+      }
+      const action = toManageAction(p.kind, p.target, p.id);
+      const result = await manageSite(
+        { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, action,
+      );
+      // Throwing puts the job on the retry ladder; a failing item must never
+      // abort its siblings, which are separate jobs.
+      if (!result.ok) throw new Error(result.error ?? "Bulk action failed");
     },
   };
 }

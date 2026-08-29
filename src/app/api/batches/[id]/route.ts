@@ -20,14 +20,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     supabaseSitesRepo(db).listSites(),
   ]);
   const names = new Map(sites.map((s) => [s.id, s.name]));
-  const rows = jobs.map((j) => ({
-    id: j.id,
-    site_id: j.site_id,
-    site_name: j.site_id ? names.get(j.site_id) ?? j.site_id : "—",
-    status: j.status,
-    attempts: j.attempts,
-    last_error: j.last_error,
-  }));
+  const rows = jobs.map((j) => {
+    const siteName = j.site_id ? names.get(j.site_id) ?? j.site_id : "—";
+    const payloadLabel = (j.payload as { label?: unknown }).label;
+    return {
+      id: j.id,
+      site_id: j.site_id,
+      site_name: siteName,
+      // Bulk batches are one site, many items; install batches are one item,
+      // many sites. The payload label distinguishes them.
+      label: typeof payloadLabel === "string" && payloadLabel ? payloadLabel : siteName,
+      status: j.status,
+      attempts: j.attempts,
+      last_error: j.last_error,
+    };
+  });
   const done = rows.length > 0 && rows.every((r) => r.status === "done" || r.status === "failed");
   return NextResponse.json({ jobs: rows, done });
 }
