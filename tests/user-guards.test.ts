@@ -55,14 +55,18 @@ describe("canChangeRole", () => {
   // to `client` -- an external customer -- hands them the same
   // live-PHP-execution hole canGrantSiteAccess refuses at grant time.
   describe("changing role to client with an existing manage-level grant", () => {
-    const MANAGE_GRANT: SiteGrant[] = [{ siteId: "site-1", accessLevel: "manage" }];
-    const READ_GRANTS: SiteGrant[] = [{ siteId: "site-1", accessLevel: "read" }];
+    const MANAGE_GRANT: SiteGrant[] = [{ siteId: "site-1", siteName: "Acme Storefront", accessLevel: "manage" }];
+    const READ_GRANTS: SiteGrant[] = [{ siteId: "site-1", siteName: "Acme Storefront", accessLevel: "read" }];
 
-    it("refuses when the target holds a manage-level grant", () => {
+    it("refuses when the target holds a manage-level grant, naming the site rather than its id", () => {
+      // Finding 5 of the final whole-branch review: the admin reading this
+      // refusal is looking at a grant list rendered with site names, not
+      // ids -- the message must match what they can see.
       const v = canChangeRole(TWO_ADMINS, "d1", "client", MANAGE_GRANT);
       expect(v.allowed).toBe(false);
       expect(v.allowed === false && v.reason).toMatch(/manage-level access/i);
-      expect(v.allowed === false && v.reason).toContain("site-1");
+      expect(v.allowed === false && v.reason).toContain("Acme Storefront");
+      expect(v.allowed === false && v.reason).not.toContain("site-1");
     });
 
     it("allows when the target holds only read-level grants", () => {

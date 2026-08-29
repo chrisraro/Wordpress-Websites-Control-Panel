@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { findPageFiles } from "./support/find-page-files";
 
 // Finding 3 of the final whole-branch review.
 //
@@ -31,19 +32,6 @@ import { join } from "node:path";
 // same hole one page later. Globbing the directory closes that: any new
 // page.tsx anywhere under /users is picked up automatically.
 const USERS_DIR = join(__dirname, "..", "src", "app", "(dashboard)", "users");
-
-function findPageFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      out.push(...findPageFiles(full));
-    } else if (entry === "page.tsx") {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 const guardedPages = findPageFiles(USERS_DIR);
 

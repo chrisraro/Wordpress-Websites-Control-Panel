@@ -26,7 +26,8 @@ export function supabaseSnapshotsRepo(db: SupabaseClient): SnapshotsRepo {
  * `site_admin_users` (0011_site_admin_users.sql): staff-only, one row per
  * site, replaced wholesale on each inventory refresh -- see spec §5.1.
  * Written exclusively by the service-role collector; read by the site
- * overview page's Administrators card, inside the existing !isClient branch.
+ * overview page's Administrators card, gated there on `canViewAdminUsers`
+ * (`can(viewer, "sites.view_all")` in sites/[id]/page.tsx), not a role check.
  */
 export interface AdminUsersRepo {
   upsertAdminUsers(siteId: string, users: AdminUser[]): Promise<void>;

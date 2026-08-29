@@ -24,9 +24,19 @@ export type GuardVerdict = { allowed: true } | { allowed: false; reason: string 
 export const ALLOWED: GuardVerdict = { allowed: true };
 export const refuse = (reason: string): GuardVerdict => ({ allowed: false, reason });
 
-/** One `user_site_access` row for a single user. */
+/**
+ * One `user_site_access` row for a single user. `siteName` travels with the
+ * grant (joined at the repo) rather than being looked up separately by every
+ * caller — see canChangeRole's manage-grant refusal in guards.ts, which
+ * would otherwise have no way to name the site in the message it renders to
+ * an admin who is already looking at names, not ids, everywhere else on the
+ * page. Falls back to the id only if the joined site row is ever missing
+ * (a grant can in theory outlive its site only in the gap between a delete
+ * and the cascade, never in steady state).
+ */
 export interface SiteGrant {
   siteId: string;
+  siteName: string;
   accessLevel: SiteAccessLevel;
 }
 

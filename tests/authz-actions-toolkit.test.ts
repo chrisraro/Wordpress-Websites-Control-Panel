@@ -275,8 +275,45 @@ describe("createInstallBatchAction", () => {
     });
 
     expect(result).toEqual(DENIED);
-    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1");
-    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-2");
+    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1", "manage");
+    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-2", "manage");
+  });
+
+  // Final whole-branch review, finding 1: this action installs/activates
+  // plugin or theme code on a live WordPress site -- the same class of write
+  // every sibling toolkit action (manageAction, bulkAction,
+  // refreshInventoryAction) requires "manage" for. A `read` grant, which is
+  // exactly the level the seeded matrix hands a `client`, must not be
+  // enough.
+  it("is refused with only a read grant (requires manage)", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockImplementation((_siteId: string, min?: string) =>
+      Promise.resolve(min === "manage" ? DENIED : FAKE_VIEWER));
+
+    const result = await createInstallBatchAction({
+      source: { kind: "wporg", slug: "akismet" }, siteIds: ["site-1"], activate: true,
+    });
+
+    expect(result).toEqual(DENIED);
+    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1", "manage");
+  });
+
+  // No happy-path test in this file lets the action actually enqueue (every
+  // domain dependency is mocked to throw, by design). So "allowed with
+  // manage" is proven the same way the file proves everything else: with a
+  // manage grant the guard must not deny, meaning execution reaches
+  // `createServiceSupabase` -- which the harness throws from specifically to
+  // make "the guard was cleared" observable.
+  it("clears the guard and reaches createServiceSupabase with a manage grant", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockImplementation((_siteId: string, min?: string) =>
+      Promise.resolve(min === "manage" ? FAKE_VIEWER : DENIED));
+
+    await expect(createInstallBatchAction({
+      source: { kind: "wporg", slug: "akismet" }, siteIds: ["site-1"], activate: true,
+    })).rejects.toThrow("createServiceSupabase must not be called when a guard denies access");
+
+    expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1", "manage");
   });
 });
 

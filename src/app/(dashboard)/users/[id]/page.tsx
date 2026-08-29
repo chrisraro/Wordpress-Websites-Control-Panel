@@ -68,16 +68,22 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   // on the server, then crossed to the client as a plain { allowed, reason }
   // verdict -- never the guard functions or the user list itself.
   //
-  // canChangeRole's refusal never depends on which role is picked next: once
-  // `next` differs from the account's current role, whether the account is
-  // the sole admin is the only thing that decides (see guards.ts). So any
-  // role other than the current one is a valid probe for "would changing
-  // this account away from its current role be refused right now" -- which
-  // is exactly what the control needs to know before the admin has picked
-  // anything. The write itself re-checks against a freshly read list at the
-  // moment it runs; this is only what the control displays.
+  // Two verdicts, not one, because changeUserRole's refusal is no longer
+  // role-independent (final whole-branch review, finding 4): the last-admin
+  // rule still refuses any destination once `next` differs from the current
+  // role, but a change specifically *to* `client` can also be refused for a
+  // second, unrelated reason -- the target still holding a manage-level
+  // site grant. `probeRole` (any role other than the current one) is a
+  // valid stand-in for every non-client destination; `client` is probed
+  // separately, with the same freshly-read `grants` the page already loads
+  // for the site-access card below, so the manage-grant refusal is caught
+  // before the admin ever clicks Save, not only after. RoleForm picks
+  // whichever of these matches what is actually selected. The write itself
+  // re-checks against a freshly read list (and grants) at the moment it
+  // runs regardless; this is only what the control displays.
   const probeRole: AppRole = person.role === "admin" ? "developer" : "admin";
   const roleVerdict = canChangeRole(users, id, probeRole);
+  const clientRoleVerdict = canChangeRole(users, id, "client", grants);
   const deleteVerdict = canDeleteUser(users, viewer.id, id);
 
   const siteNameById = new Map(allSites.map((s) => [s.id, s.name] as const));
@@ -127,6 +133,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               currentRole={person.role}
               isSelf={id === viewer.id}
               verdict={roleVerdict}
+              clientVerdict={clientRoleVerdict}
               rolesWithUsersManage={rolesWithUsersManage}
             />
           </div>

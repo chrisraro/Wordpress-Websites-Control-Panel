@@ -4,7 +4,7 @@
  *
  * `client` is the one role in APP_ROLES that is an external customer of the
  * agency, not staff. Every other role's permissions only ever widen what
- * that *staff member* can do; granting one of these four to `client`
+ * that *staff member* can do; granting one of these five to `client`
  * instead widens what every customer account can do to every OTHER
  * customer's data -- it crosses a tenant boundary, not just a capability
  * boundary. That is the criterion for membership in
@@ -76,22 +76,32 @@ export const CLIENT_GRANT_WARNINGS: Partial<Record<AppPermission, ClientGrantWar
   "wp_toolkit.manage": {
     title: "Give every Client account WP Toolkit access?",
     description:
-      "manageAction and refreshInventoryAction both also require a manage-level grant on the " +
-      "specific site being acted on, and canGrantSiteAccess already refuses a manage-level grant " +
-      "onto a Client account -- so this alone does not reach every OTHER customer's site. The " +
-      "real danger is a stray manage-level grant a staff account already held before being " +
-      "changed to Client (changeUserRole refuses that too, but only going forward), or one added " +
-      "directly via SQL: turning this on removes the one remaining check standing between that " +
-      "external customer and installing, updating, or removing plugins, themes, and WordPress " +
-      "core, or running maintenance and bulk actions, on that site. This takes effect on each " +
-      "affected client's next request.",
+      "Every wp_toolkit write that actually reaches a site -- manageAction, bulkAction, " +
+      "refreshInventoryAction, createChildThemeAction, installThemeAction, and " +
+      "createInstallBatchAction -- also requires a manage-level grant on the specific site being " +
+      "acted on, and canGrantSiteAccess already refuses a manage-level grant onto a Client " +
+      "account -- so this alone does not reach every OTHER customer's site. One action is " +
+      "permission-only: prepareUploadAction mints a signed upload URL before any site has been " +
+      "picked, so there is nothing yet for a site check to run against -- but it only produces a " +
+      "token good for uploading a .zip, and createInstallBatchAction's own per-site manage check, " +
+      "which validates every target site before that upload path is ever consumed, is what " +
+      "actually installs anything. The real danger, for all of these, is a stray manage-level " +
+      "grant a staff account already held before being changed to Client (changeUserRole refuses " +
+      "that too, but only going forward), or one added directly via SQL: turning this on removes " +
+      "the one remaining check standing between that external customer and installing, updating, " +
+      "or removing plugins, themes, and WordPress core, or running maintenance and bulk actions, " +
+      "on that site. This takes effect on each affected client's next request.",
   },
   "queue.process": {
     title: "Let every Client account drain the entire job queue?",
     description:
-      "processQueueNowAction (queue-actions.ts) is the only action in the codebase gated on a " +
-      "permission with no site scoping at all. Every account with the Client role -- an " +
-      "external customer, not staff -- would be able to drain the global job queue on demand, " +
+      "processQueueNowAction (queue-actions.ts) is not the only action gated on a permission with " +
+      "no site scoping -- createSite (sites.manage) and prepareUploadAction (wp_toolkit.manage) " +
+      "are permission-only too -- but it is the only one of those that acts on every site at " +
+      "once: createSite only ever creates the one site being connected, and prepareUploadAction " +
+      "only ever mints one upload URL, while draining the queue on demand runs every OTHER " +
+      "customer's pending job, on every site that has one, in a single click. Every account with " +
+      "the Client role -- an external customer, not staff -- would be able to trigger that, " +
       "executing every OTHER customer's pending snapshot_refresh and security_scan jobs, which " +
       "run PHP against those customers' live WordPress sites. This takes effect on each affected " +
       "client's next request.",

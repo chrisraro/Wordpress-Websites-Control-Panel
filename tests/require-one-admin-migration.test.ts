@@ -62,7 +62,7 @@ describe("0014_require_one_admin.sql", () => {
     expect(createIndex).toBeGreaterThan(dropIndex);
   });
 
-  it("is row-level, not statement-level -- statement-level would still fire on a zero-row upsert", () => {
+  it("is row-level, not statement-level -- statement-level would still fire on a zero-conflict insert-only upsert", () => {
     // repo.setRole (src/services/users/repo.ts) writes every role change via
     // `.upsert(..., { onConflict: "user_id" })`, i.e.
     // `insert ... on conflict (user_id) do update ...`. Postgres has fired
@@ -70,13 +70,19 @@ describe("0014_require_one_admin.sql", () => {
     // 9.5 (a statement-level trigger's firing is governed by which events
     // the statement's command could invoke, not by which branch, if any, a
     // row actually took) -- so that is not why row-level is the right
-    // choice. The reason is that a statement-level trigger fires
-    // unconditionally once per statement even when the DO UPDATE branch
-    // changes zero rows, evaluating this invariant on a write that never
-    // actually changed anyone's role. Row-level AFTER UPDATE triggers fire
-    // only for rows genuinely taking the DO UPDATE branch -- documented
-    // Postgres behaviour for ON CONFLICT DO UPDATE -- so this only ever
-    // runs the check when a role change really happened.
+    // choice. Final whole-branch review, finding 3: the real, stronger
+    // reason is that this same rule means a statement-level version would
+    // still fire even when every row in the statement takes the plain
+    // INSERT branch and none conflicts at all -- exactly the shape of
+    // scripts/bootstrap-admin.ts's very first call, upserting into a
+    // completely empty user_roles where there is nothing yet to conflict
+    // with. That would couple the very statement that grants an
+    // environment's first administrator to a check written to catch an
+    // admin being taken away, not one being granted. Row-level AFTER
+    // UPDATE triggers fire only for rows that actually took the DO UPDATE
+    // branch -- documented Postgres behaviour for ON CONFLICT DO UPDATE --
+    // so a statement made up entirely of fresh inserts never invokes it at
+    // all, by construction.
     const m = SQL.match(/create trigger user_roles_require_one_admin[\s\S]*?;/);
     expect(m).not.toBeNull();
     expect(m![0]).toMatch(/for each row/);

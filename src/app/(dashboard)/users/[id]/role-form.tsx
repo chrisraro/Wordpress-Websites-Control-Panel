@@ -4,14 +4,21 @@
  * The role control for one account: a select, a save button, and the two
  * things that make changing a role safe --
  *
- * - `verdict` is computed on the server (page.tsx) against a freshly read
- *   user list, via the same `canChangeRole` guard the action itself calls.
- *   It crosses the boundary as a plain { allowed, reason }, never as the
- *   guard function or the user list. When refused, the control stays
- *   visible and disabled with its reason -- an admin needs to see why they
- *   cannot demote themselves, not wonder where the control went. The
- *   server action re-checks against a *fresh* list at write time regardless
- *   of what this verdict says; this is only what the control displays.
+ * - `verdict` and `clientVerdict` are computed on the server (page.tsx)
+ *   against a freshly read user list (and, for `clientVerdict`, the
+ *   target's freshly read site grants), via the same `canChangeRole` guard
+ *   the action itself calls. They cross the boundary as plain
+ *   { allowed, reason } values, never as the guard function, the user list,
+ *   or the grants. Two verdicts, not one, because a change specifically to
+ *   Client can be refused for a reason (a lingering manage-level site
+ *   grant) that no other destination role is refused for -- see
+ *   page.tsx's comment above where these are computed. `effectiveVerdict`
+ *   below picks whichever one matches the currently selected role. When
+ *   refused, the control stays visible and disabled with its reason -- an
+ *   admin needs to see why they cannot make this change, not wonder where
+ *   the control went. The server action re-checks against a *fresh* list
+ *   (and fresh grants) at write time regardless of what either verdict
+ *   says; this is only what the control displays.
  * - Changing your own role, when the guard allows it, opens a confirmation
  *   naming the consequence before it happens -- but only when the
  *   consequence is real. The permission matrix is editable (Task 6), so
@@ -46,12 +53,14 @@ const DEMOTE_SELF_WARNING =
   "yourself -- another administrator will need to change it back for you.";
 
 export function RoleForm({
-  targetId, currentRole, isSelf, verdict, rolesWithUsersManage,
+  targetId, currentRole, isSelf, verdict, clientVerdict, rolesWithUsersManage,
 }: {
   targetId: string;
   currentRole: AppRole | null;
   isSelf: boolean;
   verdict: { allowed: boolean; reason?: string };
+  /** The verdict for a change specifically to Client -- see this file's header comment. */
+  clientVerdict: { allowed: boolean; reason?: string };
   /** Roles that currently hold `users.manage`, read fresh from `role_permissions`. */
   rolesWithUsersManage: AppRole[];
 }) {
@@ -61,8 +70,11 @@ export function RoleForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  // Client is the one destination whose refusal depends on more than "is
+  // this account the sole admin" -- see this file's header comment.
+  const effectiveVerdict = role === "client" ? clientVerdict : verdict;
   const changed = role !== "" && role !== currentRole;
-  const canSubmit = changed && verdict.allowed && !pending;
+  const canSubmit = changed && effectiveVerdict.allowed && !pending;
   // Only meaningful for isSelf, but computed regardless of it -- cheap, and
   // keeps the condition below a single readable expression.
   const destinationKeepsUsersManage = role !== "" && rolesWithUsersManage.includes(role);
@@ -137,10 +149,10 @@ export function RoleForm({
         </button>
       </div>
 
-      {!verdict.allowed && (
+      {!effectiveVerdict.allowed && (
         <p className="flex items-start gap-2 text-body text-ember">
           <IconAlert size={16} className="mt-0.5 shrink-0" />
-          {verdict.reason}
+          {effectiveVerdict.reason}
         </p>
       )}
 

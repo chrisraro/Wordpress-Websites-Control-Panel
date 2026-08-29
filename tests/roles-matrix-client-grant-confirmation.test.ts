@@ -75,22 +75,29 @@ describe("CLIENT_GRANT_WARNINGS", () => {
     expect(new Set(Object.keys(CLIENT_GRANT_WARNINGS))).toEqual(new Set(CLIENT_CROSS_TENANT_PERMISSIONS));
   });
 
-  it("gives every entry a defined, non-generic title and description", () => {
+  it("gives every entry a real, non-generic title and description", () => {
+    // Final whole-branch review, finding 8: a bare toBeTruthy() lets a
+    // one-character string pass a test whose name promises "non-generic" --
+    // restore bounds that actually mean something, and keep the negative
+    // match below as a second, independent check against this module's own
+    // fallback wording.
     for (const permission of CLIENT_CROSS_TENANT_PERMISSIONS) {
       const warning = CLIENT_GRANT_WARNINGS[permission];
       expect(warning).toBeDefined();
-      expect(warning?.title).toBeTruthy();
-      expect(warning?.description).toBeTruthy();
+      expect(warning?.title.length).toBeGreaterThan(10);
+      expect(warning?.description.length).toBeGreaterThan(40);
       // Not the generic wording this module falls back to if a warning were
       // ever missing -- each of the five must be real, specific copy.
       expect(warning?.description).not.toMatch(/reaches\s+beyond a single customer's own sites\.$/i);
     }
   });
 
-  it("names the missing global scoping for queue.process, the one action gated on no site check at all", () => {
-    // Finding 5 of the final whole-branch review: processQueueNowAction
-    // gates on queue.process and nothing else -- no per-site check -- so
-    // granting it to Client drains every OTHER customer's queued work.
+  it("names the missing site scoping for queue.process, the one action that acts on every site at once", () => {
+    // Final whole-branch review, finding 6: processQueueNowAction is not the
+    // *only* action gated on a permission with no site scoping (createSite
+    // and prepareUploadAction are too) -- it is the only one of those that
+    // drains every OTHER customer's queued work across every site in one
+    // click, which is the actual distinction worth confirming.
     const warning = CLIENT_GRANT_WARNINGS["queue.process"];
     expect(warning?.description).toMatch(/queue/i);
     expect(warning?.description).toMatch(/snapshot_refresh|security_scan/);

@@ -27,8 +27,12 @@ export async function createInstallBatchAction(input: {
   }
   // Every target site must be checked — a partial check here is a
   // cross-tenant hole, since a batch that installs on N sites should not
-  // proceed on any of them if the caller lacks access to even one.
-  const siteChecks = await Promise.all(input.siteIds.map((id) => checkSiteAccess(id)));
+  // proceed on any of them if the caller lacks access to even one. This
+  // installs/activates plugin or theme code on the site's live WordPress,
+  // the same write every sibling toolkit action requires "manage" for
+  // (manageAction, bulkAction, refreshInventoryAction) — a "read" grant is
+  // not enough, even though checkSiteAccess would default to it.
+  const siteChecks = await Promise.all(input.siteIds.map((id) => checkSiteAccess(id, "manage")));
   const firstDenial = siteChecks.find(isDenied);
   if (firstDenial) return firstDenial;
   if (input.source.kind === "wporg" && !SLUG_RE.test(input.source.slug)) {

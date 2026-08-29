@@ -305,7 +305,10 @@ describe("supabaseUsersRepo — writes", () => {
     });
     const repo = supabaseUsersRepo(db);
     const grants = await repo.listGrants("u1");
-    expect(grants).toEqual([{ siteId: "s1", accessLevel: "read" }]);
+    // The fake query builder does not simulate the `sites(name)` join, so
+    // this exercises the same "joined row missing" fallback the real repo
+    // uses when a grant briefly outlives its site.
+    expect(grants).toEqual([{ siteId: "s1", siteName: "s1", accessLevel: "read" }]);
   });
 
   it("grantSite upserts a user_site_access row", async () => {
@@ -427,7 +430,7 @@ function memoryUsersRepo(initialUsers: ManagedUser[], initialGrants: Record<stri
       const existing = grantsByUserId.get(userId) ?? [];
       grantsByUserId.set(userId, [
         ...existing.filter((g) => g.siteId !== siteId),
-        { siteId, accessLevel: level },
+        { siteId, siteName: siteId, accessLevel: level },
       ]);
     },
     async revokeSite(userId, siteId) {
@@ -505,7 +508,7 @@ describe("changeUserRole", () => {
     it("refuses when the target holds a manage-level grant, and writes nothing", async () => {
       const { repo, setRoleCalls } = memoryUsersRepo(
         [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
-        { d1: [{ siteId: "site-1", accessLevel: "manage" }] },
+        { d1: [{ siteId: "site-1", siteName: "Site One", accessLevel: "manage" }] },
       );
       const result = await changeUserRole(repo, "a1", "d1", "client");
       expect(result).toEqual({ ok: false, error: expect.stringMatching(/manage-level access/i) });
@@ -515,7 +518,7 @@ describe("changeUserRole", () => {
     it("allows when the target holds only read-level grants", async () => {
       const { repo, setRoleCalls } = memoryUsersRepo(
         [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
-        { d1: [{ siteId: "site-1", accessLevel: "read" }] },
+        { d1: [{ siteId: "site-1", siteName: "Site One", accessLevel: "read" }] },
       );
       const result = await changeUserRole(repo, "a1", "d1", "client");
       expect(result).toEqual({ ok: true });
@@ -536,7 +539,7 @@ describe("changeUserRole", () => {
     it("allows changing to a staff role even with a manage-level grant, since it is never enforced there", async () => {
       const { repo, setRoleCalls } = memoryUsersRepo(
         [managedUser("a1", "admin"), managedUser("a2", "admin"), managedUser("d1", "developer")],
-        { d1: [{ siteId: "site-1", accessLevel: "manage" }] },
+        { d1: [{ siteId: "site-1", siteName: "Site One", accessLevel: "manage" }] },
       );
       const result = await changeUserRole(repo, "a1", "d1", "content_writer");
       expect(result).toEqual({ ok: true });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
+import { findPageFiles } from "./support/find-page-files";
 
 // Phase 9a's whole point is that a client's reads go through `readDbFor`,
 // which routes them through the user-scoped Supabase client so RLS (not
@@ -13,19 +14,6 @@ import { join, sep } from "node:path";
 // show up in a unit test of the gate — it shows up in what the query returns
 // against a real, RLS-enabled database.
 const DASHBOARD_DIR = join(__dirname, "..", "src", "app", "(dashboard)");
-
-function findPageFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    if (statSync(full).isDirectory()) {
-      out.push(...findPageFiles(full));
-    } else if (entry === "page.tsx") {
-      out.push(full);
-    }
-  }
-  return out;
-}
 
 const pageFiles = findPageFiles(DASHBOARD_DIR);
 

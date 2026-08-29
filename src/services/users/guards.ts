@@ -54,13 +54,16 @@ export function canChangeRole(
   }
 
   if (next === "client") {
-    const manageSiteIds = targetGrants
+    // Final whole-branch review, finding 5: name the sites, not their ids —
+    // the admin reading this is looking at a grant list rendered with names
+    // a few inches above (see users/[id]/page.tsx), not the raw uuids.
+    const manageSiteNames = targetGrants
       .filter((g) => g.accessLevel === "manage")
-      .map((g) => g.siteId);
-    if (manageSiteIds.length > 0) {
+      .map((g) => g.siteName);
+    if (manageSiteNames.length > 0) {
       return refuse(
-        `This account holds manage-level access to ${manageSiteIds.length === 1 ? "a site" : `${manageSiteIds.length} sites`} ` +
-          `(${manageSiteIds.join(", ")}). A client with manage-level access could trigger a live ` +
+        `This account holds manage-level access to ${manageSiteNames.length === 1 ? "a site" : `${manageSiteNames.length} sites`} ` +
+          `(${manageSiteNames.join(", ")}). A client with manage-level access could trigger a live ` +
           "inventory refresh, which opens a connection to that site and runs PHP there. " +
           "Downgrade those grants to read before changing this account's role to client.",
       );

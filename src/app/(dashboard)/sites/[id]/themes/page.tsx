@@ -29,8 +29,13 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   const themes = snapshot?.payload.themes ?? [];
   const activeTheme = themes.find((t) => t.status === "active");
 
-  const canRefresh = canAccessSite(viewer, id, "manage");
-  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
+  // Final whole-branch review, finding 7: refreshInventoryAction
+  // (manage-actions.ts) checks both wp_toolkit.manage and a "manage" site
+  // grant -- a site grant alone (the level a client's own dashboard offers)
+  // is not enough, or the button renders for a viewer the action then
+  // refuses. Same fix as sites/[id]/page.tsx's canRefresh.
+  const canRefresh = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
+  const canManageToolkit = canRefresh;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const createChild = createChildThemeAction.bind(null, id, false);

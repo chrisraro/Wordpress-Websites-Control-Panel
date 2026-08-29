@@ -145,15 +145,24 @@ export function supabaseUsersRepo(db: SupabaseClient): UsersRepo {
     },
 
     async listGrants(userId) {
+      // Joins the site's name in the same query — see SiteGrant's comment in
+      // ./types for why callers (guards.ts in particular) need a name, not
+      // just the id, to render a refusal an admin can actually act on.
       const { data, error } = await db
         .from("user_site_access")
-        .select("site_id,access_level")
+        .select("site_id,access_level,sites(name)")
         .eq("user_id", userId);
       if (error) throw new Error(`listGrants failed: ${error.message}`);
-      return (data ?? []).map((r: { site_id: string; access_level: SiteAccessLevel }) => ({
-        siteId: r.site_id,
-        accessLevel: r.access_level,
-      }));
+      return (data ?? []).map(
+        (r: { site_id: string; access_level: SiteAccessLevel; sites: { name: string } | { name: string }[] | null }) => {
+          const site = Array.isArray(r.sites) ? r.sites[0] : r.sites;
+          return {
+            siteId: r.site_id,
+            siteName: site?.name ?? r.site_id,
+            accessLevel: r.access_level,
+          };
+        },
+      );
     },
 
     async grantSite(userId, siteId, level, grantedBy) {

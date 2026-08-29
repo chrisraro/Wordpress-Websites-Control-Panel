@@ -34,14 +34,45 @@
 -- its trigger runs the same unlocked SELECT and still sees B=admin,
 -- because T1 has not committed yet from T2's point of view -- passes,
 -- commits. Zero admins, the trigger having fired twice and refused
--- nothing. `for update` changes this: it takes a row lock on every
--- user_roles row currently marked admin, so T2's SELECT ... FOR UPDATE
--- blocks until T1 either commits or rolls back holding that same row lock
--- (B's row), then re-reads under READ COMMITTED's read-committed-row
--- semantics -- seeing B's just-committed 'developer' role, finding no
--- admin rows left, and raising. `user_roles` is one row per account, so
--- the lock footprint of this is trivial; do not remove it as noise, it is
--- the entire reason two concurrent demotions can no longer both pass.
+-- nothing. `for update` changes this -- not by locking every admin row,
+-- but by locking one: `exists (select ... for update)` short-circuits as
+-- soon as the scan finds one matching tuple, so exactly one admin row is
+-- locked per firing, never the whole set. That is enough, because the
+-- invariant only needs one surviving admin: if the row a blocked scan is
+-- waiting on turns out, once the lock releases, to no longer be admin,
+-- EvalPlanQual re-checks that row's post-commit value and the scan
+-- continues rather than answering from a stale tuple.
+--
+-- Walking this scenario with `for update` in place: T1's trigger, still
+-- needing an admin row to exist after its own demotion of B, finds and
+-- locks A (the only admin its own transaction still sees) and commits,
+-- releasing that lock. T2's own UPDATE, demoting A, is a separate
+-- statement from T2's trigger and takes A's ordinary write lock as soon
+-- as it runs; if that happens while T1's trigger is still holding its
+-- FOR UPDATE lock on A, T2 blocks right there, in its own UPDATE, not in
+-- its trigger's SELECT -- and only proceeds once T1 commits and releases
+-- A. T2's trigger then runs against the now-fully-committed state (A
+-- just demoted by T2, B already demoted by T1), finds no admin rows
+-- left, and raises. `user_roles` is one row per account, so the lock
+-- footprint of this is trivial; do not remove it as noise, it is the
+-- entire reason two concurrent demotions can no longer both pass.
+--
+-- A different interleaving of the same two transactions is a deadlock,
+-- not a clean block-then-raise, and is worth naming rather than leaving
+-- implicit: if both UPDATEs (T1 on B, T2 on A) land before either
+-- trigger runs, T1's trigger then needs to lock A -- held by T2's still-
+-- open UPDATE -- while T2's trigger needs to lock B -- held by T1's
+-- still-open UPDATE. Each waits on a lock the other is holding. Postgres
+-- detects this and aborts one of the two transactions with a `40P01`
+-- deadlock error rather than hanging forever; the survivor's own trigger
+-- then re-evaluates against the now-rolled-back state (the aborted
+-- transaction's row reverts to its pre-transaction value) and correctly
+-- finds one admin still standing, so the invariant holds either way. The
+-- outcome for the operator is ugly -- whichever demotion loses the
+-- deadlock surfaces a raw "deadlock detected" Postgres error through
+-- repo.setRole rather than a friendly application-level refusal -- but it
+-- is safe: this migration's one guarantee, that at least one admin row
+-- always survives, holds under this interleaving too.
 --
 -- No deploy-order dependency: unlike 0012/0013, this migration does not
 -- touch any application-visible shape (no column, no policy, nothing an
@@ -93,23 +124,34 @@
 -- nodeModifyTable.c): a statement-level trigger's firing is governed by
 -- which trigger events the statement's command could ever invoke, not by
 -- which branch, if any, a given row actually took. So that is not the
--- reason to prefer row-level here. The real reason is that a
--- statement-level trigger fires unconditionally once per statement, even
--- when the DO UPDATE branch runs but changes zero rows (a conflict target
--- whose row already matches every assigned value, for instance) -- so a
--- statement-level version of this check would still evaluate the
--- invariant on a statement that never actually changed anyone's role,
--- which is at best a redundant check and at worst a spurious raise on an
--- unrelated no-op write. A row-level trigger has no such gap: Postgres's
--- documented behaviour for `insert ... on conflict do update` is that
--- row-level AFTER UPDATE triggers fire for exactly the rows that took the
--- DO UPDATE branch and were genuinely changed, the same as any other
--- UPDATE. repo.setRole (src/services/users/repo.ts) writes every role
--- change via `.upsert(..., { onConflict: "user_id" })`, which PostgREST
--- executes as this exact statement shape, so this is not a hypothetical --
--- it is this application's only demotion path. user_roles holds one row
--- per account, so the per-row cost of row-level firing over statement-level
--- is irrelevant here -- there is never more than one row to fire for per
+-- reason to prefer row-level here. The real, stronger reason sits in the
+-- same rule stated above: a statement-level AFTER UPDATE trigger still
+-- fires even when every row in the statement takes the plain INSERT
+-- branch and none conflicts at all -- exactly the shape of
+-- scripts/bootstrap-admin.ts's very first call, `insert ... on conflict
+-- (user_id) do update ...` against a completely empty user_roles, where
+-- there is nothing yet to conflict with. A statement-level version of
+-- this check would run require_one_admin() on that call regardless,
+-- coupling the very statement that grants an environment's first
+-- administrator to a check written to catch an admin being taken away,
+-- not one being granted. Row-level has no such coupling: an AFTER UPDATE
+-- row-level trigger only fires for rows that actually took the DO UPDATE
+-- branch -- documented Postgres behaviour for `insert ... on conflict do
+-- update` -- so a statement made up entirely of fresh inserts never
+-- invokes it at all, by construction, not by the accident of who already
+-- happens to be an admin when it runs. (It still fires for a DO UPDATE
+-- that assigns a row values identical to what it already had: Postgres
+-- writes a new tuple version regardless of whether any column's value
+-- actually changed, and the row-level trigger fires on that tuple the
+-- same as any other update -- which is exactly why this function
+-- re-evaluates the invariant fresh from the table each time rather than
+-- trusting OLD/NEW to tell it whether anything is actually different.)
+-- repo.setRole (src/services/users/repo.ts) writes every role change via
+-- `.upsert(..., { onConflict: "user_id" })`, which PostgREST executes as
+-- this exact statement shape, so this is not a hypothetical -- it is this
+-- application's only demotion path. user_roles holds one row per account,
+-- so the per-row cost of row-level firing over statement-level is
+-- irrelevant here -- there is never more than one row to fire for per
 -- account touched.
 --
 -- Multi-row statements still behave correctly under FOR EACH ROW: a single
