@@ -1,9 +1,13 @@
 -- Phase 9a: authorization schema. Roles, an editable permission matrix,
 -- per-user overrides, and per-site grants. Nothing here is enforced yet —
--- that is a later task. This migration intentionally adds no RLS policies:
--- all server code currently uses the service-role key (which bypasses RLS),
--- so policies here would be inert, and would only make a later task's RLS
--- diff harder to review.
+-- that is a later task. RLS is enabled below with deliberately zero
+-- policies: these tables decide who is an admin, and Supabase exposes
+-- every public-schema table over PostgREST to anyone holding a valid
+-- session JWT plus the anon key, regardless of what this app's own
+-- server code does. RLS-enabled-with-no-policies default-denies that
+-- path for every non-owner role, while the service-role key (which
+-- carries bypassrls) keeps the application working unchanged. The
+-- scoped policies land in 0008_rls_scoped.sql.
 
 -- Enums
 create type app_role as enum ('admin', 'developer', 'content_writer', 'client');
@@ -37,7 +41,7 @@ create type site_access_level as enum (
 create table user_roles (
   user_id    uuid primary key references auth.users(id) on delete cascade,
   role       app_role not null,
-  granted_by uuid references auth.users(id),
+  granted_by uuid references auth.users(id) on delete set null,
   granted_at timestamptz not null default now()
 );
 
@@ -57,7 +61,7 @@ create table user_permission_overrides (
   user_id    uuid not null references auth.users(id) on delete cascade,
   permission app_permission not null,
   effect     override_effect not null,
-  granted_by uuid references auth.users(id),
+  granted_by uuid references auth.users(id) on delete set null,
   granted_at timestamptz not null default now(),
   primary key (user_id, permission)
 );
@@ -69,7 +73,7 @@ create table user_site_access (
   user_id      uuid not null references auth.users(id) on delete cascade,
   site_id      uuid not null references sites(id) on delete cascade,
   access_level site_access_level not null default 'read',
-  granted_by   uuid references auth.users(id),
+  granted_by   uuid references auth.users(id) on delete set null,
   granted_at   timestamptz not null default now(),
   primary key (user_id, site_id)
 );
@@ -104,3 +108,9 @@ insert into role_permissions (role, permission) values
   ('content_writer', 'reports.generate'),
   ('client', 'reports.generate')
 on conflict (role, permission) do nothing;
+
+-- RLS: enabled, deliberately policy-free. See header comment for why.
+alter table user_roles enable row level security;
+alter table role_permissions enable row level security;
+alter table user_permission_overrides enable row level security;
+alter table user_site_access enable row level security;
