@@ -101,7 +101,7 @@ interface RawTheme {
  *  Exported so the normalisation can be tested without a network call. */
 export function authorName(a: RawTheme["author"]): string {
   if (typeof a === "string") return a.replace(/<[^>]*>/g, "").trim();
-  return (a?.display_name ?? a?.user_nicename ?? "Unknown").trim();
+  return String(a?.display_name ?? a?.user_nicename ?? "Unknown").trim();
 }
 
 function normaliseTheme(t: RawTheme): WpOrgTheme {

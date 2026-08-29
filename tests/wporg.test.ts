@@ -60,4 +60,11 @@ describe("authorName", () => {
     expect(authorName({ user_nicename: "wordpressdotorg" })).toBe("wordpressdotorg");
     expect(authorName("<a href='#'>Someone</a>")).toBe("Someone");
   });
+
+  it("degrades instead of throwing on a non-string sub-field", () => {
+    // The API is not contractually guaranteed to send strings; coerce like
+    // stripHtml does rather than letting .trim() throw on e.g. a number.
+    expect(authorName({ display_name: 42 as unknown as string })).toBe("42");
+    expect(authorName({ user_nicename: null as unknown as string })).toBe("Unknown");
+  });
 });

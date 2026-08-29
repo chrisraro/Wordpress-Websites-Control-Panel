@@ -34,6 +34,25 @@ describe("buildThemeInstallPhp", () => {
     expect(php).toContain("switch_theme");
   });
 
+  it("surfaces the real upgrader failure reason instead of a generic message", () => {
+    // Theme_Upgrader::install() returning false means the skin captured the
+    // actual reason (bad permissions, expired URL, corrupt zip); read it
+    // back through get_upgrade_messages() instead of guessing.
+    const php = buildThemeInstallPhp({ kind: "wporg", slug: "storefront" }, false);
+    expect(php).toContain("get_upgrade_messages");
+  });
+
+  it("does not re-switch when the theme to activate is already active", () => {
+    // switch_theme() fires switch_theme/after_switch_theme hooks, which some
+    // themes use for first-run setup; re-activating the current theme should
+    // not re-run that work.
+    const alreadyInstalled = buildThemeInstallPhp({ kind: "wporg", slug: "storefront" }, true);
+    expect(alreadyInstalled).toContain("get_stylesheet() === $slug");
+
+    const freshInstall = buildThemeInstallPhp({ kind: "url", url: "https://x/t.zip" }, true);
+    expect(freshInstall).toContain("get_stylesheet() === $stylesheet");
+  });
+
   it("rejects a non-https upload URL", () => {
     expect(() => buildThemeInstallPhp({ kind: "url", url: "http://x/t.zip" }, false)).toThrow();
   });
