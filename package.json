@@ -7,7 +7,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bootstrap:admin": "node --experimental-strip-types scripts/bootstrap-admin.ts"
+    "bootstrap:admin": "node --experimental-strip-types scripts/bootstrap-admin.ts",
+    "verify:rls": "node --experimental-strip-types scripts/verify-rls.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
