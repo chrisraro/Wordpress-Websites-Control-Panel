@@ -41,10 +41,13 @@ export interface UsersRepo {
    */
   setRolePermission(role: AppRole, permission: AppPermission, enabled: boolean): Promise<void>;
   /**
-   * Returns the action link when Supabase's admin API provides one on the
-   * invited `User` object, so the UI can offer it as a copyable fallback —
-   * Supabase's built-in mailer is rate-limited and frequently spam-filtered.
-   * `null` when no link is present; never invented.
+   * Creates the account via `auth.admin.generateLink({ type: "invite" })`
+   * (not `inviteUserByEmail`, whose returned user never carries a usable
+   * action_link — measured against this project) and returns the action
+   * link so the UI can offer it as a copyable fallback: Supabase's built-in
+   * mailer is rate-limited and frequently spam-filtered. `null` when no
+   * link is present; never invented. The link is a bearer credential —
+   * callers must return it, never log or store it.
    */
   inviteUser(email: string, redirectTo: string): Promise<{ id: string; inviteLink: string | null }>;
 }
@@ -190,12 +193,20 @@ export function supabaseUsersRepo(db: SupabaseClient): UsersRepo {
     },
 
     async inviteUser(email, redirectTo) {
-      const { data, error } = await db.auth.admin.inviteUserByEmail(email, { redirectTo });
+      // generateLink({ type: "invite" }), not inviteUserByEmail: measured
+      // against this project, inviteUserByEmail creates the account but
+      // returns a user whose action_link is undefined, so there is no link
+      // to show. generateLink creates the same account and returns
+      // properties.action_link. Surfacing a link exists specifically to
+      // survive an email that never arrives, so the API that cannot
+      // produce one is the wrong tool.
+      const { data, error } = await db.auth.admin.generateLink({
+        type: "invite",
+        email,
+        options: { redirectTo },
+      });
       if (error) throw new Error(`inviteUser failed: ${error.message}`);
-      // `action_link` is an optional field on the auth-js `User` type; the
-      // documented inviteUserByEmail() response never demonstrates it being
-      // populated, so treat its absence as the expectation, not an error.
-      return { id: data.user.id, inviteLink: data.user.action_link ?? null };
+      return { id: data.user.id, inviteLink: data.properties.action_link ?? null };
     },
   };
 }

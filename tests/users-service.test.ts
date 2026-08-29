@@ -29,7 +29,10 @@ function fakeDb(opts: {
   userRoles?: Row[];
   userSiteAccess?: Row[];
   rolePermissions?: Row[];
-  inviteResult?: { data: { user: AdminUser | null }; error: { message: string } | null };
+  inviteResult?: {
+    data: { user: AdminUser | null; properties?: { action_link?: string } };
+    error: { message: string } | null;
+  };
   // Forces getUserById to fail as a genuine error (not "no such user") —
   // e.g. a network blip or an auth-admin outage — regardless of whether the
   // id matches a known user.
@@ -116,11 +119,11 @@ function fakeDb(opts: {
           calls.deleteUser.push(id);
           return { data: {}, error: null };
         },
-        async inviteUserByEmail(email: string, inviteOpts: unknown) {
-          calls.invite.push({ email, opts: inviteOpts });
+        async generateLink(params: { type: string; email: string; options?: unknown }) {
+          calls.invite.push({ email: params.email, opts: params.options });
           return (
             opts.inviteResult ?? {
-              data: { user: { id: "new-user-id", email } },
+              data: { user: { id: "new-user-id", email: params.email }, properties: {} },
               error: null,
             }
           );
@@ -352,7 +355,10 @@ describe("supabaseUsersRepo — writes", () => {
   it("inviteUser returns the action link when Supabase provides one", async () => {
     const { db } = fakeDb({
       inviteResult: {
-        data: { user: { id: "new-user", email: "new@example.com", action_link: "https://example.com/verify?token=abc" } },
+        data: {
+          user: { id: "new-user", email: "new@example.com" },
+          properties: { action_link: "https://example.com/verify?token=abc" },
+        },
         error: null,
       },
     });
@@ -363,7 +369,10 @@ describe("supabaseUsersRepo — writes", () => {
 
   it("inviteUser returns inviteLink: null when Supabase does not provide an action_link", async () => {
     const { db } = fakeDb({
-      inviteResult: { data: { user: { id: "new-user", email: "new@example.com" } }, error: null },
+      inviteResult: {
+        data: { user: { id: "new-user", email: "new@example.com" }, properties: {} },
+        error: null,
+      },
     });
     const repo = supabaseUsersRepo(db);
     const result = await repo.inviteUser("new@example.com", "https://app.example.com/login");
