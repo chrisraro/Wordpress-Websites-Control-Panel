@@ -32,6 +32,12 @@ function memoryRepo() {
           }
         : null;
     },
+    async getSiteConnection(id) {
+      const s = sites.find((x) => x.id === id);
+      return s
+        ? { mcp_endpoint: s.mcp_endpoint as string, wp_username: s.wp_username as string }
+        : null;
+    },
     async updateSiteStatus(id, status: SiteStatus) {
       const s = sites.find((x) => x.id === id);
       if (s) s.status = status;

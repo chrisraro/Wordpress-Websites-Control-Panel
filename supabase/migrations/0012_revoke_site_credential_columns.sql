@@ -1,0 +1,33 @@
+-- Phase 9b, spec §5.2: revoke credential-adjacent columns on `sites` from
+-- the `authenticated` role.
+--
+-- SITE_COLUMNS (src/services/sites/repo.ts), the shared select list used by
+-- both listSites and getSite, used to include mcp_endpoint and wp_username.
+-- A client granted a site reads sites through the user-scoped client
+-- (readDbFor, src/lib/authz/db.ts), so RLS -- not application code -- is the
+-- actual boundary on that path, and RLS is row-level: it cannot hide a
+-- column from a row a client is otherwise allowed to read. Without this
+-- revoke, a client with a grant can pull mcp_endpoint (the site's control
+-- channel) and wp_username (half of a login) straight over PostgREST with
+-- their own JWT, regardless of what the UI renders.
+--
+-- Apply this migration ONLY AFTER the code that stops selecting these
+-- columns is deployed (the commit that removed mcp_endpoint and wp_username
+-- from SITE_COLUMNS and SiteRow, and added getSiteConnection for the one
+-- staff-only surface that still needs them). PostgREST fails the WHOLE
+-- query when a revoked column appears anywhere in the select list -- not
+-- just that column -- so revoking before the code stops selecting them
+-- turns every client page read into a 500. There is no ordering hazard in
+-- the other direction: the code change is harmless to apply before this
+-- revoke lands, since it only narrows what is selected.
+--
+-- app_password_encrypted is included even though it was never in
+-- SITE_COLUMNS -- getSiteCredentials names it explicitly and only ever runs
+-- on the service-role client, which this revoke (scoped to `authenticated`)
+-- does not affect. Revoking it here anyway closes the column off from
+-- `authenticated` outright, rather than relying on no application code path
+-- ever selecting it for that role.
+--
+-- Written to be re-run safely: `revoke` on a privilege that is already
+-- absent is a no-op in Postgres, not an error.
+revoke select (mcp_endpoint, wp_username, app_password_encrypted) on sites from authenticated;

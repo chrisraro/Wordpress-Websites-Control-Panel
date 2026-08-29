@@ -12,6 +12,7 @@ export interface SitesRepo {
   getSiteCredentials(id: string): Promise<{
     mcp_endpoint: string; wp_username: string; app_password_encrypted: string;
   } | null>;
+  getSiteConnection(id: string): Promise<{ mcp_endpoint: string; wp_username: string } | null>;
   updateSiteStatus(id: string, status: SiteStatus): Promise<void>;
   insertActivity(entry: {
     actor: string; site_id?: string; action: string; detail?: unknown;
@@ -19,8 +20,13 @@ export interface SitesRepo {
   recordScanResult(id: string, success: boolean): Promise<void>;
 }
 
+// mcp_endpoint and wp_username are deliberately absent: they are
+// credential-adjacent, and this list is also selected by clients through
+// the user-scoped client (readDbFor). See getSiteConnection below for the
+// one staff-only surface that still needs them, and migration
+// 0012_revoke_site_credential_columns.sql for the database-level backstop.
 const SITE_COLUMNS =
-  "id,name,url,mcp_endpoint,wp_username,status,client_label,capabilities,created_at,updated_at";
+  "id,name,url,status,client_label,capabilities,created_at,updated_at";
 
 export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
   return {
@@ -46,6 +52,15 @@ export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
         .eq("id", id)
         .maybeSingle();
       if (error) throw new Error(`getSiteCredentials failed: ${error.message}`);
+      return data ?? null;
+    },
+    async getSiteConnection(id) {
+      const { data, error } = await db
+        .from("sites")
+        .select("mcp_endpoint,wp_username")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw new Error(`getSiteConnection failed: ${error.message}`);
       return data ?? null;
     },
     async updateSiteStatus(id, status) {

@@ -67,11 +67,14 @@ describe("the two credential call sites opt into secret copying", () => {
     // this one too. A WordPress username is not a bearer credential (it
     // can't authenticate anything by itself), and the review explicitly
     // scoped the flag to the invite link and the report share link only.
+    // `site.wp_username` no longer exists (spec §5.2 moved it to the
+    // `connection` value returned by getSiteConnection); this button now
+    // reads `connection.wp_username`.
     const source = readFileSync(
       join(__dirname, "..", "src", "app", "(dashboard)", "sites", "[id]", "page.tsx"),
       "utf8",
     );
-    expect(source).toMatch(/<CopyValueButton\s+value=\{site\.wp_username\}[^>]*\/>/);
-    expect(source).not.toMatch(/<CopyValueButton\s+value=\{site\.wp_username\}[^>]*\bsecret\b/);
+    expect(source).toMatch(/<CopyValueButton\s+value=\{connection\.wp_username\}[^>]*\/>/);
+    expect(source).not.toMatch(/<CopyValueButton\s+value=\{connection\.wp_username\}[^>]*\bsecret\b/);
   });
 });

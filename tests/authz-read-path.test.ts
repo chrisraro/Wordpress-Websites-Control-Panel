@@ -56,34 +56,53 @@ describe("dashboard page reads stay on the RLS-governed path", () => {
 });
 
 describe("the site overview page never unconditionally renders credentials-adjacent fields", () => {
-  // Spec §5: mcp_endpoint and wp_username are credentials-adjacent and must
-  // be omitted outright for a client, not merely blanked. Pinning this here
-  // means a future edit that moves the row out of the `isClient` guard (or
-  // adds a second, unguarded place that prints either value) fails a test
-  // instead of shipping.
+  // Spec §5.2: mcp_endpoint and wp_username are credentials-adjacent and
+  // must be omitted outright for a client, not merely blanked. They are no
+  // longer even fetched into `site` (SITE_COLUMNS/SiteRow dropped them) --
+  // the page fetches them separately as `connection`, only for a non-client
+  // viewer. Pinning this here means a future edit that moves the row out of
+  // that guard (or adds a second, unguarded place that prints either value)
+  // fails a test instead of shipping.
   const source = readFileSync(
     join(DASHBOARD_DIR, "sites", "[id]", "page.tsx"),
     "utf8",
   );
 
-  it("does not render mcp_endpoint unconditionally", () => {
-    // The only occurrence of `site.mcp_endpoint` must sit inside the
-    // `isClient ? [] : [...]` row-building expression that omits it for
-    // clients — never used bare (e.g. as a fallback rendered regardless of
-    // role).
-    const occurrences = source.split("site.mcp_endpoint").length - 1;
+  // mcp_endpoint and wp_username came off SiteRow and SITE_COLUMNS entirely
+  // (spec §5.2) -- `site` (from getSite) never carries them anymore. The
+  // page now fetches them separately, via `connection`, which is `null`
+  // whenever `isClient` is true and otherwise the result of
+  // `getSiteConnection`. Pinning that assignment is what makes `connection`
+  // a valid stand-in for the old `isClient` guard below: it can only be
+  // truthy for a non-client viewer.
+  it("only fetches the connection fields for a non-client viewer", () => {
+    const occurrences = source.split("supabaseSitesRepo(db).getSiteConnection(id)").length - 1;
     expect(occurrences).toBe(1);
-    expect(source).toContain('isClient ? [] : [{ term: "MCP endpoint", value: site.mcp_endpoint');
+    expect(source).toContain(
+      "const connection = isClient ? null : await supabaseSitesRepo(db).getSiteConnection(id);",
+    );
+  });
+
+  it("does not render mcp_endpoint unconditionally", () => {
+    // The only occurrence of `connection.mcp_endpoint` must sit inside the
+    // `connection ? [...] : []` row-building expression, which is `[]`
+    // whenever `connection` is `null` — i.e. whenever the viewer is a
+    // client — never used bare (e.g. as a fallback rendered regardless of
+    // role).
+    const occurrences = source.split("connection.mcp_endpoint").length - 1;
+    expect(occurrences).toBe(1);
+    expect(source).toContain('connection ? [{ term: "MCP endpoint", value: connection.mcp_endpoint');
   });
 
   it("does not render wp_username unconditionally", () => {
-    const occurrences = source.split("site.wp_username").length - 1;
-    // One occurrence inside the client-omitted Connection-card row, one
-    // inside the `!isClient` guarded "Copy WP username" control. Both are
-    // role-gated; there must be no third, unguarded occurrence.
+    const occurrences = source.split("connection.wp_username").length - 1;
+    // One occurrence inside the connection-gated Connection-card row, one
+    // inside the connection-gated "Copy WP username" control. Both are
+    // gated on the same `connection` value, which is only non-null for a
+    // non-client viewer; there must be no third, unguarded occurrence.
     expect(occurrences).toBe(2);
-    expect(source).toContain('isClient ? [] : [{ term: "WP user", value: site.wp_username');
-    expect(source).toContain("!isClient && (");
+    expect(source).toContain('connection ? [{ term: "WP user", value: connection.wp_username');
+    expect(source).toContain("{connection && (");
   });
 
   it("does not render WordPress administrator logins/emails unconditionally", () => {

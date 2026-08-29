@@ -4,8 +4,6 @@ export interface SiteRow {
   id: string;
   name: string;
   url: string;
-  mcp_endpoint: string;
-  wp_username: string;
   status: SiteStatus;
   client_label: string | null;
   capabilities: { abilities: string[] };

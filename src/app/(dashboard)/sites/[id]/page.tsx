@@ -36,6 +36,14 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const canRefresh = canAccessSite(viewer, id, "manage");
   const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
+  // mcp_endpoint and wp_username are credential-adjacent (spec §5.2) and are
+  // off SITE_COLUMNS/SiteRow entirely -- getSite above never carries them.
+  // `db` is already the service-role client here (readDbFor returns it for
+  // any non-client viewer), so fetching them only when !isClient keeps this
+  // read on the same client the revoke in 0012 does not affect, and never
+  // in reach of a client's own session.
+  const connection = isClient ? null : await supabaseSitesRepo(db).getSiteConnection(id);
+
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
   // site_admin_users' RLS policy (0011_site_admin_users.sql) grants read to
@@ -123,10 +131,10 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               </a>
             )}
           </div>
-          {!isClient && (
+          {connection && (
             <>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <CopyValueButton value={site.wp_username} label="Copy WP username" />
+                <CopyValueButton value={connection.wp_username} label="Copy WP username" />
               </div>
               <p className="max-w-72 text-right text-caption tracking-normal text-mid-gray">
                 Application passwords can’t sign in to wp-admin — sign in with your usual WordPress
@@ -173,8 +181,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
           <CardTitle>Connection</CardTitle>
           <dl className="divide-y divide-hairline px-5 text-body">
             {[
-              ...(isClient ? [] : [{ term: "MCP endpoint", value: site.mcp_endpoint, truncate: true }]),
-              ...(isClient ? [] : [{ term: "WP user", value: site.wp_username }]),
+              ...(connection ? [{ term: "MCP endpoint", value: connection.mcp_endpoint, truncate: true }] : []),
+              ...(connection ? [{ term: "WP user", value: connection.wp_username }] : []),
               { term: "Abilities", value: String(site.capabilities?.abilities?.length ?? 0) },
               { term: "Connected", value: new Date(site.created_at).toLocaleDateString() },
               ...(snapshot
