@@ -32,6 +32,21 @@
  * The database needs at least two rows in `sites`: the throwaway `client`
  * user is granted exactly one (read-level), and every assertion about the
  * *other* site proves the grant boundary rather than an empty table.
+ *
+ * Assertions 7 and 8 verify the two exposures closed in Phase 9b (spec
+ * §5.1/§5.2) -- see supabase/migrations/0011_site_admin_users.sql and
+ * 0012_revoke_site_credential_columns.sql. Neither migration has been
+ * applied to any database yet (the operator applies them by hand, later),
+ * so this script must tell three outcomes apart, not two:
+ *   - refused    -- the expected post-migration result.
+ *   - allowed    -- the data came back. A real failure.
+ *   - cannot verify -- the prerequisite migration is not applied, so the
+ *     query that would prove or disprove the assertion never ran. Counting
+ *     that as a pass would be exactly the vacuous check this script exists
+ *     to avoid (a green result for the wrong reason); counting it as a
+ *     failure would misreport an unmigrated database as broken. It is
+ *     tracked separately (see `recordUnverifiable`) and is never counted as
+ *     a pass.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomBytes } from "node:crypto";
@@ -76,13 +91,26 @@ const admin: SupabaseClient = createClient(supabaseUrl, serviceKey, {
   auth: { persistSession: false },
 });
 
-type Assertion = { name: string; pass: boolean; detail?: string };
+type Assertion = { name: string; pass: boolean; detail?: string; unverifiable?: boolean };
 const assertions: Assertion[] = [];
 
 function record(name: string, pass: boolean, detail?: string): void {
   assertions.push({ name, pass, detail });
   const line = `${pass ? "PASS" : "FAIL"} - ${name}${detail ? `: ${detail}` : ""}`;
   console.log(line);
+}
+
+// Distinct from record(): the migration this assertion depends on has not
+// been applied, so the query that would prove or disprove it never ran
+// (e.g. `relation "public.site_admin_users" does not exist`, Postgres
+// 42P01). `pass: false` here is a bookkeeping detail only -- `unverifiable`
+// is what the summary at the bottom of this file actually keys off, and it
+// excludes these from both the pass and fail counts so an operator cannot
+// mistake "nothing to check yet" for "verified clean". It still forces a
+// non-zero exit: an unmigrated database is not a clean run of this script.
+function recordUnverifiable(name: string, reason: string, detail?: string): void {
+  assertions.push({ name, pass: false, unverifiable: true, detail });
+  console.log(`SKIP - ${name}: cannot verify -- ${reason}${detail ? ` (${detail})` : ""}`);
 }
 
 // Assertions 4 and 5 treat an error response as proof RLS refused the write.
@@ -99,6 +127,29 @@ function isRlsRefusal(error: { code?: string; message?: string } | null): boolea
   // Require the message to confirm row-level security actually fired.
   if (error.code === "42501") return /row-level security/i.test(error.message ?? "");
   return typeof error.message === "string" && /row-level security/i.test(error.message);
+}
+
+// Assertion 8 (mcp_endpoint) needs a different signature than isRlsRefusal.
+// Every refusal above is a row-level security USING clause: Postgres lets
+// the query run and either silently filters rows to empty or raises 42501
+// with "row-level security" in the message. 0012's revoke is not a policy
+// at all -- it is a plain column-level GRANT, checked once at query-rewrite
+// time, before any row (or any RLS policy) is evaluated. A denied column
+// reference is a hard error, same SQLSTATE 42501, but Postgres's message
+// for it is "permission denied for column ..." and never mentions
+// row-level security -- isRlsRefusal's message check would reject it
+// (correctly: it is not what isRlsRefusal claims to detect), so this is a
+// second, narrower helper rather than a case folded into that one.
+function isColumnPermissionRefusal(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  return error.code === "42501" && /permission denied for column/i.test(error.message ?? "");
+}
+
+// Both a missing relation and (defensively) a missing schema/search-path
+// entry surface as 42P01 ("undefined_table") -- the SQLSTATE for "this
+// relation does not exist yet", which is exactly the pre-0011 state.
+function isMissingRelation(error: { code?: string } | null): boolean {
+  return error?.code === "42P01";
 }
 
 async function main(): Promise<void> {
@@ -125,6 +176,8 @@ async function main(): Promise<void> {
   let seededJobId: string | undefined;
   let seededSnapshotId: string | undefined;
   let mutatedSiteName: { id: string; name: string } | undefined;
+  let seededSiteAdminUsersSiteId: string | undefined;
+  let siteAdminUsersPrereqError: string | undefined;
 
   // --- content_writer fixture state (0009 regression coverage) ---
   let cwUserId: string | undefined;
@@ -195,6 +248,45 @@ async function main(): Promise<void> {
         .single();
       if (fixtureErr) throw new Error(`could not seed site_snapshots fixture: ${fixtureErr.message}`);
       seededSnapshotId = fixture!.id as string;
+    }
+
+    // Assertion 7 needs a real row in `site_admin_users` for the GRANTED
+    // site to be meaningful -- otherwise "select returns zero rows" is true
+    // whether or not RLS works, because the table would be empty for that
+    // site regardless (same reasoning as the jobs and site_snapshots
+    // fixtures above). But this table is new in migration 0011, which has
+    // NOT been applied to any database yet (see this file's header and
+    // 0011_site_admin_users.sql's own note) -- so this seed attempt can
+    // itself fail with "relation does not exist" (Postgres 42P01), on the
+    // service-role client, which bypasses RLS entirely and has no other
+    // reason to be refused. That is not an error to throw and abort the
+    // whole run on: it is the expected pre-migration state, and it means
+    // assertion 7 below has nothing to prove yet. Record the reason and let
+    // the assertion report itself as unverifiable instead.
+    const { data: existingAdminUsers, error: existingAdminUsersErr } = await admin
+      .from("site_admin_users")
+      .select("site_id")
+      .eq("site_id", granted.id)
+      .limit(1);
+    if (existingAdminUsersErr) {
+      if (isMissingRelation(existingAdminUsersErr)) {
+        siteAdminUsersPrereqError = existingAdminUsersErr.message;
+      } else {
+        throw new Error(`could not read site_admin_users: ${existingAdminUsersErr.message}`);
+      }
+    } else if (!existingAdminUsers || existingAdminUsers.length === 0) {
+      const { error: fixtureErr } = await admin
+        .from("site_admin_users")
+        .insert({ site_id: granted.id, users: [{ probe: true }] });
+      if (fixtureErr) {
+        if (isMissingRelation(fixtureErr)) {
+          siteAdminUsersPrereqError = fixtureErr.message;
+        } else {
+          throw new Error(`could not seed site_admin_users fixture: ${fixtureErr.message}`);
+        }
+      } else {
+        seededSiteAdminUsersSiteId = granted.id;
+      }
     }
 
     // Sign in as the throwaway user with the ANON key -- this is the same
@@ -335,6 +427,92 @@ async function main(): Promise<void> {
           "select jobs returns zero rows",
           false,
           `leaked ${data.length} job row(s) to a client-role account`,
+        );
+      }
+    }
+
+    // --- Assertion 7: select on site_admin_users for the GRANTED site
+    // returns zero rows (Phase 9b §5.1, migration 0011) ---
+    // A client with a `read` grant on `granted` is exactly the account this
+    // exposure affected: pre-0011, WordPress administrator logins/emails
+    // for a site the client legitimately reads sat in
+    // site_snapshots.payload.admin_users, readable through the same grant.
+    // 0011 moves that data to its own table, gated by
+    // authorize('sites.view_all') alone -- not by site grant at all, so
+    // this must fail closed even for the site the client IS granted. The
+    // policy's USING clause has nothing to do with site_id, so a refusal
+    // here looks exactly like assertions 1-3/6 above: a silently empty
+    // result, not an error.
+    {
+      if (siteAdminUsersPrereqError) {
+        recordUnverifiable(
+          "select site_admin_users (granted site) returns zero rows",
+          "migration 0011 not applied",
+          siteAdminUsersPrereqError,
+        );
+      } else {
+        const { data, error } = await scoped
+          .from("site_admin_users")
+          .select("site_id")
+          .eq("site_id", granted.id);
+        if (error) {
+          if (isMissingRelation(error)) {
+            // The service-role seed above succeeded, so the relation
+            // existed a moment ago -- still handle this defensively rather
+            // than misreport a race as a pass.
+            recordUnverifiable(
+              "select site_admin_users (granted site) returns zero rows",
+              "migration 0011 not applied",
+              error.message,
+            );
+          } else {
+            record(
+              "select site_admin_users (granted site) returns zero rows",
+              false,
+              `query errored: ${error.message}`,
+            );
+          }
+        } else if (data.length === 0) {
+          record("select site_admin_users (granted site) returns zero rows", true);
+        } else {
+          record(
+            "select site_admin_users (granted site) returns zero rows",
+            false,
+            `leaked ${data.length} admin-user row(s) for a site the client IS granted -- WordPress admin logins/emails are readable by a client`,
+          );
+        }
+      }
+    }
+
+    // --- Assertion 8: select sites.mcp_endpoint for the GRANTED site is
+    // rejected (Phase 9b §5.2, migration 0012) ---
+    // Every other assertion in this file selects columns `authenticated`
+    // was always meant to read. This one deliberately selects a column
+    // 0012 revokes: pre-0012, `authenticated` still holds Supabase's
+    // default blanket table-level SELECT grant on `sites`, so this query
+    // SUCCEEDS today -- that success is exactly the exposure 0012 closes,
+    // not a bug in this assertion. See isColumnPermissionRefusal's comment
+    // for why the refusal signature differs from isRlsRefusal's.
+    {
+      const { data, error } = await scoped
+        .from("sites")
+        .select("mcp_endpoint")
+        .eq("id", granted.id);
+      if (error) {
+        if (isColumnPermissionRefusal(error)) {
+          record("select sites.mcp_endpoint (granted site) is rejected", true, `refused: ${error.message}`);
+        } else {
+          record(
+            "select sites.mcp_endpoint (granted site) is rejected",
+            false,
+            `errored for a reason other than the column revoke (code ${error.code ?? "?"}): ${error.message}`,
+          );
+        }
+      } else {
+        record(
+          "select sites.mcp_endpoint (granted site) is rejected",
+          false,
+          `query SUCCEEDED and returned mcp_endpoint (${JSON.stringify(data)}) -- migration 0012 not applied, or the column grant was not narrowed`,
         );
       }
     }
@@ -623,6 +801,13 @@ async function main(): Promise<void> {
       const { error } = await admin.from("site_snapshots").delete().eq("id", seededSnapshotId);
       if (error) console.error(`cleanup: failed to delete site_snapshots fixture: ${error.message}`);
     }
+    if (seededSiteAdminUsersSiteId) {
+      const { error } = await admin
+        .from("site_admin_users")
+        .delete()
+        .eq("site_id", seededSiteAdminUsersSiteId);
+      if (error) console.error(`cleanup: failed to delete site_admin_users fixture: ${error.message}`);
+    }
     if (userId) {
       const { error: grantDelErr } = await admin
         .from("user_site_access")
@@ -683,11 +868,30 @@ async function main(): Promise<void> {
     }
   }
 
-  const failed = assertions.filter((a) => !a.pass);
-  console.log(`\n${assertions.length - failed.length}/${assertions.length} assertions passed`);
+  // Unverifiable assertions are excluded from this count entirely -- they
+  // neither passed nor failed, they never ran. Keeping the original
+  // "N/M assertions passed" wording unchanged when nothing is unverifiable
+  // (the common case once every migration in this phase is applied) means
+  // this line reads identically to before assertions 7 and 8 existed.
+  const unverifiable = assertions.filter((a) => a.unverifiable);
+  const verified = assertions.filter((a) => !a.unverifiable);
+  const failed = verified.filter((a) => !a.pass);
+  console.log(`\n${verified.length - failed.length}/${verified.length} assertions passed`);
+  if (unverifiable.length > 0) {
+    console.log(
+      `${unverifiable.length} assertion(s) UNVERIFIABLE -- migration prerequisite not applied (re-run after applying it):`,
+    );
+    for (const u of unverifiable) console.log(`  - ${u.name}${u.detail ? `: ${u.detail}` : ""}`);
+  }
   if (failed.length > 0) {
     console.log("FAILED:");
     for (const f of failed) console.log(`  - ${f.name}${f.detail ? `: ${f.detail}` : ""}`);
+  }
+  // Non-zero on either an actual failure or an unverified assertion: an
+  // unmigrated database is not a clean run of this script, and a caller
+  // checking only the exit code must not be able to mistake "we could not
+  // check this yet" for "verified clean".
+  if (failed.length > 0 || unverifiable.length > 0) {
     process.exitCode = 1;
   }
 }
