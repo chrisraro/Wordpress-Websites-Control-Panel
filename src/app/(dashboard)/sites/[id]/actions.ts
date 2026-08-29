@@ -13,3 +13,19 @@ export async function runConnectionTest(siteId: string) {
   revalidatePath(`/sites/${siteId}`);
   return result;
 }
+
+/**
+ * useActionState calls (prevState, formData); the bound siteId is prepended,
+ * so this signature must carry all three. Declaring it any other way and
+ * casting at the call site is what crashed the GeoGrid form.
+ */
+export async function testConnectionAction(
+  siteId: string,
+  _prevState: { ok: boolean; error?: string } | null,
+  _formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const result = await runConnectionTest(siteId);
+  return result.ok
+    ? { ok: true }
+    : { ok: false, error: result.error ?? `Site reported status: ${result.status}` };
+}

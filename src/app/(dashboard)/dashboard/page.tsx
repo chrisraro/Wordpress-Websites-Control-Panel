@@ -8,15 +8,26 @@ import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates } from "@/services/inventory/types";
 import type { SiteStatus } from "@/services/sites/types";
+import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
+import { buttonClass, cardClass } from "@/components/ui/styles";
+import { IconPlus, IconSites } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_STYLE: Record<SiteStatus, string> = {
-  connected: "bg-green-100 text-green-800",
-  degraded: "bg-yellow-100 text-yellow-800",
-  reconnect_needed: "bg-red-100 text-red-800",
-  disabled: "bg-slate-200 text-slate-600",
+const STATUS_TONE: Record<SiteStatus, StatusTone> = {
+  connected: "good",
+  degraded: "warn",
+  reconnect_needed: "bad",
+  disabled: "idle",
 };
+
+const GRADE_TONE: Record<string, StatusTone> = {
+  A: "good", B: "good", C: "warn", D: "alert", F: "bad",
+};
+
+function seoTone(score: number): StatusTone {
+  return score >= 80 ? "good" : score >= 50 ? "warn" : "bad";
+}
 
 export default async function DashboardPage() {
   const db = createServiceSupabase();
@@ -40,56 +51,90 @@ export default async function DashboardPage() {
   }));
 
   return (
-    <main className="mx-auto max-w-6xl p-4 sm:p-6">
-      <h1 className="mb-6 text-2xl font-semibold">Sites</h1>
+    <main>
+      <PageHeader
+        title="Sites"
+        subtitle={
+          sites.length > 0
+            ? `${sites.length} WordPress ${sites.length === 1 ? "site" : "sites"} connected`
+            : undefined
+        }
+        actions={
+          sites.length > 0 && (
+            <Link href="/sites/new" className={buttonClass("primary")}>
+              <IconPlus size={16} />
+              Connect site
+            </Link>
+          )
+        }
+      />
+
       {sites.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-white p-12 text-center text-slate-500">
-          No sites connected yet.{" "}
-          <Link href="/sites/new" className="text-slate-900 underline">Connect your first site</Link>
-        </div>
+        <Card>
+          <EmptyState
+            icon={<IconSites size={28} />}
+            title="No sites connected yet"
+            action={
+              <Link href="/sites/new" className={`${buttonClass("primary")} mt-1`}>
+                <IconPlus size={16} />
+                Connect your first site
+              </Link>
+            }
+          >
+            Connect a WordPress site running the Novamira plugin to manage its plugins and
+            themes, scan it for vulnerabilities, and report on its search visibility.
+          </EmptyState>
+        </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {sites.map((s) => {
             const n = updates.get(s.id);
+            const grade = grades.get(s.id);
+            const seo = seoScores.get(s.id);
             return (
-              <Link key={s.id} href={`/sites/${s.id}`}
-                className="rounded-lg border bg-white p-4 shadow-sm transition hover:shadow">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className="truncate font-medium">{s.name}</h2>
-                    <p className="truncate text-sm text-slate-500">{s.url.replace(/^https?:\/\//, "")}</p>
+              <li key={s.id}>
+                <Link
+                  href={`/sites/${s.id}`}
+                  className={`${cardClass} flex h-full flex-col p-5 transition-[box-shadow,transform]
+                    duration-200 ease-[var(--ease-out-quint)] hover:-translate-y-0.5
+                    hover:shadow-raised focus-visible:-translate-y-0.5`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-body font-medium text-ink">{s.name}</h2>
+                      <p className="truncate text-caption tracking-normal text-mid-gray">
+                        {s.url.replace(/^https?:\/\//, "")}
+                      </p>
+                    </div>
+                    <StatusBadge tone={STATUS_TONE[s.status]} className="shrink-0">
+                      {s.status.replace("_", " ")}
+                    </StatusBadge>
                   </div>
-                  <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[s.status]}`}>
-                    {s.status.replace("_", " ")}
-                  </span>
-                </div>
-                <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span>{s.capabilities?.abilities?.length ?? 0} abilities</span>
-                  {s.client_label && <span>· {s.client_label}</span>}
-                  {n !== undefined && (n > 0
-                    ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">{n} updates</span>
-                    : <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-800">up to date</span>)}
-                  {grades.has(s.id) && (
-                    <span className={`rounded-full px-2 py-0.5 ${
-                      { A: "bg-green-100 text-green-800", B: "bg-lime-100 text-lime-800", C: "bg-amber-100 text-amber-800",
-                        D: "bg-orange-100 text-orange-800", F: "bg-red-100 text-red-800" }[grades.get(s.id)!]
-                    }`}>
-                      security {grades.get(s.id)}
-                    </span>
-                  )}
-                  {seoScores.has(s.id) && (
-                    <span className={`rounded-full px-2 py-0.5 ${
-                      seoScores.get(s.id)! >= 80 ? "bg-green-100 text-green-800"
-                        : seoScores.get(s.id)! >= 50 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"
-                    }`}>
-                      SEO {seoScores.get(s.id)}
-                    </span>
-                  )}
-                </p>
-              </Link>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                    {n !== undefined &&
+                      (n > 0 ? (
+                        <StatusBadge tone="warn">{n} updates</StatusBadge>
+                      ) : (
+                        <StatusBadge tone="good">Up to date</StatusBadge>
+                      ))}
+                    {grade && (
+                      <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>Security {grade}</StatusBadge>
+                    )}
+                    {seo !== undefined && (
+                      <StatusBadge tone={seoTone(seo)}>SEO {seo}</StatusBadge>
+                    )}
+                  </div>
+
+                  <p className="mt-4 flex flex-wrap items-center gap-x-2 text-caption tracking-normal text-mid-gray">
+                    <span>{s.capabilities?.abilities?.length ?? 0} abilities</span>
+                    {s.client_label && <span>· {s.client_label}</span>}
+                  </p>
+                </Link>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </main>
   );

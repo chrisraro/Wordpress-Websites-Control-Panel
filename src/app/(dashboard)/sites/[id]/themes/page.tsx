@@ -5,9 +5,13 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
-import { ManageForm, type ManageFormAction } from "../action-form";
+import { ManageForm } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
 import { createChildThemeAction } from "../child-theme-actions";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { Card, CardTitle, EmptyState, StatusBadge } from "@/components/ui/primitives";
+import { tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconRefresh, IconThemes } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -19,92 +23,159 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   if (!site) notFound();
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const themes = snapshot?.payload.themes ?? [];
+  const activeTheme = themes.find((t) => t.status === "active");
 
-  const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
-  const createChild = createChildThemeAction.bind(null, id, false) as unknown as ManageFormAction;
-  const createAndActivate = createChildThemeAction.bind(null, id, true) as unknown as ManageFormAction;
+  const refresh = refreshInventoryAction.bind(null, id);
+  const createChild = createChildThemeAction.bind(null, id, false);
+  const createAndActivate = createChildThemeAction.bind(null, id, true);
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-      <p className="mb-4 text-sm text-slate-500">Themes</p>
+    <main>
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/dashboard" },
+          { label: site.name, href: `/sites/${id}` },
+          { label: "Themes" },
+        ]}
+      />
+      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
       <SiteTabs siteId={id} active="themes" />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">
-          {snapshot
-            ? `${themes.length} themes · inventory from ${new Date(snapshot.taken_at).toLocaleString()}`
-            : "No inventory yet — refresh to load themes."}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="text-body text-mid-gray">
+          {snapshot ? (
+            <>
+              {themes.length} installed
+              {activeTheme ? ` · ${activeTheme.title || activeTheme.name} is active` : ""}
+              <span className="block text-caption tracking-normal">
+                Inventory taken {new Date(snapshot.taken_at).toLocaleString()}
+              </span>
+            </>
+          ) : (
+            "No inventory yet — refresh to load themes."
+          )}
         </p>
-        <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
-          confirmMessage="Fetch fresh inventory from the site now?" />
+        <ManageForm
+          action={refresh}
+          label="Refresh inventory"
+          pendingLabel="Refreshing…"
+          success="Inventory refreshed"
+          icon={<IconRefresh size={16} />}
+          showInlineError={false}
+        />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-        <table className="w-full min-w-[480px] text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Theme</th>
-              <th className="px-4 py-3">Version</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Update</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {themes.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                {snapshot ? "No themes found." : "Refresh inventory to see themes."}
-              </td></tr>
-            ) : themes.map((t) => {
-              const update = manageAction.bind(null, id, { kind: "update_theme" as const, slug: t.name }) as unknown as ManageFormAction;
-              return (
-                <tr key={t.name} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-medium">{t.title || t.name}</td>
-                  <td className="px-4 py-2">{t.version}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${t.status === "active"
-                      ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-600"}`}>
-                      {t.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {t.update === "available"
-                      ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                          {t.update_version ?? "available"}
-                        </span>
-                      : <span className="text-xs text-slate-400">current</span>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex justify-end">
-                      {t.update === "available" && (
-                        <ManageForm action={update} label="Update" pendingLabel="…"
-                          confirmMessage={`Update theme ${t.name} to ${t.update_version ?? "latest"}?`} />
-                      )}
-                    </div>
-                  </td>
+      <Card className="overflow-hidden">
+        {themes.length === 0 ? (
+          <EmptyState
+            icon={<IconThemes size={28} />}
+            title={snapshot ? "No themes installed" : "No inventory yet"}
+          >
+            {snapshot
+              ? "This site has no themes registered."
+              : "Refresh the inventory to pull the current theme list from the site."}
+          </EmptyState>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-body">
+              <thead>
+                <tr className={tableHeadClass}>
+                  <th className="px-5 py-3 font-medium">Theme</th>
+                  <th className="px-5 py-3 font-medium">Version</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Update</th>
+                  <th className="px-5 py-3 text-right font-medium">Actions</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {themes.map((t) => {
+                  const update = manageAction.bind(null, id, {
+                    kind: "update_theme" as const, slug: t.name,
+                  });
+                  const name = t.title || t.name;
+                  return (
+                    <tr key={t.name} className={tableRowClass}>
+                      <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
+                      <td className={`${tableCellClass} text-mid-gray`}>{t.version}</td>
+                      <td className={tableCellClass}>
+                        <StatusBadge tone={t.status === "active" ? "good" : "idle"}>
+                          {t.status}
+                        </StatusBadge>
+                      </td>
+                      <td className={tableCellClass}>
+                        {t.update === "available" ? (
+                          <StatusBadge tone="warn">{t.update_version ?? "available"}</StatusBadge>
+                        ) : (
+                          <span className="text-caption tracking-normal text-mid-gray">current</span>
+                        )}
+                      </td>
+                      <td className={tableCellClass}>
+                        <div className="flex justify-end">
+                          {t.update === "available" && (
+                            <ManageForm
+                              action={update}
+                              label="Update"
+                              pendingLabel="Updating…"
+                              success={`${name} updated`}
+                              size="sm"
+                              confirm={{
+                                title: `Update ${name}?`,
+                                description: `Version ${t.version} will be replaced with ${t.update_version ?? "the latest release"}. If this theme has been edited directly, those changes will be lost — that is what child themes are for.`,
+                                confirmLabel: "Update",
+                              }}
+                              showInlineError={false}
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
-      <section className="mt-6 rounded-lg border bg-white p-4 shadow-sm">
-        <h2 className="mb-1 font-medium">Child theme</h2>
-        <p className="mb-3 text-xs text-slate-500">
-          Generate a child theme of the active theme (style.css + functions.php with the parent
-          stylesheet enqueued). Safe to run: refuses if the active theme is already a child.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <ManageForm action={createChild} label="Create child theme" pendingLabel="Creating…"
-            confirmMessage={`Create a child theme of the active theme on ${site.name}?`} />
-          <ManageForm action={createAndActivate} label="Create + activate" pendingLabel="Creating…"
-            confirmMessage={`Create AND ACTIVATE a child theme on ${site.name}? The site will switch themes.`}
-            buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
+      <Card className="mt-4">
+        <CardTitle>Child theme</CardTitle>
+        <div className="p-5">
+          <p className="mb-4 max-w-prose text-body text-mid-gray">
+            Generates a child of the active theme — a <code className="text-ink">style.css</code> and
+            a <code className="text-ink">functions.php</code> that enqueues the parent stylesheet — so
+            your customisations survive the parent theme&rsquo;s updates. It refuses to run if the
+            active theme is already a child.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <ManageForm
+              action={createChild}
+              label="Create child theme"
+              pendingLabel="Creating…"
+              success="Child theme created"
+              confirm={{
+                title: "Create a child theme?",
+                description: `A child of ${activeTheme ? activeTheme.title || activeTheme.name : "the active theme"} will be written to ${site.name}. The active theme does not change.`,
+                confirmLabel: "Create",
+              }}
+              showInlineError={false}
+            />
+            <ManageForm
+              action={createAndActivate}
+              label="Create and activate"
+              pendingLabel="Creating…"
+              success="Child theme created and activated"
+              variant="primary"
+              confirm={{
+                title: "Create and activate a child theme?",
+                description: `${site.name} will switch to the new child theme immediately. Customiser settings and widgets are per-theme in WordPress, so some may need to be set again.`,
+                confirmLabel: "Create and activate",
+                tone: "danger",
+              }}
+              showInlineError={false}
+            />
+          </div>
         </div>
-      </section>
+      </Card>
     </main>
   );
 }
-

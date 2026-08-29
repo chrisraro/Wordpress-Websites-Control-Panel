@@ -5,9 +5,14 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseReportsRepo } from "@/services/reports/repo";
 import { SiteTabs } from "../tabs";
-import { ManageForm, type ManageFormAction } from "../action-form";
+import { ManageForm } from "../action-form";
 import { revokeReportAction } from "../reports-actions";
 import { GenerateReportForm } from "./generate-form";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { Card, CardTitle, EmptyState, StatusBadge } from "@/components/ui/primitives";
+import { CopyLinkButton } from "@/components/ui/copy-button";
+import { tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconExternal, IconReport } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,59 +30,100 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
   const reports = await supabaseReportsRepo(db).listForSite(id, 20);
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-      <p className="mb-4 text-sm text-slate-500">Reports</p>
+    <main>
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/dashboard" },
+          { label: site.name, href: `/sites/${id}` },
+          { label: "Reports" },
+        ]}
+      />
+      <h1 className="text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <p className="mb-6 mt-1 text-body text-mid-gray">
+        Branded PDFs built from data your scans already collected.
+      </p>
       <SiteTabs siteId={id} active="reports" />
 
-      <section className="mb-6">
-        <h2 className="mb-2 font-medium">Generate a report</h2>
-        <p className="mb-3 text-sm text-slate-500">
-          Reports are built from the data already collected by scans — generating one never
-          contacts the website, so it takes a few seconds.
+      <section className="mb-4">
+        <h2 className="mb-1 text-body font-medium text-ink">Generate a report</h2>
+        <p className="mb-3 max-w-prose text-body text-mid-gray">
+          Generating never contacts the website — it reads stored snapshots — so it takes a few
+          seconds. Run the scans you want reflected first.
         </p>
         <GenerateReportForm siteId={id} />
       </section>
 
-      <section className="rounded-lg border bg-white shadow-sm">
-        <h2 className="border-b px-4 py-3 font-medium">Generated reports</h2>
+      <Card className="overflow-hidden">
+        <CardTitle>Generated reports</CardTitle>
         {reports.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-500">No reports yet.</p>
+          <EmptyState icon={<IconReport size={28} />} title="No reports yet">
+            Generate one above, or wait for the monthly report that runs automatically on the
+            first of each month.
+          </EmptyState>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[720px] text-body">
               <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-2">Generated</th>
-                  <th className="px-4 py-2">Sections</th>
-                  <th className="px-4 py-2">Source</th>
-                  <th className="px-4 py-2">Share link</th>
-                  <th className="px-4 py-2 text-right">Actions</th>
+                <tr className={tableHeadClass}>
+                  <th className="px-5 py-3 font-medium">Generated</th>
+                  <th className="px-5 py-3 font-medium">Sections</th>
+                  <th className="px-5 py-3 font-medium">Source</th>
+                  <th className="px-5 py-3 font-medium">Share link</th>
+                  <th className="px-5 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {reports.map((r) => {
-                  const revoke = revokeReportAction.bind(null, id, r.id) as unknown as ManageFormAction;
+                  const revoke = revokeReportAction.bind(null, id, r.id);
                   return (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="px-4 py-2">{new Date(r.generated_at).toLocaleString()}</td>
-                      <td className="px-4 py-2">
+                    <tr key={r.id} className={tableRowClass}>
+                      <td className={`${tableCellClass} text-ink`}>
+                        {new Date(r.generated_at).toLocaleString()}
+                      </td>
+                      <td className={`${tableCellClass} text-mid-gray`}>
                         {r.sections.map((s) => SECTION_LABELS[s] ?? s).join(", ")}
                       </td>
-                      <td className="px-4 py-2">{r.auto ? "Monthly" : "Manual"}</td>
-                      <td className="px-4 py-2">
+                      <td className={tableCellClass}>
+                        <StatusBadge tone="idle">{r.auto ? "Monthly" : "Manual"}</StatusBadge>
+                      </td>
+                      <td className={tableCellClass}>
                         {r.share_token ? (
-                          <a href={`/r/${r.share_token}`} target="_blank" rel="noreferrer"
-                            className="underline">Open</a>
+                          <a
+                            href={`/r/${r.share_token}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-ink underline
+                              transition-colors duration-150 hover:text-mid-gray"
+                          >
+                            Open
+                            <IconExternal size={14} />
+                          </a>
                         ) : (
-                          <span className="text-slate-400">Revoked</span>
+                          <StatusBadge tone="idle">Revoked</StatusBadge>
                         )}
                       </td>
-                      <td className="px-4 py-2">
-                        <div className="flex justify-end">
+                      <td className={tableCellClass}>
+                        <div className="flex flex-wrap items-start justify-end gap-2">
                           {r.share_token && (
-                            <ManageForm action={revoke} label="Revoke link" pendingLabel="Revoking…"
-                              confirmMessage="Revoke this share link? Anyone holding it will lose access." />
+                            <>
+                              <CopyLinkButton path={`/r/${r.share_token}`} />
+                              <ManageForm
+                                action={revoke}
+                                label="Revoke"
+                                pendingLabel="Revoking…"
+                                success="Share link revoked"
+                                size="sm"
+                                variant="danger"
+                                confirm={{
+                                  title: "Revoke this share link?",
+                                  description:
+                                    "Anyone holding the link loses access immediately, and the PDF stops being served. This cannot be undone — generate a new report to share again.",
+                                  confirmLabel: "Revoke link",
+                                  tone: "danger",
+                                }}
+                                showInlineError={false}
+                              />
+                            </>
                           )}
                         </div>
                       </td>
@@ -88,7 +134,12 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
             </table>
           </div>
         )}
-      </section>
+      </Card>
+
+      <p className="mt-4 max-w-prose text-caption tracking-normal text-mid-gray">
+        Share links are unguessable and carry no login, so anyone holding one can read the
+        report. Revoke any that circulate further than you intended.
+      </p>
     </main>
   );
 }

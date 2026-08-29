@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BatchPoller } from "./poller";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -9,14 +9,12 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
   return (
-    <main className="mx-auto max-w-4xl p-4 sm:p-6">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Install batch</h1>
-        <Link href="/marketplace" className="min-h-10 rounded border px-3 py-2 text-sm hover:bg-slate-100">
-          ← Marketplace
-        </Link>
-      </div>
-      <p className="mb-6 break-all text-xs text-slate-400">{id}</p>
+    <main>
+      <Breadcrumbs
+        items={[{ label: "Marketplace", href: "/marketplace" }, { label: "Install batch" }]}
+      />
+      <h1 className="text-heading-sm font-semibold text-ink">Install batch</h1>
+      <p className="mb-6 mt-1 break-all text-caption tracking-normal text-mid-gray">{id}</p>
       <BatchPoller batchId={id} />
     </main>
   );

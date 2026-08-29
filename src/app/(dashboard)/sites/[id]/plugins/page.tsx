@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
@@ -5,8 +6,12 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
-import { ManageForm, type ManageFormAction } from "../action-form";
+import { ManageForm } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { Card, EmptyState, StatusBadge } from "@/components/ui/primitives";
+import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconPlugins, IconPlus, IconRefresh } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -19,94 +24,173 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const plugins = snapshot?.payload.plugins ?? [];
   const updatable = plugins.filter((p) => p.update === "available");
+  const active = plugins.filter((p) => p.status === "active").length;
 
-  const refresh = refreshInventoryAction.bind(null, id) as unknown as ManageFormAction;
-  const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const }) as unknown as ManageFormAction;
+  const refresh = refreshInventoryAction.bind(null, id);
+  const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const });
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-      <p className="mb-4 text-sm text-slate-500">Plugins</p>
+    <main>
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/dashboard" },
+          { label: site.name, href: `/sites/${id}` },
+          { label: "Plugins" },
+        ]}
+      />
+      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
       <SiteTabs siteId={id} active="plugins" />
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <p className="text-sm text-slate-500">
+        <p className="text-body text-mid-gray">
           {snapshot
-            ? `${plugins.length} plugins · ${updatable.length} updates · inventory from ${new Date(snapshot.taken_at).toLocaleString()}`
+            ? `${plugins.length} installed · ${active} active · ${updatable.length} with updates`
             : "No inventory yet — refresh to load plugins."}
+          {snapshot && (
+            <span className="block text-caption tracking-normal">
+              Inventory taken {new Date(snapshot.taken_at).toLocaleString()}
+            </span>
+          )}
         </p>
         <div className="flex flex-wrap gap-2">
-          <a href="/marketplace" className="min-h-10 rounded border px-3 py-2 text-sm hover:bg-slate-100">
-            Install new plugin
-          </a>
-          <ManageForm action={refresh} label="Refresh inventory" pendingLabel="Refreshing…"
-            confirmMessage="Fetch fresh inventory from the site now?" />
+          <Link href="/marketplace" className={buttonClass("outline")}>
+            <IconPlus size={16} />
+            Install plugin
+          </Link>
+          <ManageForm
+            action={refresh}
+            label="Refresh inventory"
+            pendingLabel="Refreshing…"
+            success="Inventory refreshed"
+            icon={<IconRefresh size={16} />}
+            showInlineError={false}
+          />
           {updatable.length > 0 && (
-            <ManageForm action={updateAll} label={`Update all (${updatable.length})`} pendingLabel="Updating…"
-              confirmMessage={`Update ${updatable.length} plugin(s) on ${site.name}?`}
-              buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
+            <ManageForm
+              action={updateAll}
+              label={`Update all (${updatable.length})`}
+              pendingLabel="Updating…"
+              success={`${updatable.length} plugin(s) updated`}
+              variant="primary"
+              confirm={{
+                title: `Update ${updatable.length} plugin(s)?`,
+                description: `Every plugin with an available update on ${site.name} will be updated in one pass. Plugin updates can change how the site behaves — take a backup if you are unsure.`,
+                confirmLabel: "Update all",
+              }}
+              showInlineError={false}
+            />
           )}
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Plugin</th>
-              <th className="px-4 py-3">Version</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Update</th>
-              <th className="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {plugins.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                {snapshot ? "No plugins found." : "Refresh inventory to see plugins."}
-              </td></tr>
-            ) : plugins.map((p) => {
-              const activate = manageAction.bind(null, id, { kind: "activate_plugin" as const, file: p.file }) as unknown as ManageFormAction;
-              const deactivate = manageAction.bind(null, id, { kind: "deactivate_plugin" as const, file: p.file }) as unknown as ManageFormAction;
-              const update = manageAction.bind(null, id, { kind: "update_plugin" as const, file: p.file }) as unknown as ManageFormAction;
-              return (
-                <tr key={p.file} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-medium">{p.title || p.name}</td>
-                  <td className="px-4 py-2">{p.version}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${p.status === "active"
-                      ? "bg-green-100 text-green-800" : "bg-slate-200 text-slate-600"}`}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {p.update === "available"
-                      ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                          {p.update_version ?? "available"}
-                        </span>
-                      : <span className="text-xs text-slate-400">current</span>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap justify-end gap-2">
-                      {p.update === "available" && (
-                        <ManageForm action={update} label="Update" pendingLabel="…"
-                          confirmMessage={`Update ${p.name} to ${p.update_version ?? "latest"}?`} />
-                      )}
-                      {p.status === "active" ? (
-                        <ManageForm action={deactivate} label="Deactivate" pendingLabel="…"
-                          confirmMessage={`Deactivate ${p.name}? The site may lose functionality.`} />
-                      ) : (
-                        <ManageForm action={activate} label="Activate" pendingLabel="…"
-                          confirmMessage={`Activate ${p.name}?`} />
-                      )}
-                    </div>
-                  </td>
+      <Card className="overflow-hidden">
+        {plugins.length === 0 ? (
+          <EmptyState
+            icon={<IconPlugins size={28} />}
+            title={snapshot ? "No plugins installed" : "No inventory yet"}
+          >
+            {snapshot
+              ? "Install one from the Marketplace to get started."
+              : "Refresh the inventory to pull the current plugin list from the site."}
+          </EmptyState>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-body">
+              <thead>
+                <tr className={tableHeadClass}>
+                  <th className="px-5 py-3 font-medium">Plugin</th>
+                  <th className="px-5 py-3 font-medium">Version</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Update</th>
+                  <th className="px-5 py-3 text-right font-medium">Actions</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {plugins.map((p) => {
+                  const activate = manageAction.bind(null, id, {
+                    kind: "activate_plugin" as const, file: p.file,
+                  });
+                  const deactivate = manageAction.bind(null, id, {
+                    kind: "deactivate_plugin" as const, file: p.file,
+                  });
+                  const update = manageAction.bind(null, id, {
+                    kind: "update_plugin" as const, file: p.file,
+                  });
+                  const name = p.title || p.name;
+                  return (
+                    <tr key={p.file} className={tableRowClass}>
+                      <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
+                      <td className={`${tableCellClass} text-mid-gray`}>{p.version}</td>
+                      <td className={tableCellClass}>
+                        <StatusBadge tone={p.status === "active" ? "good" : "idle"}>
+                          {p.status}
+                        </StatusBadge>
+                      </td>
+                      <td className={tableCellClass}>
+                        {p.update === "available" ? (
+                          <StatusBadge tone="warn">{p.update_version ?? "available"}</StatusBadge>
+                        ) : (
+                          <span className="text-caption tracking-normal text-mid-gray">current</span>
+                        )}
+                      </td>
+                      <td className={tableCellClass}>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {p.update === "available" && (
+                            <ManageForm
+                              action={update}
+                              label="Update"
+                              pendingLabel="Updating…"
+                              success={`${name} updated`}
+                              size="sm"
+                              confirm={{
+                                title: `Update ${name}?`,
+                                description: `Version ${p.version} will be replaced with ${p.update_version ?? "the latest release"} on ${site.name}.`,
+                                confirmLabel: "Update",
+                              }}
+                              showInlineError={false}
+                            />
+                          )}
+                          {p.status === "active" ? (
+                            <ManageForm
+                              action={deactivate}
+                              label="Deactivate"
+                              pendingLabel="Deactivating…"
+                              success={`${name} deactivated`}
+                              size="sm"
+                              variant="danger"
+                              confirm={{
+                                title: `Deactivate ${name}?`,
+                                description: `Any functionality this plugin provides will stop working on ${site.name} immediately. You can reactivate it from this page.`,
+                                confirmLabel: "Deactivate",
+                                tone: "danger",
+                              }}
+                              showInlineError={false}
+                            />
+                          ) : (
+                            <ManageForm
+                              action={activate}
+                              label="Activate"
+                              pendingLabel="Activating…"
+                              success={`${name} activated`}
+                              size="sm"
+                              confirm={{
+                                title: `Activate ${name}?`,
+                                description: `The plugin will start running on ${site.name} straight away.`,
+                                confirmLabel: "Activate",
+                              }}
+                              showInlineError={false}
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </main>
   );
 }

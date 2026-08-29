@@ -2,28 +2,33 @@
 
 import { useActionState } from "react";
 import { createSite } from "./actions";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { buttonClass, cardClass, hintClass, inputClass, labelClass } from "@/components/ui/styles";
+import { IconAlert, IconSpinner } from "@/components/ui/icons";
 
 export default function NewSitePage() {
   const [state, action, pending] = useActionState(createSite, undefined);
+
   return (
-    <main className="mx-auto max-w-lg p-6">
-      <h1 className="mb-4 text-2xl font-semibold">Connect a WordPress site</h1>
-      <form action={action} className="space-y-4 rounded-lg border bg-white p-6 shadow-sm">
-        <div className="space-y-1">
-          <label htmlFor="name" className="text-sm font-medium">
+    <main className="mx-auto max-w-xl">
+      <Breadcrumbs items={[{ label: "Sites", href: "/dashboard" }, { label: "Connect a site" }]} />
+
+      <h1 className="text-heading-sm font-semibold text-ink">Connect a WordPress site</h1>
+      <p className="mt-1 text-body text-mid-gray">
+        We verify the connection before saving, so you will know immediately if the credentials
+        or the Novamira plugin need attention.
+      </p>
+
+      <form action={action} className={`${cardClass} mt-6 space-y-5 p-5`}>
+        <div className="space-y-1.5">
+          <label htmlFor="name" className={labelClass}>
             Site name
           </label>
-          <input
-            id="name"
-            name="name"
-            required
-            placeholder="El Nido Guide"
-            className="w-full rounded border px-3 py-2"
-          />
+          <input id="name" name="name" required placeholder="El Nido Guide" className={inputClass} />
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="url" className="text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="url" className={labelClass}>
             Site URL
           </label>
           <input
@@ -33,12 +38,12 @@ export default function NewSitePage() {
             required
             placeholder="https://example.com"
             autoComplete="url"
-            className="w-full rounded border px-3 py-2"
+            className={inputClass}
           />
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="wpUsername" className="text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="wpUsername" className={labelClass}>
             WordPress username
           </label>
           <input
@@ -46,12 +51,12 @@ export default function NewSitePage() {
             name="wpUsername"
             required
             autoComplete="username"
-            className="w-full rounded border px-3 py-2"
+            className={inputClass}
           />
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="appPassword" className="text-sm font-medium">
+        <div className="space-y-1.5">
+          <label htmlFor="appPassword" className={labelClass}>
             Application password
           </label>
           <input
@@ -60,32 +65,32 @@ export default function NewSitePage() {
             type="password"
             required
             autoComplete="off"
-            className="w-full rounded border px-3 py-2"
+            aria-describedby="appPassword-hint"
+            className={inputClass}
           />
-          <span className="text-xs font-normal text-slate-500">
-            WP Admin → Users → Profile → Application Passwords. Requires the Novamira plugin active.
-          </span>
+          <p id="appPassword-hint" className={hintClass}>
+            WP Admin → Users → Profile → Application Passwords. The Novamira plugin must be active.
+          </p>
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="clientLabel" className="text-sm font-medium">
-            Client label (optional)
+        <div className="space-y-1.5">
+          <label htmlFor="clientLabel" className={labelClass}>
+            Client label <span className="font-normal text-mid-gray">(optional)</span>
           </label>
-          <input
-            id="clientLabel"
-            name="clientLabel"
-            className="w-full rounded border px-3 py-2"
-          />
+          <input id="clientLabel" name="clientLabel" className={inputClass} />
         </div>
 
-        <p className="min-h-5 text-sm text-red-600" aria-live="polite">
-          {state?.error}
-        </p>
+        <div aria-live="polite" className="min-h-5">
+          {state?.error && (
+            <p className="flex items-start gap-2 text-body text-ember">
+              <IconAlert size={16} className="mt-0.5 shrink-0" />
+              {state.error}
+            </p>
+          )}
+        </div>
 
-        <button
-          disabled={pending}
-          className="w-full rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
-        >
+        <button disabled={pending} className={buttonClass("primary", "md", "w-full")}>
+          {pending && <IconSpinner size={16} />}
           {pending ? "Verifying connection…" : "Connect site"}
         </button>
       </form>

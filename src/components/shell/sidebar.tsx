@@ -1,0 +1,169 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { logout } from "@/app/login/actions";
+import { buttonClass } from "@/components/ui/styles";
+import {
+  IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites,
+} from "@/components/ui/icons";
+
+interface NavItem {
+  href: string;
+  label: string;
+  Icon: typeof IconSites;
+  /** Sub-routes that should keep this item lit. */
+  match: (pathname: string) => boolean;
+}
+
+const NAV: NavItem[] = [
+  {
+    href: "/dashboard",
+    label: "Sites",
+    Icon: IconSites,
+    match: (p) => p === "/dashboard" || p.startsWith("/sites"),
+  },
+  {
+    href: "/marketplace",
+    label: "Marketplace",
+    Icon: IconMarketplace,
+    match: (p) => p.startsWith("/marketplace"),
+  },
+];
+
+function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  return (
+    <nav aria-label="Main" className="flex flex-col gap-1">
+      {NAV.map(({ href, label, Icon, match }) => {
+        const active = match(pathname);
+        return (
+          <Link
+            key={href}
+            href={href}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={`flex min-h-10 items-center gap-3 rounded-2xl px-3 text-body transition-colors
+              duration-150 ${
+                active
+                  ? "bg-canvas font-medium text-ink"
+                  : "text-mid-gray hover:bg-canvas hover:text-ink"
+              }`}
+          >
+            <Icon size={18} className="shrink-0" />
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SidebarBody({
+  email, pathname, onNavigate,
+}: { email: string; pathname: string; onNavigate?: () => void }) {
+  return (
+    <div className="flex h-full flex-col gap-6 p-4">
+      <Link
+        href="/dashboard"
+        onClick={onNavigate}
+        className="px-3 text-body font-semibold tracking-[-0.02em] text-ink"
+      >
+        WP Control Panel
+      </Link>
+
+      <Link
+        href="/sites/new"
+        onClick={onNavigate}
+        className={buttonClass("primary", "md", "w-full")}
+      >
+        <IconPlus size={16} />
+        Connect site
+      </Link>
+
+      <NavLinks pathname={pathname} onNavigate={onNavigate} />
+
+      <div className="mt-auto border-t border-hairline pt-4">
+        <p className="truncate px-3 text-caption tracking-normal text-mid-gray" title={email}>
+          {email}
+        </p>
+        <form action={logout} className="mt-1">
+          <button className={buttonClass("ghost", "md", "w-full justify-start")}>
+            <IconLogout size={16} />
+            Sign out
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function Sidebar({ email }: { email: string }) {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+    if (open && !el.open) el.showModal();
+    if (!open && el.open) el.close();
+  }, [open]);
+
+  // A sheet that survives navigation would cover the page it just opened.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  return (
+    <>
+      {/* Desktop: a persistent column one tonal step off the canvas. */}
+      <aside className="fixed inset-y-0 left-0 hidden w-60 border-r border-hairline bg-surface-alt lg:block">
+        <SidebarBody email={email} pathname={pathname} />
+      </aside>
+
+      {/* Mobile: slim bar + slide-over sheet. */}
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-hairline bg-surface-alt/90 px-4 py-3 backdrop-blur-sm lg:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open navigation"
+          aria-expanded={open}
+          className={buttonClass("ghost", "sm", "px-2")}
+        >
+          <IconMenu size={20} />
+        </button>
+        <Link href="/dashboard" className="text-body font-semibold tracking-[-0.02em] text-ink">
+          WP Control Panel
+        </Link>
+      </header>
+
+      <dialog
+        ref={dialogRef}
+        aria-label="Navigation"
+        onCancel={(e) => {
+          e.preventDefault();
+          setOpen(false);
+        }}
+        className="fixed inset-0 h-full max-h-full w-full max-w-full bg-transparent lg:hidden"
+      >
+        <div
+          className="animate-backdrop fixed inset-0 bg-ink/25"
+          onClick={() => setOpen(false)}
+          aria-hidden
+        />
+        <div className="animate-sheet relative h-full w-72 max-w-[85vw] border-r border-hairline bg-surface-alt">
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close navigation"
+            className="absolute right-3 top-3 rounded-2xl p-2 text-mid-gray transition-colors hover:bg-canvas hover:text-ink"
+          >
+            <IconClose size={18} />
+          </button>
+          <SidebarBody email={email} pathname={pathname} onNavigate={() => setOpen(false)} />
+        </div>
+      </dialog>
+    </>
+  );
+}

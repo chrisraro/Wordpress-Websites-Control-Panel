@@ -1,1 +1,345 @@
 @import "tailwindcss";
+
+/* =========================================================================
+   Design tokens — see DESIGN.md ("clinical blueprint on frosted paper").
+   Spacing deliberately does NOT override Tailwind's --spacing namespace:
+   the default 0.25rem base already yields DESIGN.md's 4/8/12/16/20/24/48
+   ladder as p-1…p-6/p-12, and redefining --spacing-4 would silently change
+   every existing p-4 from 16px to 4px.
+   ========================================================================= */
+@theme {
+  /* Surfaces & ink */
+  --color-canvas: #f5f5f5;
+  --color-paper: #ffffff;
+  --color-surface-alt: #fafafa;
+  --color-ink: #0a0a0a;
+  --color-ink-soft: #171717;
+  /* DESIGN.md pins Mid Gray at #737373, which measures 4.35:1 on the canvas
+     (#f5f5f5) — under the 4.5 floor, and the inactive tab strip sits exactly
+     there. #707070 is the smallest darkening that clears it on all three
+     surfaces (4.54 canvas / 4.74 sidebar / 4.95 paper) and stays inside the
+     brief, whose rule is "no lighter than #737373". */
+  --color-mid-gray: #707070;
+  --color-hairline: #e5e5e5;
+  /* Ember measures 4.38:1 on the canvas but 4.77:1 on paper, and the hue is
+     fixed by the brief. Keep ember text on paper or sidebar surfaces (cards,
+     toasts, table rows) — never directly on the page background. */
+  --color-ember: #e7000b;
+
+  /* Data-status scale — a documented extension to DESIGN.md.
+     The monochrome rule governs interface chrome; these hues appear ONLY in
+     data visualisation (GeoGrid ranks, security grade, severity, pass/fail
+     dots), never on buttons, cards, inputs, or navigation. Ember stays
+     reserved for destructive actions so a red *control* never reads as a red
+     *datum*. All four clear 4.5:1 on paper and on canvas. */
+  --color-status-good: #15803d;
+  --color-status-warn: #a16207;
+  --color-status-alert: #c2410c;
+  --color-status-bad: #b91c1c;
+  --color-status-info: #1e40af;
+
+  /* Type — Geist, loaded by next/font in layout.tsx */
+  --font-geist: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 1.33;
+  --text-caption--letter-spacing: 0.05em;
+  --text-body: 14px;
+  --text-body--line-height: 1.43;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 1.5;
+  --text-subheading: 18px;
+  --text-subheading--line-height: 1.56;
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.33;
+  --text-heading-sm--letter-spacing: -0.025em;
+  --text-heading: 30px;
+  --text-heading--line-height: 1.2;
+  --text-heading--letter-spacing: -0.025em;
+  --text-heading-lg: 36px;
+  --text-heading-lg--line-height: 1.11;
+  --text-heading-lg--letter-spacing: -0.025em;
+  --text-display: 48px;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.05em;
+
+  /* Radius — 18px interactive, 24px containers (DESIGN.md allows no between) */
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+
+  /* Elevation — hairline ring + two soft offsets, per DESIGN.md */
+  --shadow-subtle: 0 0 0 1px rgb(23 23 23 / 0.05), 0 1px 3px rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-raised: 0 0 0 1px rgb(23 23 23 / 0.05), 0 4px 12px -2px rgb(0 0 0 / 0.1),
+    0 2px 6px -2px rgb(0 0 0 / 0.08);
+  --shadow-overlay: 0 0 0 1px rgb(23 23 23 / 0.06), 0 16px 48px -12px rgb(0 0 0 / 0.24),
+    0 4px 12px -4px rgb(0 0 0 / 0.12);
+
+  /* Motion — one deceleration curve carries the whole system */
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* =========================================================================
+   Base
+   ========================================================================= */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-geist);
+    font-size: var(--text-body);
+    line-height: 1.43;
+    -webkit-font-smoothing: antialiased;
+    /* Geist's alternate single-storey g and straight-tailed l — the
+       letterforms DESIGN.md's "code-adjacent" voice depends on. */
+    font-feature-settings: "ss01" on, "cv11" on;
+  }
+
+  /* Numerals in tables and metrics must not jitter between renders. */
+  table,
+  [data-tabular] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Browser surfaces we did not draw still belong to the design system. */
+  ::selection {
+    background-color: var(--color-ink);
+    color: var(--color-surface-alt);
+  }
+
+  :root {
+    accent-color: var(--color-ink);
+    caret-color: var(--color-ink);
+    scrollbar-color: var(--color-hairline) transparent;
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-hairline);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: #d4d4d4;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: var(--radius-2xl);
+  }
+
+  a {
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 1px;
+  }
+
+  /* Native dialog: we animate it ourselves, so strip the UA backdrop. */
+  dialog::backdrop {
+    background: transparent;
+  }
+  dialog {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    max-width: none;
+    max-height: none;
+  }
+}
+
+/* =========================================================================
+   Motion
+   Every keyframe starts from a visible-enough state that a failed script or a
+   blocked animation never hides content.
+   ========================================================================= */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(3px);
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+/* The focal moment: grid points landing in reading order, so the map reads as
+   a measurement being taken rather than a picture appearing. */
+@keyframes grid-point-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@utility animate-rise {
+  animation: rise-in 260ms var(--ease-out-quint) both;
+}
+
+@utility animate-overlay {
+  animation: overlay-in 220ms var(--ease-out-quint) both;
+}
+
+@utility animate-backdrop {
+  animation: backdrop-in 220ms var(--ease-out-quint) both;
+}
+
+@utility animate-sheet {
+  animation: sheet-in 240ms var(--ease-out-quint) both;
+}
+
+@utility animate-toast-in {
+  animation: toast-in 260ms var(--ease-out-quint) both;
+}
+
+@utility animate-toast-out {
+  animation: toast-out 140ms ease-in both;
+}
+
+@utility animate-spin-slow {
+  animation: spin 700ms linear infinite;
+}
+
+/* Skeletons: a moving highlight over a static fill, bounded to the element. */
+@utility skeleton {
+  background-color: var(--color-canvas);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(255 255 255 / 0.85) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* The GeoGrid stagger. --i is set per marker; the cap keeps a 9×9 grid from
+   taking longer to draw than it takes to read. */
+@utility grid-point {
+  animation: grid-point-in 320ms var(--ease-out-quint) both;
+  animation-delay: calc(min(var(--i, 0) * 14ms, 420ms));
+}
+
+/* Reduced motion keeps state changes legible and drops only travel.
+   Toasts, dialogs and grid points still appear and still fade — they simply
+   stop moving, because their arrival is the feedback. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-toast-in,
+  .animate-overlay,
+  .animate-backdrop,
+  .animate-sheet,
+  .grid-point,
+  .animate-rise {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .animate-spin-slow {
+    animation: spin 1.2s linear infinite !important;
+  }
+
+  .skeleton {
+    animation: none !important;
+    background-image: none;
+  }
+}

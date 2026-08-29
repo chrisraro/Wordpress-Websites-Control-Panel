@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseReportsRepo } from "@/services/reports/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
+import { IconExternal, IconReport } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -26,51 +28,63 @@ export default async function SharedReportPage({
 
   // Only the site's display name is shown — never its credentials or endpoint.
   const site = await supabaseSitesRepo(db).getSite(report.site_id);
-  const period = report.period_start && report.period_end
-    ? `${new Date(report.period_start).toLocaleDateString()} – ${new Date(report.period_end).toLocaleDateString()}`
-    : null;
+  const period =
+    report.period_start && report.period_end
+      ? `${new Date(report.period_start).toLocaleDateString()} – ${new Date(report.period_end).toLocaleDateString()}`
+      : null;
 
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-6">
-      <div className="mb-6 border-b pb-4">
-        <p className="text-sm text-slate-500">OCS — Website Report</p>
-        <h1 className="text-2xl font-semibold">{site?.name ?? "Website report"}</h1>
-        {site?.url && (
-          <a href={site.url} target="_blank" rel="noreferrer"
-            className="break-all text-sm text-slate-500 underline">{site.url}</a>
-        )}
-      </div>
+    <main className="mx-auto min-h-screen w-full max-w-2xl px-4 py-12 sm:px-6">
+      <p className="text-caption font-medium uppercase text-mid-gray">OCS — Website Report</p>
+      <h1 className="mt-2 text-heading font-semibold text-ink">
+        {site?.name ?? "Website report"}
+      </h1>
+      {site?.url && (
+        <a
+          href={site.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1.5 break-all text-body text-mid-gray
+            underline transition-colors duration-150 hover:text-ink"
+        >
+          {site.url.replace(/^https?:\/\//, "")}
+          <IconExternal size={14} className="shrink-0" />
+        </a>
+      )}
 
-      <dl className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border bg-white p-3">
-          <dt className="text-xs text-slate-500">Generated</dt>
-          <dd className="font-medium">{new Date(report.generated_at).toLocaleDateString()}</dd>
-        </div>
-        <div className="rounded-lg border bg-white p-3">
-          <dt className="text-xs text-slate-500">Period</dt>
-          <dd className="font-medium">{period ?? "—"}</dd>
-        </div>
-        <div className="rounded-lg border bg-white p-3">
-          <dt className="text-xs text-slate-500">Sections</dt>
-          <dd className="font-medium">{report.sections.length}</dd>
-        </div>
+      <dl className={`${cardClass} animate-rise mt-8 divide-y divide-hairline px-5`}>
+        {[
+          { term: "Generated", value: new Date(report.generated_at).toLocaleDateString() },
+          { term: "Period covered", value: period ?? "—" },
+          { term: "Sections", value: String(report.sections.length) },
+        ].map((row) => (
+          <div key={row.term} className="flex items-baseline justify-between gap-4 py-3">
+            <dt className="text-body text-mid-gray">{row.term}</dt>
+            <dd className="text-body font-medium text-ink">{row.value}</dd>
+          </div>
+        ))}
       </dl>
 
-      <p className="mb-2 text-sm font-medium">This report covers</p>
-      <ul className="mb-6 flex flex-wrap gap-2">
+      <h2 className="mt-8 text-body font-medium text-ink">This report covers</h2>
+      <ul className="mt-2 flex flex-wrap gap-2">
         {report.sections.map((s) => (
-          <li key={s} className="rounded-full border bg-white px-3 py-1 text-sm">
+          <li key={s} className={badgeClass("outline")}>
             {SECTION_LABELS[s] ?? s}
           </li>
         ))}
       </ul>
 
-      <a href={`/r/${token}/file`} target="_blank" rel="noreferrer"
-        className="inline-flex min-h-10 items-center rounded bg-slate-900 px-4 py-2 text-sm text-white">
+      <a
+        href={`/r/${token}/file`}
+        target="_blank"
+        rel="noreferrer"
+        className={buttonClass("primary", "md", "mt-8")}
+      >
+        <IconReport size={16} />
         Open the PDF report
       </a>
 
-      <p className="mt-8 text-xs text-slate-400">
+      <p className="mt-12 border-t border-hairline pt-4 text-caption tracking-normal text-mid-gray">
         This link was shared with you by OCS and can be revoked at any time.
       </p>
     </main>

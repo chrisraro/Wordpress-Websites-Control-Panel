@@ -5,21 +5,27 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { SiteTabs } from "../tabs";
-import { ManageForm, type ManageFormAction } from "../action-form";
+import { ManageForm } from "../action-form";
 import { runSecurityScanAction } from "../security-actions";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import {
+  Card, CardTitle, EmptyState, Stat, StatusBadge, statusInk, type StatusTone,
+} from "@/components/ui/primitives";
+import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconExternal, IconShield } from "@/components/ui/icons";
 import type { Severity } from "@/services/security/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const GRADE_STYLE: Record<string, string> = {
-  A: "bg-green-100 text-green-800", B: "bg-lime-100 text-lime-800",
-  C: "bg-amber-100 text-amber-800", D: "bg-orange-100 text-orange-800",
-  F: "bg-red-100 text-red-800",
+const GRADE_TONE: Record<string, StatusTone> = {
+  A: "good", B: "good", C: "warn", D: "alert", F: "bad",
 };
-const SEV_STYLE: Record<string, string> = {
-  critical: "bg-red-100 text-red-800", high: "bg-orange-100 text-orange-800",
-  medium: "bg-amber-100 text-amber-800", low: "bg-slate-200 text-slate-600",
+const SEV_TONE: Record<string, StatusTone> = {
+  critical: "bad", high: "alert", medium: "warn", low: "idle",
+};
+const RESULT_TONE: Record<string, StatusTone> = {
+  pass: "good", fail: "bad",
 };
 const CHECK_LABELS: Record<string, string> = {
   wp_debug: "Debug mode off", debug_display: "Debug output hidden",
@@ -39,122 +45,201 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   if (!site) notFound();
   const security = supabaseSecurityRepo(db);
   const [grade, vulns, latest, uptime] = await Promise.all([
-    security.latestGrade(id), security.openVulns(id), security.latestChecks(id), security.uptimeSummary(id),
+    security.latestGrade(id), security.openVulns(id), security.latestChecks(id),
+    security.uptimeSummary(id),
   ]);
   const checks = (latest?.checks ?? []).filter((c) => c.check_id !== "grade");
-  const scan = runSecurityScanAction.bind(null, id) as unknown as ManageFormAction;
+  const failing = checks.filter((c) => c.result === "fail").length;
+  const scan = runSecurityScanAction.bind(null, id);
+
+  const scanButton = (
+    <ManageForm
+      action={scan}
+      label="Run security scan"
+      pendingLabel="Scanning…"
+      success="Security scan complete"
+      variant="primary"
+      icon={<IconShield size={16} />}
+      confirm={{
+        title: "Run a full security scan?",
+        description: `Checks ${site.name} against the Wordfence vulnerability feed, verifies core file checksums, and runs the hardening checklist. It reads only — nothing on the site is changed — and can take a few minutes.`,
+        confirmLabel: "Run scan",
+      }}
+      showInlineError={false}
+    />
+  );
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-      <p className="mb-4 text-sm text-slate-500">Security</p>
+    <main>
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/dashboard" },
+          { label: site.name, href: `/sites/${id}` },
+          { label: "Security" },
+        ]}
+      />
+      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
       <SiteTabs siteId={id} active="security" />
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {grade ? (
-            <>
-              <span className={`rounded-lg px-4 py-2 text-2xl font-bold ${GRADE_STYLE[grade.grade]}`}>
-                {grade.grade}
-              </span>
-              <div className="text-sm text-slate-500">
-                <p>Score {grade.score}/100</p>
-                {latest && <p>Scanned {new Date(latest.runAt).toLocaleString()}</p>}
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-slate-500">No scan yet — run the first one.</p>
-          )}
-        </div>
-        <ManageForm action={scan} label="Run security scan" pendingLabel="Scanning… (may take a few minutes)"
-          confirmMessage={`Run a full security scan on ${site.name} now?`}
-          buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
-      </div>
-
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {[
-          { label: "Uptime (24h)", value: uptime.uptime24h !== null ? `${uptime.uptime24h}%` : "—" },
-          { label: "Status", value: uptime.latestOk === null ? "—" : uptime.latestOk ? "Up" : "Down" },
-          { label: "Response", value: uptime.responseMs !== null ? `${uptime.responseMs} ms` : "—" },
-          { label: "SSL expires", value: uptime.sslDays !== null ? `${uptime.sslDays} days` : "—" },
-        ].map((s) => (
-          <div key={s.label} className="rounded-lg border bg-white p-3 text-center shadow-sm">
-            <p className="text-lg font-semibold">{s.value}</p>
-            <p className="text-xs text-slate-500">{s.label}</p>
+      <div className={`${cardClass} mb-4 flex flex-wrap items-center justify-between gap-4 p-5`}>
+        {grade ? (
+          <div className="flex items-center gap-4">
+            <p
+              aria-hidden
+              className={`flex size-16 shrink-0 items-center justify-center rounded-3xl border
+                border-hairline bg-canvas text-heading-lg font-semibold
+                ${statusInk(GRADE_TONE[grade.grade] ?? "idle")}`}
+            >
+              {grade.grade}
+            </p>
+            <div>
+              <p className="text-body font-medium text-ink">
+                Security grade {grade.grade}
+                <span className="font-normal text-mid-gray"> · {grade.score}/100</span>
+              </p>
+              <p className="mt-0.5 text-body text-mid-gray">
+                {failing > 0
+                  ? `${failing} hardening ${failing === 1 ? "check" : "checks"} failing`
+                  : "All hardening checks passing"}
+                {latest && ` · scanned ${new Date(latest.runAt).toLocaleString()}`}
+              </p>
+            </div>
           </div>
-        ))}
+        ) : (
+          <div>
+            <p className="text-body font-medium text-ink">Not scanned yet</p>
+            <p className="mt-0.5 text-body text-mid-gray">
+              The first scan builds the grade, the vulnerability list, and the checklist below.
+            </p>
+          </div>
+        )}
+        {scanButton}
       </div>
 
-      <section className="mb-6 rounded-lg border bg-white shadow-sm">
-        <h2 className="border-b px-4 py-3 font-medium">
-          Vulnerabilities {vulns.length > 0 && <span className="text-red-600">({vulns.length})</span>}
-        </h2>
+      <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat
+          label="Uptime 24h"
+          value={uptime.uptime24h !== null ? `${uptime.uptime24h}%` : "—"}
+          tone={
+            uptime.uptime24h === null ? undefined : uptime.uptime24h >= 99 ? "good" : "warn"
+          }
+        />
+        <Stat
+          label="Status"
+          value={uptime.latestOk === null ? "—" : uptime.latestOk ? "Up" : "Down"}
+          tone={uptime.latestOk === null ? undefined : uptime.latestOk ? "good" : "bad"}
+        />
+        <Stat
+          label="Response"
+          value={uptime.responseMs !== null ? `${uptime.responseMs} ms` : "—"}
+        />
+        <Stat
+          label="SSL expires"
+          value={uptime.sslDays !== null ? `${uptime.sslDays}d` : "—"}
+          tone={uptime.sslDays === null ? undefined : uptime.sslDays <= 14 ? "bad" : "good"}
+        />
+      </div>
+
+      <Card className="mb-4 overflow-hidden">
+        <CardTitle
+          aside={
+            vulns.length > 0 ? (
+              <StatusBadge tone="bad">{vulns.length} open</StatusBadge>
+            ) : latest ? (
+              <StatusBadge tone="good">None found</StatusBadge>
+            ) : undefined
+          }
+        >
+          Vulnerabilities
+        </CardTitle>
         {vulns.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-500">
-            {latest ? "No known vulnerabilities matched." : "Run a scan to check for vulnerabilities."}
+          <p className="px-5 py-6 text-body text-mid-gray">
+            {latest
+              ? "No installed plugin, theme, or core version matched a known vulnerability."
+              : "Run a scan to check installed components against the Wordfence feed."}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-2">Component</th>
-                  <th className="px-4 py-2">Vulnerability</th>
-                  <th className="px-4 py-2">Severity</th>
-                  <th className="px-4 py-2">Installed</th>
-                  <th className="px-4 py-2">Fixed in</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vulns.map((v) => (
-                  <tr key={`${v.feed_id}:${v.component}`} className="border-b last:border-0">
-                    <td className="px-4 py-2 font-medium">{v.component}</td>
-                    <td className="px-4 py-2">
-                      {v.title}
-                      {v.cve && (
-                        <a href={`https://www.cve.org/CVERecord?id=${v.cve}`} target="_blank" rel="noreferrer"
-                          className="ml-2 text-xs text-slate-500 underline">{v.cve}</a>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${SEV_STYLE[(v.severity ?? "low") as Severity]}`}>
-                        {v.severity ?? "unknown"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">{v.installed_version}</td>
-                    <td className="px-4 py-2">{v.fixed_in ?? "—"}</td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-body">
+                <thead>
+                  <tr className={tableHeadClass}>
+                    <th className="px-5 py-3 font-medium">Component</th>
+                    <th className="px-5 py-3 font-medium">Vulnerability</th>
+                    <th className="px-5 py-3 font-medium">Severity</th>
+                    <th className="px-5 py-3 font-medium">Installed</th>
+                    <th className="px-5 py-3 font-medium">Fixed in</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {vulns.map((v) => (
+                    <tr key={`${v.feed_id}:${v.component}`} className={tableRowClass}>
+                      <td className={`${tableCellClass} font-medium text-ink`}>{v.component}</td>
+                      <td className={tableCellClass}>
+                        {v.title}
+                        {v.cve && (
+                          <a
+                            href={`https://www.cve.org/CVERecord?id=${v.cve}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-2 inline-flex items-center gap-1 text-caption tracking-normal
+                              text-mid-gray underline transition-colors duration-150 hover:text-ink"
+                          >
+                            {v.cve}
+                            <IconExternal size={12} />
+                          </a>
+                        )}
+                      </td>
+                      <td className={tableCellClass}>
+                        <StatusBadge tone={SEV_TONE[(v.severity ?? "low") as Severity] ?? "idle"}>
+                          {v.severity ?? "unknown"}
+                        </StatusBadge>
+                      </td>
+                      <td className={`${tableCellClass} text-mid-gray`}>{v.installed_version}</td>
+                      <td className={tableCellClass}>{v.fixed_in ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="border-t border-hairline px-5 py-3 text-caption tracking-normal text-mid-gray">
+              Fix these from the Plugins tab — update to the fixed version, or deactivate the
+              component until one ships.
+            </p>
+          </>
         )}
-        {vulns.length > 0 && (
-          <p className="border-t px-4 py-3 text-xs text-slate-500">
-            Fix vulnerable plugins from the Plugins tab (update to the fixed version, or deactivate).
-          </p>
-        )}
-      </section>
+      </Card>
 
-      <section className="rounded-lg border bg-white shadow-sm">
-        <h2 className="border-b px-4 py-3 font-medium">Hardening checklist</h2>
+      <Card>
+        <CardTitle
+          aside={
+            checks.length > 0 ? (
+              <StatusBadge tone={failing > 0 ? "warn" : "good"}>
+                {checks.length - failing}/{checks.length} passing
+              </StatusBadge>
+            ) : undefined
+          }
+        >
+          Hardening checklist
+        </CardTitle>
         {checks.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-500">Run a scan to populate the checklist.</p>
+          <EmptyState icon={<IconShield size={28} />} title="No checklist yet">
+            Run a scan to audit this site against sixteen WordPress hardening checks.
+          </EmptyState>
         ) : (
-          <ul className="divide-y">
+          <ul className="divide-y divide-hairline px-5">
             {checks.map((c) => (
-              <li key={c.check_id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
-                <span>{CHECK_LABELS[c.check_id] ?? c.check_id}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs ${
-                  c.result === "pass" ? "bg-green-100 text-green-800"
-                    : c.result === "fail" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
-                  {c.result}
-                </span>
+              <li
+                key={c.check_id}
+                className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-body"
+              >
+                <span className="text-ink">{CHECK_LABELS[c.check_id] ?? c.check_id}</span>
+                <StatusBadge tone={RESULT_TONE[c.result] ?? "warn"}>{c.result}</StatusBadge>
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
     </main>
   );
 }

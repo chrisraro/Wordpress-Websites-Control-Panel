@@ -41,3 +41,18 @@ export async function processQueueNowAction(
   if (revalidate) revalidatePath(revalidate);
   return { ok: true, ...totals };
 }
+
+/**
+ * Form-shaped wrapper for the same work. processQueueNowAction stays callable
+ * directly (the batch poller does), while this one carries the
+ * (…bound, prevState, formData) signature useActionState passes.
+ */
+export async function drainQueueAction(
+  revalidate: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await processQueueNowAction(revalidate);
+  if (!res.ok) return { ok: false, error: res.error ?? "Queue processing failed" };
+  return { ok: true };
+}

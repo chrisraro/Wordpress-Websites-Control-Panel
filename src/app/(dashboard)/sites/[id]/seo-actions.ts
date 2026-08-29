@@ -7,7 +7,11 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 
-export async function runSeoScanAction(siteId: string): Promise<{ ok: boolean; error?: string }> {
+export async function runSeoScanAction(
+  siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const db = createServiceSupabase();
   try {

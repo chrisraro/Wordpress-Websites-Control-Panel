@@ -17,7 +17,10 @@ function revalidateSite(siteId: string) {
 }
 
 export async function manageAction(
-  siteId: string, action: ManageAction,
+  siteId: string,
+  action: ManageAction,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const db = createServiceSupabase();
@@ -36,6 +39,8 @@ export async function manageAction(
 
 export async function refreshInventoryAction(
   siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   await requireUser();
   const db = createServiceSupabase();

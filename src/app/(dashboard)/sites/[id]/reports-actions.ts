@@ -54,7 +54,10 @@ export async function generateReportAction(
 }
 
 export async function revokeReportAction(
-  siteId: string, reportId: string,
+  siteId: string,
+  reportId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const db = createServiceSupabase();

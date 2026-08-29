@@ -8,7 +8,10 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 
 export async function createChildThemeAction(
-  siteId: string, activate: boolean,
+  siteId: string,
+  activate: boolean,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const db = createServiceSupabase();

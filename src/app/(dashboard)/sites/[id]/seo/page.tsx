@@ -9,9 +9,15 @@ import type {
   AiVisibilityPayload, AuditPayload, KeywordsPayload, LinkStats, PageScore, PsiPayload,
 } from "@/services/seo/types";
 import { SiteTabs } from "../tabs";
-import { ManageForm, type ManageFormAction } from "../action-form";
+import { ManageForm } from "../action-form";
 import { runSeoScanAction } from "../seo-actions";
 import { Sparkline } from "./sparkline";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import {
+  Card, CardTitle, EmptyState, Stat, StatusBadge, type StatusTone,
+} from "@/components/ui/primitives";
+import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { IconExternal, IconSearch } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -28,11 +34,13 @@ const noteOf = (row: Row): string | null => {
   return p.reason ?? (p.status === "skipped" ? "Not available on this site" : "Failed");
 };
 
+function scoreTone(score: number): StatusTone {
+  return score >= 80 ? "good" : score >= 50 ? "warn" : "bad";
+}
+
 function ScoreBadge({ score }: { score: number | null }) {
-  if (score === null) return <span className="text-sm text-slate-400">—</span>;
-  const cls = score >= 80 ? "bg-green-100 text-green-800"
-    : score >= 50 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800";
-  return <span className={`rounded-full px-2 py-0.5 text-xs ${cls}`}>{score}</span>;
+  if (score === null) return <span className="text-caption tracking-normal text-mid-gray">—</span>;
+  return <StatusBadge tone={scoreTone(score)}>{score}</StatusBadge>;
 }
 
 export default async function SeoPage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,161 +66,231 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
     return typeof d?.score === "number" ? d.score : null;
   });
 
-  const scan = runSeoScanAction.bind(null, id) as unknown as ManageFormAction;
-  const failing = (audit?.findings ?? []).filter((f) => f.status === "fail" || f.status === "warning");
+  const scan = runSeoScanAction.bind(null, id);
+  const failing = (audit?.findings ?? []).filter(
+    (f) => f.status === "fail" || f.status === "warning",
+  );
+  const psiNote = noteOf(latest.psi);
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-      <p className="mb-4 text-sm text-slate-500">SEO &amp; AEO</p>
+    <main>
+      <Breadcrumbs
+        items={[
+          { label: "Sites", href: "/dashboard" },
+          { label: site.name, href: `/sites/${id}` },
+          { label: "SEO & AEO" },
+        ]}
+      />
+      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
       <SiteTabs siteId={id} active="seo" />
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4">
+      <div className={`${cardClass} mb-4 flex flex-wrap items-center justify-between gap-6 p-5`}>
+        <div className="flex flex-wrap items-center gap-6">
           <div>
-            <p className="text-3xl font-bold">{audit?.score ?? "—"}<span className="text-base font-normal text-slate-400">/100</span></p>
-            <p className="text-xs text-slate-500">
-              Rank Math site audit{audit?.grade ? ` · ${audit.grade}` : ""}
+            <p className="text-caption font-medium uppercase text-mid-gray">Site audit</p>
+            <p data-tabular className="mt-1 text-heading font-semibold text-ink">
+              {audit?.score ?? "—"}
+              <span className="text-body-lg font-normal text-mid-gray">/100</span>
+            </p>
+            <p className="mt-1 text-caption tracking-normal text-mid-gray">
+              Rank Math{audit?.grade ? ` · grade ${audit.grade}` : ""}
               {lastRun ? ` · ${new Date(lastRun).toLocaleString()}` : " · never run"}
             </p>
           </div>
           <Sparkline points={trend} label="SEO audit score" />
         </div>
-        <ManageForm action={scan} label="Run SEO scan" pendingLabel="Scanning… (up to a few minutes)"
-          confirmMessage={`Run a full SEO scan on ${site.name} now?`}
-          buttonClassName="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50" />
+        <ManageForm
+          action={scan}
+          label="Run SEO scan"
+          pendingLabel="Scanning…"
+          success="SEO scan complete"
+          variant="primary"
+          icon={<IconSearch size={16} />}
+          confirm={{
+            title: "Run a full SEO scan?",
+            description: `Collects the Rank Math audit, per-page scores, Search Console keywords, AI visibility, and PageSpeed data for ${site.name}. It reads only, and can take a few minutes.`,
+            confirmLabel: "Run scan",
+          }}
+          showInlineError={false}
+        />
       </div>
 
       {psi && (
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
           {[
-            { label: "Performance (mobile)", value: psi.mobile?.performance ?? null },
-            { label: "SEO (mobile)", value: psi.mobile?.seo ?? null },
+            { label: "Performance mobile", value: psi.mobile?.performance ?? null },
+            { label: "SEO mobile", value: psi.mobile?.seo ?? null },
             { label: "Accessibility", value: psi.mobile?.accessibility ?? null },
-            { label: "Performance (desktop)", value: psi.desktop?.performance ?? null },
+            { label: "Performance desktop", value: psi.desktop?.performance ?? null },
           ].map((s) => (
-            <div key={s.label} className="rounded-lg border bg-white p-3 text-center shadow-sm">
-              <p className="text-lg font-semibold">{s.value ?? "—"}</p>
-              <p className="text-xs text-slate-500">{s.label}</p>
-            </div>
+            <Stat
+              key={s.label}
+              label={s.label}
+              value={s.value ?? "—"}
+              tone={s.value === null ? undefined : scoreTone(s.value)}
+            />
           ))}
         </div>
       )}
-      {noteOf(latest.psi) && <p className="mb-4 text-xs text-amber-700">PageSpeed: {noteOf(latest.psi)}</p>}
+      {psiNote && (
+        <p className="mb-4 flex items-center gap-2 text-body text-mid-gray">
+          <StatusBadge tone="warn">PageSpeed</StatusBadge>
+          {psiNote}
+        </p>
+      )}
 
-      <section className="mb-6 rounded-lg border bg-white shadow-sm">
-        <h2 className="border-b px-4 py-3 font-medium">
-          Audit findings {failing.length > 0 && <span className="text-amber-700">({failing.length} need attention)</span>}
-        </h2>
+      <Card className="mb-4">
+        <CardTitle
+          aside={
+            failing.length > 0 ? (
+              <StatusBadge tone="warn">{failing.length} need attention</StatusBadge>
+            ) : audit ? (
+              <StatusBadge tone="good">All passing</StatusBadge>
+            ) : undefined
+          }
+        >
+          Audit findings
+        </CardTitle>
         {!audit ? (
-          <p className="px-4 py-6 text-sm text-slate-500">{noteOf(latest.rankmath_audit) ?? "Run a scan to see audit findings."}</p>
+          <p className="px-5 py-6 text-body text-mid-gray">
+            {noteOf(latest.rankmath_audit) ?? "Run a scan to see audit findings."}
+          </p>
         ) : failing.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-500">No failing tests. {audit.total_tests ?? 0} checks run.</p>
+          <p className="px-5 py-6 text-body text-mid-gray">
+            Nothing failing across {audit.total_tests ?? 0} checks.
+          </p>
         ) : (
-          <ul className="divide-y">
+          <ul className="divide-y divide-hairline">
             {failing.slice(0, 20).map((f) => (
-              <li key={f.test_id} className="px-4 py-3 text-sm">
+              <li key={f.test_id} className="px-5 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{f.title}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${
-                    f.status === "fail" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
-                    {f.status}
-                  </span>
+                  <span className="text-body font-medium text-ink">{f.title}</span>
+                  <StatusBadge tone={f.status === "fail" ? "bad" : "warn"}>{f.status}</StatusBadge>
                 </div>
-                {f.fix_text && <p className="mt-1 text-xs text-slate-600">{f.fix_text}</p>}
+                {f.fix_text && (
+                  <p className="mt-1 max-w-prose text-body text-mid-gray">{f.fix_text}</p>
+                )}
                 {f.kb_link && (
-                  <a href={f.kb_link} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs underline">
+                  <a
+                    href={f.kb_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-caption tracking-normal
+                      text-mid-gray underline transition-colors duration-150 hover:text-ink"
+                  >
                     How to fix
+                    <IconExternal size={12} />
                   </a>
                 )}
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Card>
 
-      <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-lg border bg-white shadow-sm">
-          <h2 className="border-b px-4 py-3 font-medium">Pages needing attention</h2>
+      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card className="overflow-hidden">
+          <CardTitle>Pages needing attention</CardTitle>
           {pages.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-500">{noteOf(latest.rankmath_scores) ?? "No page scores yet."}</p>
+            <p className="px-5 py-6 text-body text-mid-gray">
+              {noteOf(latest.rankmath_scores) ?? "No page scores collected yet."}
+            </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[420px] text-sm">
+              <table className="w-full min-w-[420px] text-body">
                 <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="px-4 py-2">Page</th>
-                    <th className="px-4 py-2">Focus keyword</th>
-                    <th className="px-4 py-2">Score</th>
+                  <tr className={tableHeadClass}>
+                    <th className="px-5 py-3 font-medium">Page</th>
+                    <th className="px-5 py-3 font-medium">Focus keyword</th>
+                    <th className="px-5 py-3 font-medium">Score</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...pages].sort((a, b) => (a.score ?? 101) - (b.score ?? 101)).slice(0, 10).map((p) => (
-                    <tr key={p.post_id} className="border-b last:border-0">
-                      <td className="max-w-64 truncate px-4 py-2" title={p.title}>{p.title}</td>
-                      <td className="max-w-40 truncate px-4 py-2 text-slate-500">{p.keyword ?? "— none —"}</td>
-                      <td className="px-4 py-2"><ScoreBadge score={p.score} /></td>
-                    </tr>
-                  ))}
+                  {[...pages]
+                    .sort((a, b) => (a.score ?? 101) - (b.score ?? 101))
+                    .slice(0, 10)
+                    .map((p) => (
+                      <tr key={p.post_id} className={tableRowClass}>
+                        <td className={`${tableCellClass} max-w-64 truncate text-ink`} title={p.title}>
+                          {p.title}
+                        </td>
+                        <td className={`${tableCellClass} max-w-40 truncate text-mid-gray`}>
+                          {p.keyword ?? "none set"}
+                        </td>
+                        <td className={tableCellClass}>
+                          <ScoreBadge score={p.score} />
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="rounded-lg border bg-white shadow-sm">
-          <h2 className="border-b px-4 py-3 font-medium">Search Console keywords</h2>
+        <Card className="overflow-hidden">
+          <CardTitle>Search Console keywords</CardTitle>
           {!keywords ? (
-            <p className="px-4 py-6 text-sm text-slate-500">{noteOf(latest.keywords) ?? "No keyword data yet."}</p>
+            <p className="px-5 py-6 text-body text-mid-gray">
+              {noteOf(latest.keywords) ?? "No keyword data collected yet."}
+            </p>
           ) : !keywords.connected ? (
-            <p className="px-4 py-6 text-sm text-slate-500">
-              Google Search Console is not connected in Rank Math on this site.
+            <p className="px-5 py-6 text-body text-mid-gray">
+              Google Search Console is not connected in Rank Math on this site. Connect it there
+              and the next scan will pull query data.
             </p>
           ) : keywords.keywords.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-slate-500">No keyword impressions in the last 30 days.</p>
+            <p className="px-5 py-6 text-body text-mid-gray">
+              No impressions recorded in the last 30 days.
+            </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[420px] text-sm">
+              <table className="w-full min-w-[420px] text-body">
                 <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                    <th className="px-4 py-2">Keyword</th>
-                    <th className="px-4 py-2">Clicks</th>
-                    <th className="px-4 py-2">Impr.</th>
-                    <th className="px-4 py-2">Pos.</th>
+                  <tr className={tableHeadClass}>
+                    <th className="px-5 py-3 font-medium">Keyword</th>
+                    <th className="px-5 py-3 font-medium">Clicks</th>
+                    <th className="px-5 py-3 font-medium">Impr.</th>
+                    <th className="px-5 py-3 font-medium">Pos.</th>
                   </tr>
                 </thead>
                 <tbody>
                   {keywords.keywords.slice(0, 10).map((k) => (
-                    <tr key={k.keyword} className="border-b last:border-0">
-                      <td className="max-w-56 truncate px-4 py-2" title={k.keyword}>{k.keyword}</td>
-                      <td className="px-4 py-2">{k.clicks}</td>
-                      <td className="px-4 py-2">{k.impressions}</td>
-                      <td className="px-4 py-2">{k.position.toFixed(1)}</td>
+                    <tr key={k.keyword} className={tableRowClass}>
+                      <td className={`${tableCellClass} max-w-56 truncate text-ink`} title={k.keyword}>
+                        {k.keyword}
+                      </td>
+                      <td className={tableCellClass}>{k.clicks}</td>
+                      <td className={tableCellClass}>{k.impressions}</td>
+                      <td className={tableCellClass}>{k.position.toFixed(1)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        </section>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="rounded-lg border bg-white p-4 shadow-sm">
-          <h2 className="mb-3 font-medium">AI Visibility (AEO)</h2>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card>
+          <CardTitle>AI visibility</CardTitle>
           {!aeo ? (
-            <p className="text-sm text-slate-500">{noteOf(latest.ai_visibility) ?? "No AEO data yet."}</p>
-          ) : aeo.brands.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              No brands tracked yet. Add a brand in Rank Math → AI Visibility to start measuring how AI assistants cite this site.
+            <p className="px-5 py-6 text-body text-mid-gray">
+              {noteOf(latest.ai_visibility) ?? "No AI visibility data collected yet."}
             </p>
+          ) : aeo.brands.length === 0 ? (
+            <EmptyState title="No brands tracked yet">
+              Add a brand in Rank Math → AI Visibility to start measuring how often assistants
+              mention and cite this site.
+            </EmptyState>
           ) : (
-            <ul className="space-y-3 text-sm">
+            <ul className="divide-y divide-hairline px-5">
               {aeo.brands.map((b) => (
-                <li key={b.id} className="flex flex-wrap items-center justify-between gap-2">
+                <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{b.name}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="truncate text-body font-medium text-ink">{b.name}</p>
+                    <p className="text-caption tracking-normal text-mid-gray">
                       {b.mentions ?? 0} mentions · {b.citations ?? 0} citations
                       {b.analysis_status ? ` · ${b.analysis_status}` : ""}
                     </p>
@@ -222,24 +300,39 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
               ))}
             </ul>
           )}
-        </section>
+        </Card>
 
-        <section className="rounded-lg border bg-white p-4 shadow-sm">
-          <h2 className="mb-3 font-medium">Links</h2>
+        <Card>
+          <CardTitle>Links</CardTitle>
           {!links ? (
-            <p className="text-sm text-slate-500">{noteOf(latest.links) ?? "No link report yet."}</p>
+            <p className="px-5 py-6 text-body text-mid-gray">
+              {noteOf(latest.links) ?? "No link report collected yet."}
+            </p>
           ) : (
             <>
-              <dl className="space-y-1 text-sm">
-                <div className="flex justify-between"><dt className="text-slate-500">Internal links</dt><dd>{links.stats.total_internal}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500">External links</dt><dd>{links.stats.total_external}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500">Posts with no internal links</dt><dd>{links.stats.posts_no_internal}</dd></div>
-                <div className="flex justify-between"><dt className="text-slate-500">Posts with no external links</dt><dd>{links.stats.posts_no_external}</dd></div>
+              <dl className="divide-y divide-hairline px-5 text-body">
+                {[
+                  { term: "Internal links", value: links.stats.total_internal },
+                  { term: "External links", value: links.stats.total_external },
+                  { term: "Posts with no internal links", value: links.stats.posts_no_internal },
+                  { term: "Posts with no external links", value: links.stats.posts_no_external },
+                ].map((row) => (
+                  <div key={row.term} className="flex items-baseline justify-between gap-4 py-2.5">
+                    <dt className="text-mid-gray">{row.term}</dt>
+                    <dd data-tabular className="text-ink">
+                      {row.value}
+                    </dd>
+                  </div>
+                ))}
               </dl>
-              {links.upgrade && <p className="mt-3 text-xs text-slate-500">{links.upgrade}</p>}
+              {links.upgrade && (
+                <p className="border-t border-hairline px-5 py-3 text-caption tracking-normal text-mid-gray">
+                  {links.upgrade}
+                </p>
+              )}
             </>
           )}
-        </section>
+        </Card>
       </div>
     </main>
   );

@@ -41,6 +41,8 @@ export async function saveGeoGridConfigAction(
 
 export async function runGeoGridAction(
   siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string; queued?: number }> {
   const user = await requireUser();
   const db = createServiceSupabase();
