@@ -1121,7 +1121,7 @@ reason rather than being silently dropped."
 - Produces:
   - `useSelection(allIds: string[])` → `{ selected, isSelected, toggle, toggleAll, clear, allChecked, someChecked }`
   - `<RowCheckbox checked onChange label />`
-  - `<SelectAllCheckbox allChecked someChecked onChange count />`
+  - `<SelectAllCheckbox allChecked someChecked onChange label? />`
   - `<BulkBar count actions onClear />` where `actions: Array<{ key, label, tone?, onClick, disabled?, disabledReason? }>`
   Consumed by Tasks 7 and 8.
 
