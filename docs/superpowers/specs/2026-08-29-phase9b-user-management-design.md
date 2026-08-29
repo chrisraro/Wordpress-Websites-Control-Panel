@@ -154,8 +154,22 @@ So both halves are needed:
 2. Then the revoke is safe:
 
    ```sql
-   revoke select (mcp_endpoint, wp_username, app_password_encrypted) on sites from authenticated;
+   revoke select on sites from authenticated;
+   grant select (id, name, url, status, client_label, capabilities, created_at, updated_at)
+     on sites to authenticated;
    ```
+
+   This cannot be a column-level revoke on its own (`revoke select (mcp_endpoint,
+   wp_username, app_password_encrypted) on sites from authenticated`). `authenticated`
+   already holds Supabase's default table-level `grant select` on every `public`
+   table, and per PostgreSQL's REVOKE documentation, revoking a privilege from
+   individual columns has no effect when the same privilege is already held at the
+   table level — column grants are additive, not subtractive. A column-level revoke
+   alone is a silent no-op: Postgres warns and commits, the migration is recorded as
+   applied, and `authenticated` keeps reading all three columns unchanged. The fix is
+   to revoke the table-level grant entirely and re-grant exactly the columns that
+   must stay readable — the list above must match `SITE_COLUMNS` exactly, or every
+   client page 500s.
 
 **`SiteRow` must lose the fields too.** Dropping them from the select while the
 type still declares them as `string` leaves every consumer type-checking against

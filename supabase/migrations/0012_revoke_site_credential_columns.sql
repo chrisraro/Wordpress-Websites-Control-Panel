@@ -7,9 +7,26 @@
 -- (readDbFor, src/lib/authz/db.ts), so RLS -- not application code -- is the
 -- actual boundary on that path, and RLS is row-level: it cannot hide a
 -- column from a row a client is otherwise allowed to read. Without this
--- revoke, a client with a grant can pull mcp_endpoint (the site's control
--- channel) and wp_username (half of a login) straight over PostgREST with
--- their own JWT, regardless of what the UI renders.
+-- revoke, a client with a grant can pull mcp_endpoint and wp_username
+-- straight over PostgREST with their own JWT, regardless of what the UI
+-- renders.
+--
+-- What this actually protects, column by column:
+--   * wp_username is genuinely non-derivable from anything else `sites`
+--     exposes, and app_password_encrypted genuinely matters -- it is the
+--     encrypted WordPress application password. Both are worth revoking
+--     for confidentiality.
+--   * mcp_endpoint is NOT a secret by construction: mcpEndpointFor(url)
+--     (src/services/sites/service.ts) is simply
+--     `url.replace(/\/+$/, "") + "/wp-json/mcp/novamira"`, addSite always
+--     stores exactly that, and `url` itself stays in SITE_COLUMNS and stays
+--     readable by any client with a grant. For every site created through
+--     addSite, the endpoint is one string concatenation away from `url` --
+--     revoking it here is defence-in-depth and consistency (it keeps the
+--     column set that PostgREST will serve in step with the column set the
+--     application actually reads), not confidentiality. Do not treat this
+--     revoke as having closed an information disclosure for mcp_endpoint;
+--     it did not, because there was very little to close.
 --
 -- Apply this migration ONLY AFTER the code that stops selecting these
 -- columns is deployed (the commit that removed mcp_endpoint and wp_username
@@ -28,6 +45,80 @@
 -- `authenticated` outright, rather than relying on no application code path
 -- ever selecting it for that role.
 --
+-- Why this cannot be a column-level revoke (the form this migration used to
+-- use): `authenticated` already holds an unqualified, table-level
+-- `grant select on sites` -- not from any migration in this repo, but from
+-- Supabase's default `grant all on all tables in schema public to anon,
+-- authenticated, service_role`, applied when the table was created. Per
+-- PostgreSQL's REVOKE documentation ("Notes"): "if a role has been granted
+-- privileges on a table, then revoking the same privileges from individual
+-- columns will have no effect" -- column privileges are additive on top of
+-- table privileges, never subtractive from them. `revoke select
+-- (mcp_endpoint, wp_username, app_password_encrypted) on sites from
+-- authenticated` is therefore a silent no-op against that table-level
+-- grant: Postgres emits `WARNING: no privileges could be revoked for
+-- column ...`, commits anyway, and the migration is recorded as applied
+-- while a client with a grant keeps reading all three columns unchanged.
+-- The only way to actually remove a column from what `authenticated` can
+-- read is to revoke the table-level grant entirely and re-grant only the
+-- columns that must stay readable, which is what the two statements below
+-- do.
+--
+-- The two statements must run together, in this exact order, as the single
+-- implicit transaction this migration file already executes as (the same
+-- transaction scope `set local search_path` below relies on, same as every
+-- sibling migration that sets it). The revoke removes every column
+-- privilege `authenticated` holds on `sites`, including ones this migration
+-- does not otherwise mention; the grant immediately restores exactly the
+-- safe subset. Splitting them across migrations, or running them out of
+-- order, leaves a window where `authenticated` has no read access to
+-- `sites` at all.
+--
+-- This is the first version of this migration that does anything, which
+-- means it is also the first version where the deploy-order hazard above
+-- (code before revoke) is real -- the no-op version could not have broken
+-- a client page no matter when it ran, because it never actually changed
+-- what PostgREST would serve.
+--
+-- The granted column list below must exactly match SITE_COLUMNS in
+-- src/services/sites/repo.ts. If the two ever diverge -- SITE_COLUMNS
+-- gains a column this grant does not list -- PostgREST fails the whole
+-- query for every client-role user the moment that code ships, because a
+-- column present in the select list but not in the grant behaves, from
+-- PostgREST's perspective, exactly like a column revoked out from under an
+-- existing select: the whole query 500s, not just that column. This is a
+-- fail-closed maintenance trap by design (a forgotten grant fails loudly
+-- instead of leaking a new column silently), but it means every future
+-- change to SITE_COLUMNS must be paired with a change here in the same
+-- deploy. tests/sites-repo-columns.test.ts asserts the two lists are the
+-- same set so this cannot silently drift.
+--
+-- Rollback: reverting the code half of this deploy (SITE_COLUMNS/SiteRow)
+-- while this migration stays applied re-adds mcp_endpoint/wp_username to
+-- SITE_COLUMNS, which `authenticated` no longer has any privilege on --
+-- PostgREST then fails the whole query for every client-role user on every
+-- page that calls listSites/getSite: /dashboard, /sites/[id] and all six of
+-- its tabs, /marketplace, /marketplace/themes. Staff are unaffected, since
+-- every server-side code path staff exercise uses the service-role client,
+-- which carries bypassrls and ignores grants entirely. If this deploy is
+-- reverted, this migration must be reverted with it by running:
+--
+--   grant select on sites to authenticated;
+--
+-- the table-level form, restoring the original blanket grant. A
+-- column-level re-grant of only the three columns named above would leave
+-- every other column on `sites` (id, name, url, status, client_label,
+-- capabilities, created_at, updated_at) ungranted, which breaks
+-- SITE_COLUMNS immediately and far more broadly than doing nothing.
+--
 -- Written to be re-run safely: `revoke` on a privilege that is already
--- absent is a no-op in Postgres, not an error.
-revoke select (mcp_endpoint, wp_username, app_password_encrypted) on sites from authenticated;
+-- absent, and `grant` on a privilege already held, are both no-ops in
+-- Postgres, not errors.
+
+set local search_path = public;
+
+revoke select on sites from authenticated;
+
+grant select (
+  id, name, url, status, client_label, capabilities, created_at, updated_at
+) on sites to authenticated;
