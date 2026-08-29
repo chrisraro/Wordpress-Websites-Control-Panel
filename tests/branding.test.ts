@@ -49,7 +49,15 @@ describe("branding: the product name appears where a user actually sees it", () 
 
   it("is the heading on the login page", () => {
     const source = readFileSync(join(SRC_DIR, "app", "login", "page.tsx"), "utf8");
-    expect(source).toContain(`<h1 className="text-heading-sm font-semibold text-ink">${PRODUCT_NAME}</h1>`);
+    // Matches the name inside an <h1> regardless of how that <h1> is styled.
+    // Pinning the exact class string instead would couple this to typography
+    // and break on any restyle, while still not testing the thing that
+    // matters — that the product name is the page's heading. It has to be:
+    // the brand panel is desktop-only, so on a phone this heading is the only
+    // thing naming what the visitor is signing into. Demoting it to a <p>
+    // still fails here.
+    const h1 = new RegExp(`<h1[^>]*>\\s*${PRODUCT_NAME}\\s*</h1>`);
+    expect(source).toMatch(h1);
   });
 
   it("is the wordmark in both the desktop sidebar and the mobile sheet", () => {
