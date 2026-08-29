@@ -113,7 +113,10 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
                         <div className="flex flex-wrap items-start justify-end gap-2">
                           {r.share_token && (
                             <>
-                              <CopyLinkButton path={`/r/${r.share_token}`} />
+                              {/* secret: this URL is a revocable bearer credential for the
+                                  report — the toast must never echo it back (see docs/superpowers/
+                                  sdd/task-4-report.md, Fix round 1, Finding 1). */}
+                              <CopyLinkButton path={`/r/${r.share_token}`} secret />
                               {canManageReports && (
                                 <ManageForm
                                   action={revoke}

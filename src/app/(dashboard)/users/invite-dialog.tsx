@@ -112,7 +112,10 @@ export function InviteDialog({ sites }: { sites: { id: string; name: string }[] 
                   <code className="min-w-0 flex-1 truncate text-caption tracking-normal text-ink">
                     {success.inviteLink}
                   </code>
-                  <CopyValueButton value={success.inviteLink} label="Copy link" />
+                  {/* secret: this is a bearer credential — whoever holds it can claim the
+                      account, so the toast must never echo it back (see docs/superpowers/
+                      sdd/task-4-report.md, Fix round 1, Finding 1). */}
+                  <CopyValueButton value={success.inviteLink} label="Copy link" secret />
                 </div>
                 <p className={hintClass}>
                   Whoever holds this link can claim the account — send it somewhere only the
@@ -180,8 +183,8 @@ export function InviteDialog({ sites }: { sites: { id: string; name: string }[] 
             </div>
 
             {needsSites && (
-              <div className="space-y-1.5">
-                <label className={labelClass}>Sites</label>
+              <fieldset className="space-y-1.5">
+                <legend className={labelClass}>Sites</legend>
                 {sites.length === 0 ? (
                   <p className={hintClass}>
                     No sites are connected yet — connect one before inviting a client.
@@ -211,7 +214,7 @@ export function InviteDialog({ sites }: { sites: { id: string; name: string }[] 
                     </p>
                   </>
                 )}
-              </div>
+              </fieldset>
             )}
 
             <div aria-live="polite" className="min-h-5">

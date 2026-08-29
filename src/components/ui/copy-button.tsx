@@ -10,8 +10,8 @@ import { useToast } from "./toast";
  * localhost is a localhost link and one copied from production is shareable.
  */
 export function CopyLinkButton({
-  path, label = "Copy link", size = "sm",
-}: { path: string; label?: string; size?: ButtonSize }) {
+  path, label = "Copy link", size = "sm", secret = false,
+}: { path: string; label?: string; size?: ButtonSize; secret?: boolean }) {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
@@ -20,7 +20,15 @@ export function CopyLinkButton({
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      toast({ tone: "success", title: "Link copied", description: url });
+      // `secret` links are bearer credentials (e.g. a report share token) —
+      // echoing them into the toast would put them in a fixed-position,
+      // selectable element that lingers for several seconds outside the
+      // dialog/page the admin is actually looking at.
+      toast(
+        secret
+          ? { tone: "success", title: "Link copied" }
+          : { tone: "success", title: "Link copied", description: url },
+      );
       // Long enough to register, short enough that the button is ready again
       // before a second click.
       setTimeout(() => setCopied(false), 1800);
@@ -47,8 +55,8 @@ export function CopyLinkButton({
  * URL from a path, which would be the wrong job for a plain value.
  */
 export function CopyValueButton({
-  value, label = "Copy", size = "sm",
-}: { value: string; label?: string; size?: ButtonSize }) {
+  value, label = "Copy", size = "sm", secret = false,
+}: { value: string; label?: string; size?: ButtonSize; secret?: boolean }) {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
@@ -56,7 +64,15 @@ export function CopyValueButton({
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      toast({ tone: "success", title: "Copied", description: value });
+      // `secret` values are bearer credentials (e.g. the one-time invite
+      // link) — echoing them into the toast would put them in a
+      // fixed-position, selectable element that lingers for several seconds
+      // outside the dialog the admin is actually looking at.
+      toast(
+        secret
+          ? { tone: "success", title: "Copied" }
+          : { tone: "success", title: "Copied", description: value },
+      );
       setTimeout(() => setCopied(false), 1800);
     } catch {
       toast({

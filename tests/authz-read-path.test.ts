@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 // Phase 9a's whole point is that a client's reads go through `readDbFor`,
 // which routes them through the user-scoped Supabase client so RLS (not
@@ -36,7 +36,13 @@ const pageFiles = findPageFiles(DASHBOARD_DIR);
 // than by RLS (see docs/superpowers/specs/2026-08-29-phase9b-user-management
 // -design.md §2.1 and §7). It is never reachable from a user's own session.
 const USERS_DIR = join(DASHBOARD_DIR, "users");
-const rlsGovernedPageFiles = pageFiles.filter((f) => !f.startsWith(USERS_DIR));
+// Match on a path boundary, not a character prefix: `f.startsWith(USERS_DIR)`
+// would also exclude a sibling directory that merely begins with "users"
+// (e.g. "users-export/", "userscript/") without ever checking it — exactly
+// the regression this test exists to catch.
+const rlsGovernedPageFiles = pageFiles.filter(
+  (f) => f !== join(USERS_DIR, "page.tsx") && !f.startsWith(USERS_DIR + sep),
+);
 
 describe("dashboard page reads stay on the RLS-governed path", () => {
   it("found at least one page.tsx to check (guards against a rotted glob)", () => {
