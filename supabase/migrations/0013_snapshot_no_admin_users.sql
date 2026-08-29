@@ -51,6 +51,15 @@
 
 set local search_path = public;
 
+-- The strip and the `add constraint` below are two statements, each with its
+-- own READ COMMITTED snapshot. If the old collector is somehow still live when
+-- this runs -- an operator applying out of the documented order -- it can
+-- insert a fresh admin_users-carrying row between them, and the constraint's
+-- validation scan aborts the transaction. This lock blocks concurrent
+-- INSERT/UPDATE on site_snapshots for the few milliseconds the two statements
+-- take, so the table cannot change underneath them. It does not block reads.
+lock table site_snapshots in share row exclusive mode;
+
 update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';
 
 alter table site_snapshots
