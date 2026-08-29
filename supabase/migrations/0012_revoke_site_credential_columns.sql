@@ -67,12 +67,32 @@
 -- The two statements must run together, in this exact order, as the single
 -- implicit transaction this migration file already executes as (the same
 -- transaction scope `set local search_path` below relies on, same as every
--- sibling migration that sets it). The revoke removes every column
--- privilege `authenticated` holds on `sites`, including ones this migration
--- does not otherwise mention; the grant immediately restores exactly the
--- safe subset. Splitting them across migrations, or running them out of
--- order, leaves a window where `authenticated` has no read access to
--- `sites` at all.
+-- sibling migration that sets it). The revoke clears the blanket
+-- table-level grant; the grant immediately restores exactly the safe
+-- subset. Splitting them across migrations, or running them out of order,
+-- leaves a window where `authenticated` has no read access to `sites` at
+-- all.
+--
+-- What the revoke below does NOT do -- this is the mirror image of the
+-- no-op described above, and the same trap in the other direction. Table
+-- privileges (pg_class.relacl) and column privileges (pg_attribute.attacl)
+-- are independent stores. `revoke select on sites from authenticated`
+-- clears only the table-level entry; it cannot touch a column-level grant
+-- someone made separately. So re-running this file is NOT a way to reset
+-- column privileges to the safe subset. If anyone ever runs an ad hoc
+-- column-level grant to `authenticated` in the SQL editor while debugging
+-- -- say, granting select on wp_username -- and forgets to undo it, that
+-- column stays readable by every client with a site grant, and re-applying
+-- this migration will not remove it: the revoke misses it and the grant
+-- never mentions it. The
+-- only remedy is an explicit column-level revoke of that column from
+-- `authenticated`, found by auditing pg_attribute.attacl for `sites`.
+--
+-- (Both examples above are deliberately written in prose rather than as
+-- runnable SQL: the parity test in tests/sites-repo-columns.test.ts
+-- extracts this file's granted column list by regex, and a second
+-- grant-shaped statement anywhere in the file -- comment or not -- would
+-- match it first.)
 --
 -- This is the first version of this migration that does anything, which
 -- means it is also the first version where the deploy-order hazard above
