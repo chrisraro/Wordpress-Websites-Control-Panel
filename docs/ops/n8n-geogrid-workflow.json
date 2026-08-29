@@ -33,7 +33,7 @@
     },
     {
       "parameters": {
-        "onError": "continueRegularOutput",
+        "onError": "continueErrorOutput",
         "jsCode": "// Replace this node with a real rank lookup (DataForSEO, SerpApi, ...).\n//\n// Contract (fix/geogrid-partial-runs): each item must output\n// { idx, rank, measured }. `rank` is 1-20 or null. `measured` is true when\n// the lookup for this point actually completed (regardless of whether it\n// ranked) and false when it failed for this point alone -- a per-point\n// failure must NOT throw out of this node, because that would fail the\n// whole run for one bad point. Catch per-point errors here and emit\n// { idx, rank: null, measured: false } for that point instead.\n//\n// `error` at the top level (see \"Post ranks back\" below) is reserved for a\n// total failure -- nothing could be measured at all (e.g. the ranking API\n// was unreachable for the whole run). Do not set it when even one point\n// succeeded; a body carrying both `ranks` and `error` is treated upstream as\n// the partial result it is, but every point you *can* report should be\n// reported via `ranks` rather than folded into `error`.\nreturn $input.all().map((item) => {\n  try {\n    // ... real lookup for item.json.idx / item.json.lat / item.json.lng ...\n    const rank = null;\n    return { json: { idx: item.json.idx, rank, measured: true } };\n  } catch (e) {\n    return { json: { idx: item.json.idx, rank: null, measured: false } };\n  }\n});"
       },
       "id": "lookup",
@@ -48,7 +48,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Collect every per-point result into a single ranks array. Each entry\n// keeps its idx, rank, and measured flag -- see the contract note on the\n// lookup node above.\nreturn [{\n  json: {\n    data: $input.all().map((i) => ({\n      idx: i.json.idx,\n      rank: i.json.rank ?? null,\n      measured: i.json.measured !== false,\n    })),\n  },\n}];"
+        "jsCode": "// Collect every per-point result into a single ranks array. Each entry\n// keeps its idx, rank, and measured flag -- see the contract note on the\n// lookup node above.\n//\n// `measured: i.json.measured === true` (not `!== false`) is deliberate: with\n// onError: continueErrorOutput on the lookup node, this branch only ever\n// receives items that came out of its *regular* output, so in principle\n// every item here already succeeded. But defaulting to false rather than\n// true means an item that reaches this node without an explicit\n// `measured: true` (e.g. a future lookup-node edit that forwards an item\n// missing the field) fails closed as unmeasured instead of silently being\n// recorded as a confirmed non-rank.\nreturn [{\n  json: {\n    data: $input.all().map((i) => ({\n      idx: i.json.idx,\n      rank: i.json.rank ?? null,\n      measured: i.json.measured === true,\n    })),\n  },\n}];"
       },
       "id": "aggregate",
       "name": "Collect ranks",
@@ -143,6 +143,13 @@
         [
           {
             "node": "Collect ranks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post total failure",
             "type": "main",
             "index": 0
           }
