@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bootstrap:admin": "node --experimental-strip-types scripts/bootstrap-admin.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
