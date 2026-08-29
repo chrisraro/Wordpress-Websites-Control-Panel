@@ -11,6 +11,27 @@ import { runChecksums } from "./checksums";
 import { computeGrade, type Grade, type SecurityCheck, type Severity } from "./types";
 import type { SecurityRepo } from "./repo";
 
+// The feed refreshes on a nightly cadence (pg_cron's wp-panel-enqueue, once
+// at 02:00 UTC). Half that cadence is long enough that a single scheduler
+// firing once a night never gets skipped here, but short enough to catch any
+// same-night double-trigger (the exact bug this constant defends against —
+// see docs/ops/scheduling.md) without ever suppressing a legitimate refresh.
+const VULN_FEED_FRESH_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// A scan grading against a feed this old is grading against data that is
+// meaningfully out of date: the nightly job should touch the feed at least
+// once a day, so one full day plus enough slack to not fire on an
+// occasionally-late run (e.g. a Vercel cold start or a transient Wordfence
+// error that still recovers on the next attempt) means at least one full
+// nightly refresh was missed outright.
+const VULN_FEED_STALE_WARN_MS = 36 * 60 * 60 * 1000; // 36 hours
+
+function formatAge(ms: number): string {
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 export interface ScanDeps {
   sites: SitesRepo;
   snapshots: SnapshotsRepo;
@@ -46,6 +67,18 @@ export async function securityScan(
       const open = await deps.security.openVulns(siteId);
       vulnSeverities = open.map((v) => v.severity);
       vulnCount = open.length;
+
+      // The feed existing isn't enough: a scan against a feed that stopped
+      // refreshing days ago produces a confidently-wrong grade, checked
+      // against vulnerabilities the feed doesn't know about yet.
+      const newest = await deps.security.newestFeedUpdatedAt();
+      const ageMs = newest ? Date.now() - new Date(newest).getTime() : null;
+      if (ageMs !== null && ageMs > VULN_FEED_STALE_WARN_MS) {
+        checks.push({
+          check_id: "wordfence_feed", result: "warn",
+          details: { message: `Vulnerability feed is stale — last refreshed ${formatAge(ageMs)} ago.` },
+        });
+      }
     } else {
       checks.push({
         check_id: "wordfence_feed", result: "warn",
@@ -88,6 +121,15 @@ export async function refreshVulnFeed(
 ): Promise<{ updated: number; skipped: boolean }> {
   const key = getOptionalEnv("WORDFENCE_API_KEY");
   if (!key) return { updated: 0, skipped: true };
+
+  // Defense in depth against any future double-trigger (the primary fix is
+  // removing the second scheduler — see docs/ops/scheduling.md): if the feed
+  // was refreshed within the window, don't spend a Wordfence request at all.
+  const newest = await security.newestFeedUpdatedAt();
+  if (newest && Date.now() - new Date(newest).getTime() < VULN_FEED_FRESH_MS) {
+    return { updated: 0, skipped: true };
+  }
+
   const entries = await fetchWordfenceFeed(key, fetchImpl ?? fetch);
   const updated = await security.replaceFeed(entries);
   return { updated, skipped: false };

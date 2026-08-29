@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseWordfenceFeed, fetchWordfenceFeed } from "@/lib/adapters/vulnfeed/wordfence";
+import { NonRetryableError } from "@/services/jobs/service";
 
 // Shape per Wordfence Intelligence vulnerability feed docs (v2/v3 record format).
 const SAMPLE = {
@@ -74,5 +75,17 @@ describe("fetchWordfenceFeed", () => {
   it("throws when a 200 response parses to zero entries (shape drift guard)", async () => {
     const fetchImpl = (async () => new Response("{}", { status: 200 })) as typeof fetch;
     await expect(fetchWordfenceFeed("k", fetchImpl)).rejects.toThrow(/0 entries/);
+  });
+
+  it("raises a NonRetryableError on 429 so the retry ladder isn't burned", async () => {
+    const fetchImpl = (async () => new Response("{}", { status: 429 })) as typeof fetch;
+    await expect(fetchWordfenceFeed("k", fetchImpl)).rejects.toBeInstanceOf(NonRetryableError);
+    await expect(fetchWordfenceFeed("k", fetchImpl)).rejects.toThrow(/429/);
+  });
+
+  it("names the Retry-After header in the 429 message when present", async () => {
+    const fetchImpl = (async () =>
+      new Response("{}", { status: 429, headers: { "Retry-After": "3600" } })) as typeof fetch;
+    await expect(fetchWordfenceFeed("k", fetchImpl)).rejects.toThrow(/Retry-After: 3600/);
   });
 });

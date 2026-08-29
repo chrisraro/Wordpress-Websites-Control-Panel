@@ -30,13 +30,19 @@ const FEED: FeedEntry[] = [{
   fixed_in: "5.4",
 }];
 
-function fakeSecurityRepo(feed: FeedEntry[]) {
+function fakeSecurityRepo(feed: FeedEntry[], feedUpdatedAt: string | null = null) {
   const state = {
     feed, synced: [] as unknown[], inserted: [] as Array<{ runAt: string; checks: SecurityCheck[] }>,
+    feedUpdatedAt,
   };
   const repo: SecurityRepo = {
-    async replaceFeed(entries) { state.feed = entries; return entries.length; },
+    async replaceFeed(entries) {
+      state.feed = entries;
+      state.feedUpdatedAt = new Date().toISOString();
+      return entries.length;
+    },
     async hasFeedEntries() { return state.feed.length > 0; },
+    async newestFeedUpdatedAt() { return state.feedUpdatedAt; },
     async feedEntriesForSlugs() { return state.feed; },
     async syncSiteVulns(_s, matches) { state.synced = matches; },
     async openVulns() {
@@ -139,6 +145,36 @@ describe("securityScan", () => {
     await expect(securityScan(deps, "site-1")).rejects.toThrow("unreachable");
     expect(f.scanResults).toEqual([false]);
   });
+
+  it("records a wordfence_feed warn check when the cached feed is stale", async () => {
+    const staleAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(); // 48h old
+    const sec = fakeSecurityRepo(FEED, staleAt);
+    const f = fakeSites();
+    f.setCreds(await encryptSecret("pass"));
+    const deps: ScanDeps = {
+      sites: f.sites, snapshots: snapshotsWith(INV), adminUsers: fakeAdminUsers(), security: sec.repo,
+      mcp: async () => phpClient(), fetchImpl: okFetch,
+    };
+    const res = await securityScan(deps, "site-1");
+    expect(res.vulnCount).toBe(1);
+    const warn = sec.state.inserted[0].checks.find((c) => c.check_id === "wordfence_feed");
+    expect(warn?.result).toBe("warn");
+    expect((warn?.details as { message: string }).message).toMatch(/stale.*2d ago|stale.*48h ago/i);
+  });
+
+  it("does not warn when the cached feed is fresh", async () => {
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h old
+    const sec = fakeSecurityRepo(FEED, freshAt);
+    const f = fakeSites();
+    f.setCreds(await encryptSecret("pass"));
+    const deps: ScanDeps = {
+      sites: f.sites, snapshots: snapshotsWith(INV), adminUsers: fakeAdminUsers(), security: sec.repo,
+      mcp: async () => phpClient(), fetchImpl: okFetch,
+    };
+    const res = await securityScan(deps, "site-1");
+    expect(res.vulnCount).toBe(1);
+    expect(sec.state.inserted[0].checks.find((c) => c.check_id === "wordfence_feed")).toBeUndefined();
+  });
 });
 
 describe("refreshVulnFeed", () => {
@@ -160,5 +196,32 @@ describe("refreshVulnFeed", () => {
     const res = await refreshVulnFeed(sec.repo, fetchImpl);
     expect(res).toEqual({ updated: 1, skipped: false });
     expect(sec.state.feed[0].software_slug).toBe("x");
+  });
+
+  it("skips the fetch entirely when the cached feed is still fresh", async () => {
+    process.env.WORDFENCE_API_KEY = "k";
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h old
+    const sec = fakeSecurityRepo(FEED, freshAt);
+    let called = false;
+    const fetchImpl = (async () => { called = true; return new Response("{}", { status: 200 }); }) as typeof fetch;
+    const res = await refreshVulnFeed(sec.repo, fetchImpl);
+    expect(res).toEqual({ updated: 0, skipped: true });
+    expect(called).toBe(false);
+  });
+
+  it("fetches again once the cached feed has aged past the freshness window", async () => {
+    process.env.WORDFENCE_API_KEY = "k";
+    const oldAt = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(); // 13h old
+    const sec = fakeSecurityRepo(FEED, oldAt);
+    const feedJson = {
+      "u1": { id: "u1", title: "T", cve: null, cvss: { score: 5 }, software: [{
+        type: "plugin", slug: "x",
+        affected_versions: { "r": { from_version: "*", from_inclusive: true, to_version: "1.0", to_inclusive: true } },
+        patched_versions: ["1.1"],
+      }]},
+    };
+    const fetchImpl = (async () => new Response(JSON.stringify(feedJson), { status: 200 })) as typeof fetch;
+    const res = await refreshVulnFeed(sec.repo, fetchImpl);
+    expect(res).toEqual({ updated: 1, skipped: false });
   });
 });

@@ -1,4 +1,5 @@
 import type { VulnRange } from "@/lib/version";
+import { NonRetryableError } from "@/services/jobs/service";
 
 export interface FeedEntry {
   id: string;
@@ -67,6 +68,16 @@ export async function fetchWordfenceFeed(
   const res = await fetchImpl(WORDFENCE_SCANNER_URL, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (res.status === 429) {
+    // A 429 means the key is valid but the window is spent — retrying at the
+    // ladder's 60s/300s cadence cannot succeed (Wordfence's rate-limit window
+    // is hours) and only spends quota the next legitimate attempt needs.
+    // Surface Retry-After (if the API sent one) so an operator checking
+    // jobs.last_error knows when it's worth trying again by hand.
+    const retryAfter = res.headers.get("retry-after");
+    const wait = retryAfter ? ` (Retry-After: ${retryAfter})` : "";
+    throw new NonRetryableError(`Wordfence feed rate limited: HTTP 429${wait}`);
+  }
   if (!res.ok) throw new Error(`Wordfence feed request failed: HTTP ${res.status}`);
   const entries = parseWordfenceFeed(await res.json());
   if (entries.length === 0) {

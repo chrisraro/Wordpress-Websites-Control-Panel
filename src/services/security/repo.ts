@@ -13,6 +13,8 @@ export interface OpenVuln extends VulnMatch {
 export interface SecurityRepo {
   replaceFeed(entries: FeedEntry[]): Promise<number>;
   hasFeedEntries(): Promise<boolean>;
+  /** Newest `updated_at` across the cached feed, or null when it's empty. */
+  newestFeedUpdatedAt(): Promise<string | null>;
   feedEntriesForSlugs(keys: Array<{ type: string; slug: string }>): Promise<FeedEntry[]>;
   syncSiteVulns(siteId: string, matches: VulnMatch[]): Promise<void>;
   openVulns(siteId: string): Promise<OpenVuln[]>;
@@ -67,6 +69,12 @@ export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
       const { count, error } = await db.from("vuln_feed").select("id", { head: true, count: "exact" });
       if (error) throw new Error(`vuln_feed count failed: ${error.message}`, { cause: error });
       return (count ?? 0) > 0;
+    },
+    async newestFeedUpdatedAt() {
+      const { data, error } = await db.from("vuln_feed").select("updated_at")
+        .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      if (error) throw new Error(`vuln_feed newestFeedUpdatedAt failed: ${error.message}`, { cause: error });
+      return (data?.updated_at as string) ?? null;
     },
     async feedEntriesForSlugs(keys) {
       const slugs = [...new Set(keys.map((k) => k.slug))];
