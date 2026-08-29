@@ -25,6 +25,13 @@ select cron.schedule('wp-panel-process', '* * * * *', $$
 $$);
 
 -- nightly snapshot fan-out at 02:00 UTC
+--
+-- NOTE: refreshVulnFeed's freshness guard (src/services/security/scan.ts,
+-- VULN_FEED_FRESH_MS) is hard-coded to 12h on the assumption this fires
+-- once every 24h. Change this cadence to anything more frequent than every
+-- 12h (e.g. '0 */6 * * *') and three of every four runs will silently skip
+-- the Wordfence fetch instead of refreshing the feed. If you change this
+-- schedule, update VULN_FEED_FRESH_MS to match.
 select cron.schedule('wp-panel-enqueue', '0 2 * * *', $$
   select net.http_post(
     url := 'APP_URL/api/cron/enqueue',

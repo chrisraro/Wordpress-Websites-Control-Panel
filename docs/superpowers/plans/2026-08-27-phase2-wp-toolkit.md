@@ -946,6 +946,10 @@ export const GET = run;
 ```
 (Vercel cron sends GET with `Authorization: Bearer $CRON_SECRET` when the `CRON_SECRET` env var is set in the project — the auth helper accepts that form. pg_cron carries per-minute processing; this daily entry is only a backstop.)
 
+> **Superseded (2026-08-29):** this backstop cron double-ran the nightly
+> fan-out in production — `vercel.json` must declare no `crons` entry; see
+> `docs/ops/scheduling.md`. Left here only as history of what not to rebuild.
+
 `docs/ops/scheduling.md`:
 ```markdown
 # Scheduling (pg_cron + pg_net)
