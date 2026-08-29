@@ -27,9 +27,9 @@ const VULN_FEED_FRESH_MS = 12 * 60 * 60 * 1000; // 12 hours
 const VULN_FEED_STALE_WARN_MS = 36 * 60 * 60 * 1000; // 36 hours
 
 function formatAge(ms: number): string {
-  const hours = Math.round(ms / (60 * 60 * 1000));
+  const hours = Math.floor(ms / (60 * 60 * 1000));
   if (hours < 48) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 export interface ScanDeps {
@@ -74,8 +74,13 @@ export async function securityScan(
       const newest = await deps.security.newestFeedUpdatedAt();
       const ageMs = newest ? Date.now() - new Date(newest).getTime() : null;
       if (ageMs !== null && ageMs > VULN_FEED_STALE_WARN_MS) {
+        // A distinct check_id from the absent-feed case below: "never set up"
+        // and "was working, now four days dead" need different remediation,
+        // and the security page renders check_id -> label with no access to
+        // `details`, so collapsing them into one id makes them indistinguishable
+        // on screen and unqueryable apart in security_checks.
         checks.push({
-          check_id: "wordfence_feed", result: "warn",
+          check_id: "wordfence_feed_stale", result: "warn",
           details: { message: `Vulnerability feed is stale — last refreshed ${formatAge(ageMs)} ago.` },
         });
       }
@@ -117,7 +122,7 @@ export async function securityScan(
 }
 
 export async function refreshVulnFeed(
-  security: SecurityRepo, fetchImpl?: typeof fetch,
+  security: SecurityRepo, fetchImpl?: typeof fetch, opts: { allowSkip: boolean } = { allowSkip: true },
 ): Promise<{ updated: number; skipped: boolean }> {
   const key = getOptionalEnv("WORDFENCE_API_KEY");
   if (!key) return { updated: 0, skipped: true };
@@ -125,9 +130,24 @@ export async function refreshVulnFeed(
   // Defense in depth against any future double-trigger (the primary fix is
   // removing the second scheduler — see docs/ops/scheduling.md): if the feed
   // was refreshed within the window, don't spend a Wordfence request at all.
-  const newest = await security.newestFeedUpdatedAt();
-  if (newest && Date.now() - new Date(newest).getTime() < VULN_FEED_FRESH_MS) {
-    return { updated: 0, skipped: true };
+  //
+  // But this guard must never fire on a retry. `replaceFeed` upserts in
+  // chunks of 500 and stamps `updated_at = now()` on every row it writes as
+  // it goes, so a run that errors partway through (statement timeout,
+  // transient 5xx on chunk 21 of 30) leaves `newestFeedUpdatedAt()` reporting
+  // a *fresh* timestamp even though the tail of the feed still holds
+  // yesterday's rows. If the retry then honoured this guard, it would see
+  // that fresh timestamp, skip re-fetching, and report `skipped: true` —
+  // turning a partial failure into a reported success, silently, with the
+  // stale-feed warn unable to catch it either (the newest row really is
+  // fresh). A retry is recovery from a failure this same job just had, not
+  // duplicate work from a double-trigger, so it must always refetch.
+  // Callers pass `allowSkip` explicitly; see handlers.ts's vuln_feed_refresh.
+  if (opts.allowSkip) {
+    const newest = await security.newestFeedUpdatedAt();
+    if (newest && Date.now() - new Date(newest).getTime() < VULN_FEED_FRESH_MS) {
+      return { updated: 0, skipped: true };
+    }
   }
 
   const entries = await fetchWordfenceFeed(key, fetchImpl ?? fetch);

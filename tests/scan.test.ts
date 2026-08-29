@@ -146,8 +146,10 @@ describe("securityScan", () => {
     expect(f.scanResults).toEqual([false]);
   });
 
-  it("records a wordfence_feed warn check when the cached feed is stale", async () => {
-    const staleAt = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(); // 48h old
+  it("records a wordfence_feed_stale warn check when the cached feed is stale", async () => {
+    // 60h deliberately, not 48h: Math.round(60h/24) would print "3d" and
+    // overstate the age; formatAge must Math.floor so 60h prints "2d ago".
+    const staleAt = new Date(Date.now() - 60 * 60 * 60 * 1000).toISOString(); // 60h old
     const sec = fakeSecurityRepo(FEED, staleAt);
     const f = fakeSites();
     f.setCreds(await encryptSecret("pass"));
@@ -157,9 +159,16 @@ describe("securityScan", () => {
     };
     const res = await securityScan(deps, "site-1");
     expect(res.vulnCount).toBe(1);
-    const warn = sec.state.inserted[0].checks.find((c) => c.check_id === "wordfence_feed");
+    // Distinct check_id from the absent-feed case: the page renders
+    // check_id -> label with no access to `details`, so these must be
+    // separately queryable/displayable — see CHECK_LABELS in
+    // src/app/(dashboard)/sites/[id]/security/page.tsx.
+    const warn = sec.state.inserted[0].checks.find((c) => c.check_id === "wordfence_feed_stale");
     expect(warn?.result).toBe("warn");
-    expect((warn?.details as { message: string }).message).toMatch(/stale.*2d ago|stale.*48h ago/i);
+    expect(sec.state.inserted[0].checks.find((c) => c.check_id === "wordfence_feed")).toBeUndefined();
+    expect((warn?.details as { message: string }).message).toBe(
+      "Vulnerability feed is stale — last refreshed 2d ago.",
+    );
   });
 
   it("does not warn when the cached feed is fresh", async () => {
@@ -223,5 +232,50 @@ describe("refreshVulnFeed", () => {
     const fetchImpl = (async () => new Response(JSON.stringify(feedJson), { status: 200 })) as typeof fetch;
     const res = await refreshVulnFeed(sec.repo, fetchImpl);
     expect(res).toEqual({ updated: 1, skipped: false });
+  });
+
+  it("a retry (allowSkip: false) always refetches, even though a partial write left the feed looking fresh", async () => {
+    // Reproduces the exact incident this guards against: replaceFeed upserts
+    // in chunks and stamps updated_at = now() on every row as it commits, so
+    // a chunk that fails partway through (statement timeout, transient 5xx)
+    // leaves newestFeedUpdatedAt() reporting a *fresh* timestamp even though
+    // the un-upserted tail of the feed still holds yesterday's rows. If the
+    // retry honoured the freshness guard here, it would see that fresh
+    // timestamp and return `skipped: true` — reporting success on a feed
+    // that is silently still incomplete.
+    process.env.WORDFENCE_API_KEY = "k";
+    const sec = fakeSecurityRepo([]);
+    let calls = 0;
+    sec.repo.replaceFeed = async (entries) => {
+      calls += 1;
+      if (calls === 1) {
+        // Simulate chunks 1..N-1 committing (and stamping updated_at) before
+        // chunk N throws — the first attempt fails, but leaves the feed
+        // looking fresh.
+        sec.state.feedUpdatedAt = new Date().toISOString();
+        throw new Error("vuln_feed upsert failed: statement timeout on chunk 21/30");
+      }
+      sec.state.feed = entries;
+      sec.state.feedUpdatedAt = new Date().toISOString();
+      return entries.length;
+    };
+    const feedJson = {
+      "u1": { id: "u1", title: "T", cve: null, cvss: { score: 5 }, software: [{
+        type: "plugin", slug: "x",
+        affected_versions: { "r": { from_version: "*", from_inclusive: true, to_version: "1.0", to_inclusive: true } },
+        patched_versions: ["1.1"],
+      }]},
+    };
+    const fetchImpl = (async () => new Response(JSON.stringify(feedJson), { status: 200 })) as typeof fetch;
+
+    // First attempt (job.attempts === 1 → allowSkip: true): fails partway
+    // through, leaving the feed's updated_at fresh but data incomplete.
+    await expect(refreshVulnFeed(sec.repo, fetchImpl, { allowSkip: true })).rejects.toThrow("statement timeout");
+
+    // Retry (job.attempts > 1 → allowSkip: false): must refetch regardless
+    // of the now-fresh timestamp, not report `skipped: true`.
+    const retryResult = await refreshVulnFeed(sec.repo, fetchImpl, { allowSkip: false });
+    expect(retryResult).toEqual({ updated: 1, skipped: false });
+    expect(calls).toBe(2);
   });
 });

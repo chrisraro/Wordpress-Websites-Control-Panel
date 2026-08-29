@@ -30,6 +30,11 @@ vi.mock("@/services/themes/install", () => ({
 vi.mock("@/services/manage/service", () => ({
   manageSite: (...args: unknown[]) => manageSiteMock(...args),
 }));
+const refreshVulnFeedMock = vi.fn((..._args: unknown[]) => Promise.resolve({ updated: 0, skipped: true }));
+vi.mock("@/services/security/scan", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/security/scan")>();
+  return { ...actual, refreshVulnFeed: (...args: unknown[]) => refreshVulnFeedMock(...args) };
+});
 
 function fakeDb(signedUrl = "https://signed.example/pkg.zip") {
   const storageCalls: string[] = [];
@@ -136,6 +141,34 @@ describe("plugin_install handler dispatch", () => {
     expect(storageCalls).toEqual(["plugins"]);
     expect(installPluginMock).toHaveBeenCalledTimes(1);
     expect(installPluginMock.mock.calls[0][3]).toEqual({ kind: "url", url: "https://signed.example/plugin.zip" });
+  });
+});
+
+// The freshness guard in refreshVulnFeed must be bypassed on a retry (see
+// src/services/security/scan.ts's `allowSkip` doc comment and the "partial
+// write" scenario it defends against) — this pins that the handler actually
+// derives `allowSkip` from `job.attempts` and doesn't hard-code it either way.
+describe("vuln_feed_refresh handler dispatch", () => {
+  beforeEach(() => {
+    refreshVulnFeedMock.mockClear();
+  });
+
+  it("allows the freshness guard to skip on a job's first attempt", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts: 1 });
+    await handlers.vuln_feed_refresh!({ job });
+    expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
+    expect(refreshVulnFeedMock.mock.calls[0][2]).toEqual({ allowSkip: true });
+  });
+
+  it("forbids the freshness guard from skipping on a retry", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts: 2 });
+    await handlers.vuln_feed_refresh!({ job });
+    expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
+    expect(refreshVulnFeedMock.mock.calls[0][2]).toEqual({ allowSkip: false });
   });
 });
 
