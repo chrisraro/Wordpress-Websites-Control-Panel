@@ -104,8 +104,8 @@ describe("refreshSnapshot", () => {
     expect(f.stored[0]).toMatchObject({ siteId: "site-1" });
     // toMatchObject is a partial match, so it alone would not catch a
     // regression that stops stripping admin_users off the stored payload
-    // (see 0011_site_admin_users.sql's site_snapshots_no_admin_users check,
-    // which is the database-level backstop for the same invariant).
+    // (see 0013_snapshot_no_admin_users.sql's site_snapshots_no_admin_users
+    // check, which is the database-level backstop for the same invariant).
     expect(f.stored[0].payload).not.toHaveProperty("admin_users");
     expect(f.storedAdmins[0]).toEqual({ siteId: "site-1", users: ADMIN_USERS });
     expect(mock.closed).toBe(true);

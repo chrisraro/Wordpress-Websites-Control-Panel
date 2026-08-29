@@ -37,7 +37,12 @@ export async function runPhp<T = unknown>(
   }
   if (env.success === false) {
     const detail = env.errors?.length ? JSON.stringify(env.errors) : env.output || "unknown error";
-    throw new McpToolError(`PHP execution failed: ${detail}`);
+    // Same rule as the envelope check above: detail can carry server-side
+    // output, including filesystem paths (checksums.ts and hardening.ts put
+    // them early in their JSON), and manage-actions.ts returns thrown
+    // messages verbatim to any client holding a `manage` grant.
+    console.error("execute-php reported failure", detail);
+    throw new McpToolError("PHP execution failed");
   }
   if (typeof env.return_value !== "string") {
     throw new McpToolError("PHP snippet did not return a JSON string");
@@ -45,6 +50,9 @@ export async function runPhp<T = unknown>(
   try {
     return JSON.parse(env.return_value) as T;
   } catch {
-    throw new McpToolError(`PHP snippet returned invalid JSON: ${env.return_value.slice(0, 200)}`);
+    // Same rule again: env.return_value is the PHP snippet's raw output and
+    // may itself contain site-sensitive data.
+    console.error("execute-php returned invalid JSON", env.return_value);
+    throw new McpToolError("PHP snippet returned invalid JSON");
   }
 }

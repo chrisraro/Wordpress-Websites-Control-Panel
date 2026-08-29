@@ -73,13 +73,20 @@ type RawInventory = Omit<InventoryPayload, "collected_at"> & { admin_users: Admi
 export interface CollectedInventory { payload: InventoryPayload; adminUsers: AdminUser[] }
 
 export async function collectInventory(client: SiteMcpClient): Promise<CollectedInventory> {
-  // Default to [] if WordPress ever omits admin_users: leaving it undefined
-  // would make supabase-js drop the key from the upsert body entirely, and
-  // the `not null` column would reject the row -- after insertSnapshot has
-  // already inserted the snapshot row, so every retry piles up another
-  // snapshot and re-runs PHP against the live site instead of failing
-  // cleanly up front.
-  const { admin_users = [], ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
+  // Throw here, before refreshSnapshot ever calls insertSnapshot, rather
+  // than defaulting to []. A functioning WordPress site always has at least
+  // one administrator, and PHP's json_encode(array()) serialises an empty
+  // list as `[]` -- present, not absent -- so a missing admin_users key
+  // means the response is malformed, never "this site has no
+  // administrators". Defaulting it away would let insertSnapshot's
+  // onConflict: site_id upsert replace a previously-good row wholesale,
+  // stamp a fresh collected_at, report success, and then show the operator
+  // "No administrator data collected yet -- refresh the inventory", which
+  // would be false twice over.
+  const { admin_users, ...rest } = await runPhp<RawInventory>(client, INVENTORY_PHP, 120_000);
+  if (!Array.isArray(admin_users)) {
+    throw new Error("collectInventory: WordPress response is missing admin_users");
+  }
   return { payload: { ...rest, collected_at: new Date().toISOString() }, adminUsers: admin_users };
 }
 

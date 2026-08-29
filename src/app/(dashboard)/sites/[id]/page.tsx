@@ -42,8 +42,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   // holders of sites.view_all, not to "non-clients" -- those happen to
   // coincide only under today's seeded permission matrix. Gate on the same
   // permission the policy checks, not on role, so an admin editing the
-  // matrix (this phase ships that editor) can't unticking a permission
-  // while this page keeps rendering the data anyway.
+  // matrix (this phase ships that editor) can't untick a permission while
+  // this page keeps rendering the data anyway.
   const canViewAdminUsers = can(viewer, "sites.view_all");
   const adminUsers = canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null;
 

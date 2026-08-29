@@ -13,11 +13,13 @@
 -- history has no value and keeping it would only multiply the exposure
 -- surface.
 --
--- This migration has not been applied to any database, so, following
--- 0008_rls_scoped.sql's convention, it is written to be re-run safely:
--- `create table if not exists`, `drop policy if exists` before
--- `create policy`, and the new constraint is dropped and re-added rather
--- than left to fail a second run.
+-- This migration has not been applied to any database, so it is written to
+-- be re-run safely: `create table if not exists`, and `drop policy if
+-- exists` before `create policy` -- the same re-run pattern
+-- 0008_rls_scoped.sql uses for its policies (0008 creates no tables, so
+-- `create table if not exists` is not its convention; every other table in
+-- this repo uses a bare `create table`, and this one departs from that only
+-- because this migration may need a second, harmless run).
 
 set local search_path = public;
 
@@ -42,17 +44,15 @@ create policy site_admin_users_read on site_admin_users
 -- out of historical snapshot rows.
 update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';
 
--- Backstop the invariant the strip above only enforces once: the strip is a
--- one-shot `update`, and after this migration the only thing keeping
--- admin_users out of newly-inserted payloads is a destructuring expression
--- in collectInventory (src/services/inventory/service.ts). A revert of that
--- application code, or a later "simplification" back to spreading the raw
--- MCP response, would silently re-publish admin logins to every client with
--- a grant, with nothing failing -- unless the database itself refuses the
--- row.
-alter table site_snapshots
-  drop constraint if exists site_snapshots_no_admin_users;
-
-alter table site_snapshots
-  add constraint site_snapshots_no_admin_users
-  check (not (payload ? 'admin_users'));
+-- The database-level backstop for this split -- a check constraint on
+-- site_snapshots forbidding an admin_users key -- is deliberately NOT in
+-- this migration. It lives in 0013_snapshot_no_admin_users.sql, which must
+-- be applied only after the code in this branch is deployed: the moment the
+-- constraint exists, it rejects every snapshot write made by the
+-- still-deployed old collectInventory, which still spreads admin_users into
+-- the payload it stores. Applying it here, alongside the table and the
+-- one-shot strip above (both of which are safe with old code running),
+-- would break every refreshInventoryAction, every snapshot_refresh job, and
+-- every security_scan that falls back to refreshSnapshot, from the moment
+-- this migration lands until the new build goes live. See
+-- 0013_snapshot_no_admin_users.sql for the rest of this reasoning.

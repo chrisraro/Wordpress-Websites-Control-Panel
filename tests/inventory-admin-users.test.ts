@@ -43,6 +43,11 @@ describe("admin_users no longer lives in the stored inventory payload", () => {
       ["admin_url", "collected_at", "core_update", "php_version", "plugins", "themes", "wp_version"].sort(),
     );
   });
+
+  it("throws before any snapshot write when the response is missing admin_users", async () => {
+    const { admin_users: _omit, ...withoutAdmins } = RAW;
+    await expect(collectInventory(fixtureClient(withoutAdmins))).rejects.toThrow(/admin_users/);
+  });
 });
 
 describe("0011_site_admin_users.sql", () => {
@@ -53,8 +58,10 @@ describe("0011_site_admin_users.sql", () => {
 
   it("creates a staff-only site_admin_users table with RLS enabled", () => {
     // "if not exists": this migration has not been applied to any database
-    // yet, so, per 0008_rls_scoped.sql's convention, it is written to be
-    // re-run safely rather than to error on a second run.
+    // yet, so it is written to be re-run safely rather than to error on a
+    // second run. This is not 0008_rls_scoped.sql's convention -- 0008
+    // creates no tables, only policies -- it is a departure made because
+    // this migration in particular may need a second, harmless run.
     expect(SQL).toMatch(/create table if not exists site_admin_users\s*\(/);
     expect(SQL).toMatch(/alter table site_admin_users enable row level security;/);
   });
@@ -76,15 +83,32 @@ describe("0011_site_admin_users.sql", () => {
     );
   });
 
-  it("backstops the strip with a check constraint, added after the strip and re-run safe", () => {
-    const stripIndex = SQL.indexOf(
-      "update site_snapshots set payload = payload - 'admin_users' where payload ? 'admin_users';",
-    );
+  it("does not carry the check-constraint backstop -- that ships separately, after deploy", () => {
+    // The constraint has the opposite deploy-order dependency from the rest
+    // of this migration: it would reject every snapshot write made by
+    // still-deployed old code between "0011 applied" and "new build live".
+    // See 0013_snapshot_no_admin_users.sql.
+    expect(SQL).not.toContain("site_snapshots_no_admin_users");
+  });
+});
+
+describe("0013_snapshot_no_admin_users.sql", () => {
+  const SQL = readFileSync(
+    path.join(__dirname, "../supabase/migrations/0013_snapshot_no_admin_users.sql"),
+    "utf8",
+  );
+
+  it("backstops 0011's strip with a check constraint, dropped before it is re-added", () => {
+    // Re-run safety within this migration: a second apply must not abort on
+    // `add constraint` already existing.
     const dropIndex = SQL.indexOf("drop constraint if exists site_snapshots_no_admin_users");
     const addIndex = SQL.indexOf("add constraint site_snapshots_no_admin_users");
-    expect(stripIndex).toBeGreaterThan(-1);
-    expect(dropIndex).toBeGreaterThan(stripIndex);
+    expect(dropIndex).toBeGreaterThan(-1);
     expect(addIndex).toBeGreaterThan(dropIndex);
     expect(SQL).toMatch(/check \(not \(payload \? 'admin_users'\)\)/);
+  });
+
+  it("documents that it must be applied only after this branch's code is deployed", () => {
+    expect(SQL).toMatch(/applied only after|apply this (constraint|migration) (only )?after/i);
   });
 });

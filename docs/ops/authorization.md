@@ -3,19 +3,35 @@
 Spec: `docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md`.
 Schema: `supabase/migrations/0006_rbac_schema.sql`, `0007_rbac_functions.sql`,
 `0008_rls_scoped.sql`, `0009_rbac_write_scope.sql`,
-`0010_vuln_write_permission.sql` and `0011_site_admin_users.sql`. 0006-0009
-are applied to the live database; **0010 and 0011 still need applying.**
+`0010_vuln_write_permission.sql`, `0011_site_admin_users.sql` and
+`0013_snapshot_no_admin_users.sql`. 0006-0009 are applied to the live
+database; **0010, 0011 and 0013 still need applying.** (0012 is a separate,
+later change — the site-credential column revoke — not covered here.)
 `0009` corrects a gap in `0008`'s write policies (see below); `0010` fixes one
 permission mapping in `0009` — `site_vulnerabilities` writes require
 `security.run`, not `wp_toolkit.manage`, because the security scan is the only
-thing that writes them. `0011` moves WordPress administrator identities into
-their own staff-only table (see "Known exposures" below, item 1) — **it must
-be applied before this code is deployed.** The application code reads
-`site_admin_users` unconditionally for any viewer who holds `sites.view_all`
-(`latestAdminUsers` in `src/services/inventory/repo.ts`, called from the site
-overview page); deploying the code before the migration creates the table
-means that read throws on a missing relation, 500ing every site overview page
-for staff.
+thing that writes them.
+
+`0011` moves WordPress administrator identities into their own staff-only
+table (see "Known exposures" below, item 1) — **it must be applied before
+this code is deployed.** The application code reads `site_admin_users`
+unconditionally for any viewer who holds `sites.view_all` (`latestAdminUsers`
+in `src/services/inventory/repo.ts`, called from the site overview page);
+deploying the code before the migration creates the table means that read
+throws on a missing relation, 500ing every site overview page for staff.
+
+`0013` adds the check constraint that backstops `0011`'s payload split
+(`site_snapshots_no_admin_users`, rejecting any `site_snapshots` row whose
+`payload` still carries an `admin_users` key). It has the **opposite**
+deploy-order rule from `0011`: **it must be applied only after this code is
+deployed**, the same deploy-after-code rule that governs
+`0012_revoke_site_credential_columns.sql`. Until the code that stops writing
+`admin_users` into the payload is live, the still-deployed old
+`collectInventory` writes that key on every refresh; landing the constraint
+first rejects every one of those writes — every `refreshInventoryAction`,
+every `snapshot_refresh` job, and every `security_scan` that falls back to
+`refreshSnapshot` because it found no cached snapshot — with a
+check-constraint violation.
 
 ## The four roles and the default matrix
 
@@ -227,26 +243,41 @@ prevent, not a test to adjust.
 One thing this phase does **not** close, recorded here explicitly so it is
 tracked as open work, not silently assumed closed by the RLS rewrite. A
 second, related exposure — `admin_users` inside `site_snapshots.payload` —
-was closed in phase 9b (see below).
+is being addressed in phase 9b (see below), but is not fully closed yet:
+`0011` and `0013`, below, are both still unapplied to the live database.
 
-1. ~~`site_snapshots.payload` contains every WordPress administrator's login
-   and email~~ — **closed by `0011_site_admin_users.sql` (phase 9b).**
-   WordPress administrator identities now live in their own table,
-   `site_admin_users` (one row per site, replaced wholesale on each
-   inventory refresh), with its own RLS policy,
-   `site_admin_users_read`, granting `select` to holders of
-   `sites.view_all` only. `collectInventory`
+1. `site_snapshots.payload` contains every WordPress administrator's login
+   and email, readable by any client with a grant on that site over
+   PostgREST (RLS is row-level and cannot filter inside a JSONB column) —
+   **closed by `0011_site_admin_users.sql`, once applied, for the write
+   path; closed for every already-scanned site only once 0011's
+   `update site_snapshots set payload = payload - 'admin_users' ...`
+   statement runs.** Right now, in production, neither has happened: every
+   historical `site_snapshots` row still carries `payload.admin_users`, and
+   any client holding a grant on that site can still read it out. An
+   on-call engineer must not read this section and conclude the leak is
+   already closed — it closes only when `0011` is applied, and even then
+   only because that migration's `update` statement specifically rewrites
+   every existing row; the table and its RLS policy alone would only stop
+   *new* leakage.
+
+   Once `0011` is applied, WordPress administrator identities live in their
+   own table, `site_admin_users` (one row per site, replaced wholesale on
+   each inventory refresh), with its own RLS policy, `site_admin_users_read`,
+   granting `select` to holders of `sites.view_all` only. `collectInventory`
    (`src/services/inventory/service.ts`) pulls `admin_users` off the raw MCP
    response before it ever reaches the `InventoryPayload` that gets written
-   to `site_snapshots.payload`, and the migration adds a database-level
-   backstop — a check constraint, `site_snapshots_no_admin_users`, that
-   rejects any insert or update whose `payload` still carries an
-   `admin_users` key — so a revert of that application code fails loudly
-   at write time instead of silently re-publishing admin logins to every
-   client with a grant. The site overview page's Administrators card reads
-   `site_admin_users` gated on `can(viewer, "sites.view_all")`, the same
-   permission the RLS policy checks, rather than on role, so the UI and the
-   database state the same rule.
+   to `site_snapshots.payload`. `0013_snapshot_no_admin_users.sql` — applied
+   separately, only after this code is deployed (see the migration ledger
+   above) — adds the database-level backstop: a check constraint,
+   `site_snapshots_no_admin_users`, that rejects any insert or update whose
+   `payload` still carries an `admin_users` key, so a revert of the
+   application code fails loudly at write time instead of silently
+   re-publishing admin logins to every client with a grant. The site
+   overview page's Administrators card reads `site_admin_users` gated on
+   `can(viewer, "sites.view_all")`, the same permission the RLS policy
+   checks, rather than on role, so the UI and the database state the same
+   rule.
 
 2. **A `client`-role user with a `manage`-level site grant can trigger
    `refreshInventoryAction`.** That action requires site access at `manage`
