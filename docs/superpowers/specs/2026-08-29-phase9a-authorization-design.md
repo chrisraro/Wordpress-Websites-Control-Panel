@@ -305,6 +305,15 @@ Child tables (`site_snapshots`, `security_checks`, `seo_snapshots`, `geogrid_*`,
 
 The four new tables get their own policies, with `user_site_access`'s self-read written as a bare predicate to avoid the recursion noted in §3.
 
+The four new tables have RLS **enabled from the migration that creates them**,
+with policies arriving here. That ordering matters: Supabase serves every
+public-schema table over PostgREST to any holder of a session JWT and the anon
+key, and this app already ships a browser anon client. A table with RLS off is
+governed only by Supabase's default grants, so leaving `user_roles` unprotected
+even briefly would let any authenticated user set their own role to `admin` over
+the REST API, with no application code involved. RLS on with no policies is
+default-deny; the service-role key carries `bypassrls`, so the app is unaffected.
+
 RLS is enabled and correct on every table **regardless of which client path reads it** — it is the backstop for the next engineer's missed check, and Supabase's own security advisor expects it.
 
 ---

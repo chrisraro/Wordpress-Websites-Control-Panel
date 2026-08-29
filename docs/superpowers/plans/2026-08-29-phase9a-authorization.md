@@ -16,6 +16,7 @@
 - **Middleware performs no authorization** (Next.js CVE-2025-29927). Every page, action and handler re-checks independently.
 - **404, never 403,** for a site the caller may not see — a 403 confirms it exists.
 - **`set search_path = ''` on every `security definer` function**, with every object reference schema-qualified.
+- **Every new table gets `enable row level security` in the migration that creates it, even before it has policies.** Supabase exposes every public-schema table over PostgREST to anyone holding a session JWT and the anon key, and this app already ships a browser anon client. RLS off means Supabase's default grants are the only gate; RLS on with zero policies is default-deny, and the service-role key (which has `bypassrls`) keeps the app working. Withholding *policies* until Task 8 keeps that diff reviewable; withholding *RLS itself* would leave the tables that decide who is an admin writable over the REST API.
 - **No RLS policy may call a helper that reads the table the policy protects.** `user_site_access`'s self-read uses a bare `auth.uid()` predicate.
 - **Wrap helper calls in policies as `(select authorize(...))`** so Postgres evaluates them once per statement, not once per row.
 - TypeScript strict; `npx tsc --noEmit` clean; `npm run build` clean; `npm test` green (currently 237 passing).
