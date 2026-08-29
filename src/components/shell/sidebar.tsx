@@ -90,7 +90,7 @@ function SidebarBody({
         onClick={onNavigate}
         className="flex items-center gap-2 px-3 text-body font-semibold leading-tight tracking-[-0.02em] text-ink"
       >
-        <Image src="/brand/icon-64.png" alt="" width={24} height={24} className="shrink-0" />
+        <Image src="/brand/icon-192.png" alt="" width={24} height={24} className="shrink-0" />
         <span>OCS Wordpress Control Panel</span>
       </Link>
 
@@ -174,7 +174,7 @@ export function Sidebar({
           href="/dashboard"
           className="flex items-center gap-2 text-body font-semibold tracking-[-0.02em] text-ink"
         >
-          <Image src="/brand/icon-64.png" alt="" width={24} height={24} className="shrink-0" />
+          <Image src="/brand/icon-192.png" alt="" width={24} height={24} className="shrink-0" />
           <span>OCS Wordpress Control Panel</span>
         </Link>
       </header>

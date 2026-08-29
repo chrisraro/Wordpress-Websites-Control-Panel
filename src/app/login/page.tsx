@@ -13,7 +13,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           <Image
-            src="/brand/icon-64.png"
+            src="/brand/icon-192.png"
             alt=""
             width={40}
             height={40}
