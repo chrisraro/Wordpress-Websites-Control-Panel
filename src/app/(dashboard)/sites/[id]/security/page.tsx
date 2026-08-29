@@ -54,8 +54,9 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   const checks = (latest?.checks ?? []).filter((c) => c.check_id !== "grade");
   const failing = checks.filter((c) => c.result === "fail").length;
   const scan = runSecurityScanAction.bind(null, id);
+  const canRunScan = can(viewer, "security.run");
 
-  const scanButton = can(viewer, "security.run") ? (
+  const scanButton = canRunScan ? (
     <ManageForm
       action={scan}
       label="Run security scan"
@@ -112,7 +113,9 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
           <div>
             <p className="text-body font-medium text-ink">Not scanned yet</p>
             <p className="mt-0.5 text-body text-mid-gray">
-              The first scan builds the grade, the vulnerability list, and the checklist below.
+              {canRunScan
+                ? "The first scan builds the grade, the vulnerability list, and the checklist below."
+                : "This site hasn't been scanned yet. The grade, vulnerability list, and checklist will appear here once someone on your team runs one."}
             </p>
           </div>
         )}

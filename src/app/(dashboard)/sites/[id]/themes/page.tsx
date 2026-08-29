@@ -29,8 +29,8 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   const themes = snapshot?.payload.themes ?? [];
   const activeTheme = themes.find((t) => t.status === "active");
 
-  const canManageToolkit = can(viewer, "wp_toolkit.manage");
   const canRefresh = canAccessSite(viewer, id, "manage");
+  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const createChild = createChildThemeAction.bind(null, id, false);

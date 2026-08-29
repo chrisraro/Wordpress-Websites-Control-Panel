@@ -32,6 +32,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
   if (!site) notFound();
   const reports = await supabaseReportsRepo(db).listForSite(id, 20);
   const canManageReports = can(viewer, "reports.manage");
+  const canGenerateReports = can(viewer, "reports.generate");
 
   return (
     <main>
@@ -48,14 +49,16 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
       </p>
       <SiteTabs siteId={id} active="reports" />
 
-      <section className="mb-4">
-        <h2 className="mb-1 text-body font-medium text-ink">Generate a report</h2>
-        <p className="mb-3 max-w-prose text-body text-mid-gray">
-          Generating never contacts the website — it reads stored snapshots — so it takes a few
-          seconds. Run the scans you want reflected first.
-        </p>
-        <GenerateReportForm siteId={id} />
-      </section>
+      {canGenerateReports && (
+        <section className="mb-4">
+          <h2 className="mb-1 text-body font-medium text-ink">Generate a report</h2>
+          <p className="mb-3 max-w-prose text-body text-mid-gray">
+            Generating never contacts the website — it reads stored snapshots — so it takes a few
+            seconds. Run the scans you want reflected first.
+          </p>
+          <GenerateReportForm siteId={id} />
+        </section>
+      )}
 
       <Card className="overflow-hidden">
         <CardTitle>Generated reports</CardTitle>

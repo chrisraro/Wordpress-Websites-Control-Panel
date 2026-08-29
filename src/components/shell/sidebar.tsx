@@ -32,10 +32,13 @@ const NAV: NavItem[] = [
   },
 ];
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({
+  pathname, onNavigate, showMarketplace,
+}: { pathname: string; onNavigate?: () => void; showMarketplace: boolean }) {
+  const items = NAV.filter((item) => showMarketplace || item.href !== "/marketplace");
   return (
     <nav aria-label="Main" className="flex flex-col gap-1">
-      {NAV.map(({ href, label, Icon, match }) => {
+      {items.map(({ href, label, Icon, match }) => {
         const active = match(pathname);
         return (
           <Link
@@ -60,8 +63,14 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 }
 
 function SidebarBody({
-  email, pathname, onNavigate,
-}: { email: string; pathname: string; onNavigate?: () => void }) {
+  email, pathname, onNavigate, showConnectSite, showMarketplace,
+}: {
+  email: string;
+  pathname: string;
+  onNavigate?: () => void;
+  showConnectSite: boolean;
+  showMarketplace: boolean;
+}) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
       <Link
@@ -72,16 +81,18 @@ function SidebarBody({
         WP Control Panel
       </Link>
 
-      <Link
-        href="/sites/new"
-        onClick={onNavigate}
-        className={buttonClass("primary", "md", "w-full")}
-      >
-        <IconPlus size={16} />
-        Connect site
-      </Link>
+      {showConnectSite && (
+        <Link
+          href="/sites/new"
+          onClick={onNavigate}
+          className={buttonClass("primary", "md", "w-full")}
+        >
+          <IconPlus size={16} />
+          Connect site
+        </Link>
+      )}
 
-      <NavLinks pathname={pathname} onNavigate={onNavigate} />
+      <NavLinks pathname={pathname} onNavigate={onNavigate} showMarketplace={showMarketplace} />
 
       <div className="mt-auto border-t border-hairline pt-4">
         <p className="truncate px-3 text-caption tracking-normal text-mid-gray" title={email}>
@@ -98,7 +109,9 @@ function SidebarBody({
   );
 }
 
-export function Sidebar({ email }: { email: string }) {
+export function Sidebar({
+  email, showConnectSite, showMarketplace,
+}: { email: string; showConnectSite: boolean; showMarketplace: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -119,7 +132,12 @@ export function Sidebar({ email }: { email: string }) {
     <>
       {/* Desktop: a persistent column one tonal step off the canvas. */}
       <aside className="fixed inset-y-0 left-0 hidden w-60 border-r border-hairline bg-surface-alt lg:block">
-        <SidebarBody email={email} pathname={pathname} />
+        <SidebarBody
+          email={email}
+          pathname={pathname}
+          showConnectSite={showConnectSite}
+          showMarketplace={showMarketplace}
+        />
       </aside>
 
       {/* Mobile: slim bar + slide-over sheet. */}
@@ -161,7 +179,13 @@ export function Sidebar({ email }: { email: string }) {
           >
             <IconClose size={18} />
           </button>
-          <SidebarBody email={email} pathname={pathname} onNavigate={() => setOpen(false)} />
+          <SidebarBody
+            email={email}
+            pathname={pathname}
+            onNavigate={() => setOpen(false)}
+            showConnectSite={showConnectSite}
+            showMarketplace={showMarketplace}
+          />
         </div>
       </dialog>
     </>

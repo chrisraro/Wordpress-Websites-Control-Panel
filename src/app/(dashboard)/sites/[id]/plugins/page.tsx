@@ -30,8 +30,8 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const updatable = plugins.filter((p) => p.update === "available");
   const active = plugins.filter((p) => p.status === "active").length;
 
-  const canManageToolkit = can(viewer, "wp_toolkit.manage");
   const canRefresh = canAccessSite(viewer, id, "manage");
+  const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const });

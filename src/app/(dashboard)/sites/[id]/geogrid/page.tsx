@@ -15,7 +15,7 @@ import { drainQueueAction } from "../../../queue-actions";
 import { GeoGridConfigForm } from "./config-form";
 import { GridMap } from "./grid-map";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
-import { Card, CardTitle, Stat, StatusBadge } from "@/components/ui/primitives";
+import { Card, CardTitle, EmptyState, Stat, StatusBadge } from "@/components/ui/primitives";
 import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
 import { IconMap } from "@/components/ui/icons";
 
@@ -245,7 +245,7 @@ export default async function GeoGridPage({
         </>
       )}
 
-      {canManageGeoGrid && (
+      {canManageGeoGrid ? (
         <section>
           <h2 className="mb-1 text-body font-medium text-ink">
             {config ? "Configuration" : "Set up GeoGrid"}
@@ -257,6 +257,15 @@ export default async function GeoGridPage({
           </p>
           <GeoGridConfigForm siteId={id} config={config} />
         </section>
+      ) : (
+        !config && (
+          <Card>
+            <EmptyState icon={<IconMap size={28} />} title="Local ranking hasn't been set up yet">
+              Once this site is configured for GeoGrid tracking, its local pack ranks will show up
+              here.
+            </EmptyState>
+          </Card>
+        )
       )}
     </main>
   );
