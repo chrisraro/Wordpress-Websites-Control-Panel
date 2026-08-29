@@ -30,6 +30,10 @@ function fakeDb(opts: {
   userSiteAccess?: Row[];
   rolePermissions?: Row[];
   inviteResult?: { data: { user: AdminUser | null }; error: { message: string } | null };
+  // Forces getUserById to fail as a genuine error (not "no such user") —
+  // e.g. a network blip or an auth-admin outage — regardless of whether the
+  // id matches a known user.
+  getUserByIdError?: { message: string; status?: number; code?: string };
 }) {
   const state: Record<string, Row[]> = {
     user_roles: [...(opts.userRoles ?? [])],
@@ -91,8 +95,22 @@ function fakeDb(opts: {
           return { data: { users, aud: "authenticated" }, error: null };
         },
         async getUserById(id: string) {
+          if (opts.getUserByIdError) {
+            return { data: { user: null }, error: opts.getUserByIdError };
+          }
           const u = pages.flat().find((u) => u.id === id);
-          return { data: { user: u ?? null }, error: null };
+          if (!u) {
+            // Real GoTrue reports a well-formed uuid matching no user as an
+            // error with a stable `user_not_found` code — not a plain
+            // `{ data: { user: null }, error: null }` — so the fake must
+            // mirror that shape for the repo's error-vs-absence logic to be
+            // exercised honestly.
+            return {
+              data: { user: null },
+              error: { message: "User not found", status: 404, code: "user_not_found" },
+            };
+          }
+          return { data: { user: u }, error: null };
         },
         async deleteUser(id: string) {
           calls.deleteUser.push(id);
@@ -200,6 +218,60 @@ describe("supabaseUsersRepo — listUsers composition", () => {
     const repo = supabaseUsersRepo(db);
     await repo.listUsers();
     expect(calls.listUsersPages).toEqual([1]);
+  });
+
+  it("fetches a second, empty page when the first page comes back exactly full (the 50 boundary)", async () => {
+    // 50 is AUTH_USERS_PER_PAGE. A page that comes back exactly full is
+    // indistinguishable from "there might be more" until a second request
+    // confirms it's empty — the off-by-one this loop must not make.
+    const page1 = Array.from({ length: 50 }, (_, i) => ({
+      id: `u${i}`,
+      email: `u${i}@example.com`,
+      last_sign_in_at: "2026-01-01T00:00:00Z",
+    }));
+    const { db, calls } = fakeDb({ authUsersPages: [page1, []] });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    expect(users).toHaveLength(50);
+    expect(calls.listUsersPages).toEqual([1, 2]);
+  });
+});
+
+describe("supabaseUsersRepo — getUser", () => {
+  it("returns the ManagedUser shape for a successful single-user lookup", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+      userRoles: [{ user_id: "u1", role: "admin" }],
+      userSiteAccess: [{ user_id: "u1", site_id: "s1", access_level: "read" }],
+    });
+    const repo = supabaseUsersRepo(db);
+    const user = await repo.getUser("u1");
+    expect(user).toEqual({
+      id: "u1",
+      email: "u1@example.com",
+      role: "admin",
+      lastSignInAt: "2026-01-01T00:00:00Z",
+      invitedNotAccepted: false,
+      siteGrants: 1,
+    });
+  });
+
+  it("returns null for a genuinely missing user (well-formed id, no match)", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+    });
+    const repo = supabaseUsersRepo(db);
+    const user = await repo.getUser("does-not-exist");
+    expect(user).toBeNull();
+  });
+
+  it("throws on a genuine error instead of reporting it as null — a transient failure must not read as a deleted account", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+      getUserByIdError: { message: "service unavailable", status: 500, code: "unexpected_failure" },
+    });
+    const repo = supabaseUsersRepo(db);
+    await expect(repo.getUser("u1")).rejects.toThrow(/service unavailable/);
   });
 });
 

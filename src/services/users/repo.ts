@@ -10,12 +10,35 @@ import type { ManagedUser, RolePermissionRow, SiteGrant } from "./types";
 export interface UsersRepo {
   listUsers(): Promise<ManagedUser[]>;
   getUser(id: string): Promise<ManagedUser | null>;
+  /**
+   * Unguarded primitive: writes the role with no lockout logic. Does not
+   * check whether this would demote the last remaining admin. Every caller
+   * outside this module must go through `changeUserRole` in `service.ts`,
+   * which reads a fresh user list and applies that guard before calling
+   * this. Call this directly and you can strip admin from every account
+   * with no way back except editing `user_roles` via SQL.
+   */
   setRole(userId: string, role: AppRole, grantedBy: string): Promise<void>;
+  /**
+   * Unguarded primitive: deletes the auth user with no lockout or
+   * self-delete logic. Every caller outside this module must go through
+   * `deleteManagedUser` in `service.ts`, which applies the last-admin and
+   * self-delete guards before calling this. Call this directly and you can
+   * delete the last remaining admin account with no way back except SQL.
+   */
   deleteUser(id: string): Promise<void>;
   listGrants(userId: string): Promise<SiteGrant[]>;
   grantSite(userId: string, siteId: string, level: SiteAccessLevel, grantedBy: string): Promise<void>;
   revokeSite(userId: string, siteId: string): Promise<void>;
   listRolePermissions(): Promise<RolePermissionRow[]>;
+  /**
+   * Unguarded primitive: writes the role/permission row with no check that
+   * this would strip `users.manage` from the admin role. Every caller
+   * outside this module must go through `setRolePermissionChecked` in
+   * `service.ts`, which applies that guard before calling this. Call this
+   * directly and you can lock every admin out of user management with no
+   * way back except SQL.
+   */
   setRolePermission(role: AppRole, permission: AppPermission, enabled: boolean): Promise<void>;
   /**
    * Returns the action link when Supabase's admin API provides one on the
@@ -85,7 +108,20 @@ export function supabaseUsersRepo(db: SupabaseClient): UsersRepo {
 
     async getUser(id) {
       const { data, error } = await db.auth.admin.getUserById(id);
-      if (error || !data.user) return null;
+      // A genuine failure (network blip, auth-admin outage, rate limit) and
+      // "no such user" both come back as `error` on this same response
+      // shape — they must NOT be collapsed into the same `null` return, or
+      // an outage renders as "this account no longer exists" (confidently
+      // wrong, worse than an error). This is the same bug shape Phase 9a
+      // shipped and had to fix. GoTrue gives a real miss the stable
+      // `user_not_found` code; anything else is treated as a real failure
+      // and thrown, matching how every other method in this repo handles
+      // `error`.
+      if (error) {
+        if (error.code === "user_not_found") return null;
+        throw new Error(`getUser failed: ${error.message}`);
+      }
+      if (!data.user) return null;
       const [managed] = await toManagedUsers([data.user]);
       return managed;
     },
