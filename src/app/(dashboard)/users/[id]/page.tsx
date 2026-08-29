@@ -35,6 +35,13 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   // staff-only page in this app.
   const viewer = await requirePermission("users.manage");
 
+  // repo.getUser (auth.admin.getUserById) only treats GoTrue's stable
+  // `user_not_found` code as absence -- a malformed id is a validation
+  // error instead, which throws rather than 404ing. Same fix as
+  // marketplace/batches/[id]/page.tsx: reject the shape before it ever
+  // reaches Supabase.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
+
   const db = createServiceSupabase();
   const usersRepo = supabaseUsersRepo(db);
   const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient };

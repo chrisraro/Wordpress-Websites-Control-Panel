@@ -36,31 +36,38 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const canRefresh = canAccessSite(viewer, id, "manage");
   const canManageToolkit = can(viewer, "wp_toolkit.manage") && canRefresh;
 
+  // site_admin_users' RLS policy (0011_site_admin_users.sql), the sites
+  // table's credential-adjacent columns (spec §5.2), and activity_log's RLS
+  // policy (0008_rls_scoped.sql:197-199) all gate their real read on
+  // sites.view_all, not on "is this viewer a client" -- those only coincide
+  // under today's seeded permission matrix. `db` here is already the
+  // service-role client (readDbFor returns it for any non-client viewer),
+  // which bypasses RLS entirely, so every read below that has a matching
+  // RLS policy has to re-check the same permission that policy checks --
+  // not stand in an isClient role check, which stops matching the moment an
+  // admin edits the matrix (this phase ships that editor) and would then
+  // keep serving this data to a role the database itself would refuse.
+  const canViewAdminUsers = can(viewer, "sites.view_all");
+
   // mcp_endpoint and wp_username are credential-adjacent (spec §5.2) and are
   // off SITE_COLUMNS/SiteRow entirely -- getSite above never carries them.
-  // `db` is already the service-role client here (readDbFor returns it for
-  // any non-client viewer), so fetching them only when !isClient keeps this
-  // read on the same client the revoke in 0012 does not affect, and never
-  // in reach of a client's own session.
-  const connection = isClient ? null : await supabaseSitesRepo(db).getSiteConnection(id);
+  const connection = canViewAdminUsers ? await supabaseSitesRepo(db).getSiteConnection(id) : null;
 
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
-  // site_admin_users' RLS policy (0011_site_admin_users.sql) grants read to
-  // holders of sites.view_all, not to "non-clients" -- those happen to
-  // coincide only under today's seeded permission matrix. Gate on the same
-  // permission the policy checks, not on role, so an admin editing the
-  // matrix (this phase ships that editor) can't untick a permission while
-  // this page keeps rendering the data anyway.
-  const canViewAdminUsers = can(viewer, "sites.view_all");
   const adminUsers = canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null;
 
-  const { data: activity } = await db
-    .from("activity_log")
-    .select("action,detail,at")
-    .eq("site_id", id)
-    .order("at", { ascending: false })
-    .limit(10);
+  // See the canViewAdminUsers comment above: activity_log's RLS policy
+  // requires sites.view_all, and this read runs on the service-role client,
+  // which never consults that policy at all.
+  const { data: activity } = canViewAdminUsers
+    ? await db
+        .from("activity_log")
+        .select("action,detail,at")
+        .eq("site_id", id)
+        .order("at", { ascending: false })
+        .limit(10)
+    : { data: null };
 
   const testConnection = testConnectionAction.bind(null, id);
   const refresh = refreshInventoryAction.bind(null, id);

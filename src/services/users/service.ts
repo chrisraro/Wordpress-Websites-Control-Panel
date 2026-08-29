@@ -1,5 +1,5 @@
 import type { AppPermission, AppRole, SiteAccessLevel } from "@/lib/authz/types";
-import { canChangeRole, canDeleteUser, canSetRolePermission } from "./guards";
+import { canChangeRole, canDeleteUser, canGrantSiteAccess, canSetRolePermission } from "./guards";
 import type { UsersRepo } from "./repo";
 import type { ManagedUser, RolePermissionRow, SiteGrant } from "./types";
 
@@ -61,15 +61,26 @@ export async function setRolePermissionChecked(
   return { ok: true };
 }
 
-/** Grants a user access to a site. No lockout guard applies to this operation. */
+/**
+ * Grants a user access to a site. Not a lockout guard, but the same
+ * freshly-read discipline as changeUserRole/deleteManagedUser above: the
+ * target's role is read from the repo right here, at the moment of the
+ * write, never taken as a parameter from a caller that may be holding a
+ * role the page rendered a moment ago. See canGrantSiteAccess for why a
+ * `manage`-level grant onto a `client` is refused.
+ */
 export async function grantSiteAccess(
   repo: UsersRepo,
   userId: string,
   siteId: string,
   level: SiteAccessLevel,
   grantedBy: string,
-): Promise<void> {
+): Promise<ActionResult> {
+  const target = await repo.getUser(userId);
+  const verdict = canGrantSiteAccess(target?.role ?? null, level);
+  if (!verdict.allowed) return { ok: false, error: verdict.reason };
   await repo.grantSite(userId, siteId, level, grantedBy);
+  return { ok: true };
 }
 
 /** Revokes a user's access to a site. No lockout guard applies to this operation. */

@@ -20,6 +20,17 @@
  * connection and runs PHP on their live WordPress site. `read` is the right
  * default for a client, and the difference is called out at the point of
  * choosing, not just after the fact.
+ *
+ * The final whole-branch review found that "called out" was not enough: the
+ * level picker offered Manage to a client regardless, so the only thing
+ * stopping the grant was a sentence in docs/ops/authorization.md. The
+ * `<option>` below is now `disabled` for a `client` target -- the UI must
+ * not offer a choice the server (`canGrantSiteAccess` in
+ * src/services/users/guards.ts) will refuse -- with the reason shown as
+ * standing text, not only a hover title, matching how the permission matrix
+ * (src/app/(dashboard)/users/roles/matrix.tsx) presents its one locked
+ * cell. An account with no role yet keeps the choice and the inline
+ * warning below it: it is not yet a client, and may never become one.
  */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -36,6 +47,14 @@ const ROLE_LABEL: Record<AppRole, string> = {
   content_writer: "Content writer",
   client: "Client",
 };
+
+// Mirrors canGrantSiteAccess's refusal in src/services/users/guards.ts --
+// the UI stating the same reason the server enforces, not a second,
+// independent rule that could drift from it.
+const MANAGE_UNAVAILABLE_FOR_CLIENT_REASON =
+  "Manage-level access isn't available for a client — it would let them trigger a live " +
+  "inventory refresh, which opens a connection to the site's WordPress install and runs PHP " +
+  "there. Read is the only level a client can be granted.";
 
 export interface SiteGrantRow {
   siteId: string;
@@ -66,6 +85,10 @@ export function SiteGrants({
   // type-checks without a redundant null check.
   const staffRole = role !== null && role !== "client" ? role : null;
   const isStaffRole = staffRole !== null;
+  // The one role this add control ever renders manage-level access to that
+  // it must not: see the file header and canGrantSiteAccess in
+  // src/services/users/guards.ts.
+  const targetIsClient = role === "client";
 
   function handleAdd() {
     if (!addSiteId) return;
@@ -188,7 +211,13 @@ export function SiteGrants({
                   className={inputClass}
                 >
                   <option value="read">Read</option>
-                  <option value="manage">Manage</option>
+                  <option
+                    value="manage"
+                    disabled={targetIsClient}
+                    title={targetIsClient ? MANAGE_UNAVAILABLE_FOR_CLIENT_REASON : undefined}
+                  >
+                    Manage{targetIsClient ? " (not available for a client)" : ""}
+                  </option>
                 </select>
                 <button
                   type="button"
@@ -200,19 +229,33 @@ export function SiteGrants({
                   Grant
                 </button>
               </div>
-              {addLevel === "manage" && (
-                // This block only renders when !isStaffRole (client or null
-                // role) -- see Finding 1 of docs/superpowers/sdd/
-                // task-5-report.md. A not-yet-roled account is exactly the
-                // state where an admin is most likely to be handing out
-                // access, so it must see this warning too.
-                <p className="flex items-start gap-2 text-caption tracking-normal text-ember">
-                  <IconAlert size={14} className="mt-0.5 shrink-0" />
-                  Manage-level access lets this client trigger inventory refreshes, which opens a
-                  live connection to the site&apos;s WordPress install and runs PHP there. Read is
-                  the right default for a client — only choose Manage if they specifically need
-                  to refresh inventory themselves.
+              {targetIsClient ? (
+                // Standing text, not only the <option>'s hover title -- same
+                // "a hover-only tooltip is not a visible reason" rule the
+                // permission matrix's locked cell follows. The guard this
+                // mirrors (canGrantSiteAccess) refuses the write server-side
+                // regardless of what this control offers, so this note is
+                // belt-and-suspenders, not the enforcement itself.
+                <p className="flex items-start gap-2 text-caption tracking-normal text-mid-gray">
+                  <IconInfo size={14} className="mt-0.5 shrink-0" />
+                  {MANAGE_UNAVAILABLE_FOR_CLIENT_REASON}
                 </p>
+              ) : (
+                addLevel === "manage" && (
+                  // This block only renders for an account with no role yet
+                  // (a client can no longer select Manage above at all) --
+                  // see the file header. That account is not a client and
+                  // may never become one, but a manage grant would carry the
+                  // exact same risk the moment it does, so it gets the same
+                  // warning here rather than only after the fact.
+                  <p className="flex items-start gap-2 text-caption tracking-normal text-ember">
+                    <IconAlert size={14} className="mt-0.5 shrink-0" />
+                    Manage-level access lets this account trigger inventory refreshes, which opens
+                    a live connection to the site&apos;s WordPress install and runs PHP there.
+                    Read is the safer default — only choose Manage if manage-level access is
+                    specifically needed.
+                  </p>
+                )
               )}
             </>
           )}

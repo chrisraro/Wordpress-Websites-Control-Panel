@@ -57,12 +57,12 @@ describe("dashboard page reads stay on the RLS-governed path", () => {
 
 describe("the site overview page never unconditionally renders credentials-adjacent fields", () => {
   // Spec §5.2: mcp_endpoint and wp_username are credentials-adjacent and
-  // must be omitted outright for a client, not merely blanked. They are no
-  // longer even fetched into `site` (SITE_COLUMNS/SiteRow dropped them) --
-  // the page fetches them separately as `connection`, only for a non-client
-  // viewer. Pinning this here means a future edit that moves the row out of
-  // that guard (or adds a second, unguarded place that prints either value)
-  // fails a test instead of shipping.
+  // must be omitted outright for anyone who does not hold sites.view_all,
+  // not merely blanked. They are no longer even fetched into `site`
+  // (SITE_COLUMNS/SiteRow dropped them) -- the page fetches them separately
+  // as `connection`. Pinning this here means a future edit that moves the
+  // row out of that guard (or adds a second, unguarded place that prints
+  // either value) fails a test instead of shipping.
   const source = readFileSync(
     join(DASHBOARD_DIR, "sites", "[id]", "page.tsx"),
     "utf8",
@@ -71,15 +71,20 @@ describe("the site overview page never unconditionally renders credentials-adjac
   // mcp_endpoint and wp_username came off SiteRow and SITE_COLUMNS entirely
   // (spec §5.2) -- `site` (from getSite) never carries them anymore. The
   // page now fetches them separately, via `connection`, which is `null`
-  // whenever `isClient` is true and otherwise the result of
-  // `getSiteConnection`. Pinning that assignment is what makes `connection`
-  // a valid stand-in for the old `isClient` guard below: it can only be
-  // truthy for a non-client viewer.
-  it("only fetches the connection fields for a non-client viewer", () => {
+  // unless the viewer holds `sites.view_all`. This pin was previously
+  // written against `isClient ? null : ...` -- the final whole-branch
+  // review found that gate wrong: it coincides with the permission check
+  // only under today's seeded matrix, and stops matching the moment an
+  // admin unticks sites.view_all for a staff role (this phase ships that
+  // editor), at which point a role check would keep serving these fields
+  // to someone the database itself would refuse. Pinning the permission
+  // form here, not the role form, is what stops that regression from
+  // creeping back in without weakening what this test catches.
+  it("only fetches the connection fields when the viewer holds sites.view_all", () => {
     const occurrences = source.split("supabaseSitesRepo(db).getSiteConnection(id)").length - 1;
     expect(occurrences).toBe(1);
     expect(source).toContain(
-      "const connection = isClient ? null : await supabaseSitesRepo(db).getSiteConnection(id);",
+      'const connection = canViewAdminUsers ? await supabaseSitesRepo(db).getSiteConnection(id) : null;',
     );
   });
 
@@ -123,5 +128,18 @@ describe("the site overview page never unconditionally renders credentials-adjac
     expect(source).toContain('const canViewAdminUsers = can(viewer, "sites.view_all");');
     expect(source).toContain("canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null");
     expect(source).toContain("{canViewAdminUsers && (");
+  });
+
+  it("does not read activity_log unconditionally", () => {
+    // activity_log's own RLS policy (0008_rls_scoped.sql:197-199) requires
+    // sites.view_all -- but this read runs on the service-role client
+    // (readDbFor returns it for any non-client viewer), which bypasses RLS
+    // entirely, so before this fix nothing on this page enforced that
+    // policy's rule at all. Pinning the guarded form here means a refactor
+    // that drops this check (or restores an unconditional `.from
+    // ("activity_log")` read) fails a test instead of shipping.
+    const occurrences = source.split('.from("activity_log")').length - 1;
+    expect(occurrences).toBe(1);
+    expect(source).toContain("const { data: activity } = canViewAdminUsers");
   });
 });

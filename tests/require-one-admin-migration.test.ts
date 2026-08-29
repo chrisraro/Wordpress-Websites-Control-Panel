@@ -1,0 +1,82 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+// Finding 4 of the final whole-branch review: src/services/users/guards.ts's
+// last-admin rule (canChangeRole / canDeleteUser) is evaluated in
+// application code with no transaction spanning the read and the write, so
+// two admins demoting each other inside the same second can both pass the
+// guard and both commit, leaving zero rows with role = 'admin' -- a state
+// spec §4 declares must be impossible and whose only recovery is raw SQL
+// against production. This is a source-scan of the migration's shape, the
+// same style tests/inventory-admin-users.test.ts uses for 0011/0013,
+// because the property under test -- "this trigger fires on UPDATE/DELETE
+// but never on INSERT, and evaluates once per statement" -- is a property
+// of the SQL text, not of any TypeScript this repo can import and run.
+
+const SQL = readFileSync(
+  path.join(__dirname, "../supabase/migrations/0014_require_one_admin.sql"),
+  "utf8",
+);
+
+describe("0014_require_one_admin.sql", () => {
+  it("found the migration file to check (guards against a rotted path)", () => {
+    expect(SQL.length).toBeGreaterThan(0);
+  });
+
+  it("declares the guard function security definer with an empty search_path, matching 0007's convention", () => {
+    const m = SQL.match(/create or replace function public\.require_one_admin\(\)[\s\S]*?\$\$;/);
+    expect(m).not.toBeNull();
+    expect(m![0]).toMatch(/security definer/);
+    expect(m![0]).toMatch(/set search_path = ''/);
+    // Every table reference inside the function body must be schema-qualified
+    // -- an unqualified `user_roles` could resolve to an object a
+    // lower-privileged caller created to shadow it, under an empty search_path.
+    expect(m![0]).toContain("public.user_roles");
+  });
+
+  it("raises when no admin row would remain", () => {
+    const m = SQL.match(/create or replace function public\.require_one_admin\(\)[\s\S]*?\$\$;/);
+    expect(m![0]).toMatch(/not exists \(select 1 from public\.user_roles where role = 'admin'\)/);
+    expect(m![0]).toMatch(/raise exception/);
+  });
+
+  it("is re-runnable: drops the trigger before recreating it, and replaces rather than merely creates the function", () => {
+    expect(SQL).toContain("create or replace function public.require_one_admin()");
+    expect(SQL).toContain("drop trigger if exists user_roles_require_one_admin on public.user_roles;");
+    const dropIndex = SQL.indexOf("drop trigger if exists user_roles_require_one_admin");
+    const createIndex = SQL.indexOf("create trigger user_roles_require_one_admin");
+    expect(dropIndex).toBeGreaterThan(-1);
+    expect(createIndex).toBeGreaterThan(dropIndex);
+  });
+
+  it("fires once per statement, not once per row", () => {
+    const m = SQL.match(/create trigger user_roles_require_one_admin[\s\S]*?;/);
+    expect(m).not.toBeNull();
+    expect(m![0]).toMatch(/for each statement/);
+    expect(m![0]).not.toMatch(/for each row/);
+  });
+
+  it("fires on UPDATE and DELETE, but never on INSERT", () => {
+    // The header explains why: INSERT can only ever add a row, so it can
+    // never be the operation that takes the admin count to zero, and
+    // guarding it would wrongly refuse a fresh environment's very first
+    // role grant (scripts/bootstrap-admin.ts), made before any admin
+    // exists yet.
+    const m = SQL.match(/create trigger user_roles_require_one_admin[\s\S]*?;/);
+    expect(m).not.toBeNull();
+    expect(m![0]).toMatch(/after update or delete on public\.user_roles/);
+    expect(m![0]).not.toMatch(/insert/i);
+  });
+
+  it("documents that it has no deploy-order dependency, unlike 0012/0013", () => {
+    expect(SQL).toMatch(/no deploy-order dependency/i);
+    expect(SQL).toContain("safe to apply before, during or");
+    expect(SQL).toContain("after this branch's code goes live");
+  });
+
+  it("documents why the application-level guards remain primary and this is only a backstop", () => {
+    expect(SQL.toLowerCase()).toContain("primary mechanism");
+    expect(SQL.toLowerCase()).toContain("backstop");
+  });
+});

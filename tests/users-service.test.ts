@@ -5,6 +5,7 @@ import type { UsersRepo } from "@/services/users/repo";
 import {
   changeUserRole,
   deleteManagedUser,
+  grantSiteAccess,
   setRolePermissionChecked,
 } from "@/services/users/service";
 import type { ManagedUser } from "@/services/users/types";
@@ -396,6 +397,7 @@ function memoryUsersRepo(initialUsers: ManagedUser[]) {
   const setRoleCalls: { userId: string; role: string; grantedBy: string }[] = [];
   const deleteCalls: string[] = [];
   const setRolePermissionCalls: { role: string; permission: string; enabled: boolean }[] = [];
+  const grantSiteCalls: { userId: string; siteId: string; level: string; grantedBy: string }[] = [];
 
   const repo: UsersRepo = {
     async listUsers() {
@@ -415,7 +417,9 @@ function memoryUsersRepo(initialUsers: ManagedUser[]) {
     async listGrants() {
       return [];
     },
-    async grantSite() {},
+    async grantSite(userId, siteId, level, grantedBy) {
+      grantSiteCalls.push({ userId, siteId, level, grantedBy });
+    },
     async revokeSite() {},
     async listRolePermissions() {
       return [];
@@ -427,7 +431,7 @@ function memoryUsersRepo(initialUsers: ManagedUser[]) {
       return { id: `invited-${email}`, inviteLink: null };
     },
   };
-  return { repo, setRoleCalls, deleteCalls, setRolePermissionCalls, getUsers: () => users };
+  return { repo, setRoleCalls, deleteCalls, setRolePermissionCalls, grantSiteCalls, getUsers: () => users };
 }
 
 const managedUser = (id: string, role: ManagedUser["role"]): ManagedUser => ({
@@ -507,5 +511,45 @@ describe("setRolePermissionChecked", () => {
     const result = await setRolePermissionChecked(repo, "developer", "seo.run", false);
     expect(result).toEqual({ ok: true });
     expect(setRolePermissionCalls).toEqual([{ role: "developer", permission: "seo.run", enabled: false }]);
+  });
+});
+
+describe("grantSiteAccess", () => {
+  it("allows a manage-level grant onto a staff role", async () => {
+    const { repo, grantSiteCalls } = memoryUsersRepo([managedUser("u1", "developer")]);
+    const result = await grantSiteAccess(repo, "u1", "site-1", "manage", "actor-1");
+    expect(result).toEqual({ ok: true });
+    expect(grantSiteCalls).toEqual([
+      { userId: "u1", siteId: "site-1", level: "manage", grantedBy: "actor-1" },
+    ]);
+  });
+
+  it("allows a read-level grant onto a client", async () => {
+    const { repo, grantSiteCalls } = memoryUsersRepo([managedUser("u1", "client")]);
+    const result = await grantSiteAccess(repo, "u1", "site-1", "read", "actor-1");
+    expect(result).toEqual({ ok: true });
+    expect(grantSiteCalls).toHaveLength(1);
+  });
+
+  it("refuses a manage-level grant onto a client, reading the role from the repo rather than trusting the caller", async () => {
+    const { repo, grantSiteCalls } = memoryUsersRepo([managedUser("u1", "client")]);
+    const result = await grantSiteAccess(repo, "u1", "site-1", "manage", "actor-1");
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/read access/i) });
+    expect(grantSiteCalls).toHaveLength(0);
+  });
+
+  it("refuses a manage-level grant when the target's role changed to client after the page that offered this write rendered", async () => {
+    // Same freshly-read discipline this file already exercises for
+    // changeUserRole above: the guard here must not trust a role the
+    // caller derived earlier (e.g. from a page render) -- it must see
+    // whatever the repo says *right now*. Simulated by writing the role
+    // change directly through the fake repo, standing in for "someone
+    // else changed this account's role between render and this write",
+    // then calling grantSiteAccess with no role of its own to trust.
+    const { repo, grantSiteCalls } = memoryUsersRepo([managedUser("u1", "developer")]);
+    await repo.setRole("u1", "client", "someone-else");
+    const result = await grantSiteAccess(repo, "u1", "site-1", "manage", "actor-1");
+    expect(result.ok).toBe(false);
+    expect(grantSiteCalls).toHaveLength(0);
   });
 });

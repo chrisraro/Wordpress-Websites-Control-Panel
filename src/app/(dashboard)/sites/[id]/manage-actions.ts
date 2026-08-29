@@ -48,6 +48,15 @@ export async function refreshInventoryAction(
   _formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   await requireUser();
+  // A site grant says which sites; a permission says what may be done on
+  // them. This is the one WP Toolkit write in the codebase that used to
+  // check only the former -- every sibling action (manageAction above,
+  // bulkAction, installThemeAction, ...) requires both. Without this, a
+  // `manage` grant alone -- the level a client's own dashboard offers, see
+  // site-grants.tsx -- opens an MCP connection and runs PHP on the site's
+  // live WordPress install.
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
   const site = await checkSiteAccess(siteId, "manage");
   if (isDenied(site)) return site;
   const db = createServiceSupabase();

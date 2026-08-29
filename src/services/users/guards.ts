@@ -1,4 +1,4 @@
-import type { AppPermission, AppRole } from "@/lib/authz/types";
+import type { AppPermission, AppRole, SiteAccessLevel } from "@/lib/authz/types";
 import { ALLOWED, refuse, type GuardVerdict, type ManagedUser } from "@/services/users/types";
 
 /**
@@ -49,6 +49,40 @@ export function canDeleteUser(
 
   if (isSoleAdmin(users, target)) {
     return refuse("This is the last administrator. Promote someone else first.");
+  }
+  return ALLOWED;
+}
+
+/**
+ * True only for a `manage`-level grant onto a `client`. Per docs/ops/
+ * authorization.md, client grants must always be `read` — `manage` is what
+ * `refreshInventoryAction` (src/app/(dashboard)/sites/[id]/manage-actions.ts)
+ * requires in order to open an MCP connection and run PHP against the
+ * site's live WordPress install. A client is an external customer; handing
+ * one of them that level of access, even accidentally, is a live-execution
+ * hole, not a theoretical one. `target === null` (an account with no role
+ * yet — see ManagedUser) and every staff role (`admin`, `developer`,
+ * `content_writer`) are unaffected: those roles already reach every site
+ * through `sites.view_all`, so a grant adds nothing for them regardless of
+ * level.
+ *
+ * Callers must pass the target's role freshly read at the moment of the
+ * write, never a role captured earlier (e.g. by the page that rendered the
+ * form) — same discipline as `changeUserRole`'s and `deleteManagedUser`'s
+ * freshly-read-list guards in service.ts. `grantSiteAccess` in service.ts
+ * enforces that by reading `repo.getUser` itself rather than accepting a
+ * role parameter from its caller.
+ */
+export function canGrantSiteAccess(
+  targetRole: AppRole | null,
+  level: SiteAccessLevel,
+): GuardVerdict {
+  if (targetRole === "client" && level === "manage") {
+    return refuse(
+      "A client can only be granted read access. Manage-level access would let them trigger " +
+        "a live inventory refresh, which opens a connection to their WordPress install and " +
+        "runs PHP there.",
+    );
   }
   return ALLOWED;
 }

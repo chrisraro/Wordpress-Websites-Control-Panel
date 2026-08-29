@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canChangeRole, canDeleteUser, canSetRolePermission } from "@/services/users/guards";
+import { canChangeRole, canDeleteUser, canGrantSiteAccess, canSetRolePermission } from "@/services/users/guards";
 import type { ManagedUser } from "@/services/users/types";
 import type { AppRole } from "@/lib/authz/types";
 
@@ -83,6 +83,40 @@ describe("canDeleteUser", () => {
     // everything and are never the last admin, so removing them is always safe.
     const withRoleless = [...ONE_ADMIN, user("r1", null)];
     expect(canDeleteUser(withRoleless, "a1", "r1")).toEqual({ allowed: true });
+  });
+});
+
+describe("canGrantSiteAccess", () => {
+  // Finding 1 of the final whole-branch review: a `manage` grant on a
+  // `client` (an external customer) is a live PHP-execution hole via
+  // refreshInventoryAction, not a theoretical one -- see the reasoning in
+  // src/services/users/guards.ts above canGrantSiteAccess itself.
+
+  it("refuses a manage-level grant onto a client", () => {
+    const v = canGrantSiteAccess("client", "manage");
+    expect(v.allowed).toBe(false);
+    expect(v.allowed === false && v.reason).toMatch(/read access/i);
+  });
+
+  it("allows a read-level grant onto a client", () => {
+    expect(canGrantSiteAccess("client", "read")).toEqual({ allowed: true });
+  });
+
+  it("allows a manage-level grant onto every staff role", () => {
+    // Staff already reach every site through sites.view_all, so a grant on
+    // one of them is inert either way -- but the guard must not refuse it,
+    // since site-grants.tsx still lists/removes leftover grants for staff.
+    expect(canGrantSiteAccess("admin", "manage")).toEqual({ allowed: true });
+    expect(canGrantSiteAccess("developer", "manage")).toEqual({ allowed: true });
+    expect(canGrantSiteAccess("content_writer", "manage")).toEqual({ allowed: true });
+  });
+
+  it("allows a manage-level grant onto an account with no role yet", () => {
+    // Not yet a client, and may never become one -- see site-grants.tsx's
+    // file header. The UI still shows a warning at the point of choosing,
+    // but the server-side guard does not refuse it the way it does for an
+    // actual client.
+    expect(canGrantSiteAccess(null, "manage")).toEqual({ allowed: true });
   });
 });
 

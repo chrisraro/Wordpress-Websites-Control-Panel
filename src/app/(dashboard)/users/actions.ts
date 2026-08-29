@@ -82,7 +82,8 @@ export async function inviteUserAction(
     const roleResult = await changeUserRole(users, user.id, invited.id, role);
     if (!roleResult.ok) throw new Error(roleResult.error);
     for (const siteId of siteIds) {
-      await grantSiteAccess(users, invited.id, siteId, "read", user.id);
+      const grantResult = await grantSiteAccess(users, invited.id, siteId, "read", user.id);
+      if (!grantResult.ok) throw new Error(grantResult.error);
     }
   } catch (failure) {
     // Undo the just-created account. This must use rollbackFailedInvite, not
@@ -189,14 +190,17 @@ export async function grantSiteAction(
   const gate = await checkPermission("users.manage");
   if (isDenied(gate)) return gate;
 
+  let result: ActionResult;
   try {
-    await grantSiteAccess(repo(), userId, siteId, level, user.id);
+    result = await grantSiteAccess(repo(), userId, siteId, level, user.id);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not grant site access" };
   }
-  revalidatePath("/users");
-  revalidatePath(`/users/${userId}`);
-  return { ok: true };
+  if (result.ok) {
+    revalidatePath("/users");
+    revalidatePath(`/users/${userId}`);
+  }
+  return result;
 }
 
 export async function revokeSiteAction(

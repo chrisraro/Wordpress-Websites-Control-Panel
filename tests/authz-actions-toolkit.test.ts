@@ -150,10 +150,24 @@ describe("manageAction", () => {
 });
 
 describe("refreshInventoryAction", () => {
+  // Finding 1 of the final whole-branch review: a site grant says *which*
+  // sites; a permission says *what* may be done on them. Every other
+  // wp_toolkit write in this file (manageAction, bulkAction below,
+  // installThemeAction, ...) requires both -- this was the one exception,
+  // and a `manage` grant alone is exactly the level a client's own
+  // dashboard can offer (site-grants.tsx).
+  it("is refused without wp_toolkit.manage", async () => {
+    checkPermissionMock.mockResolvedValue(DENIED);
+    const result = await refreshInventoryAction("site-1");
+    expect(result).toEqual(DENIED);
+    expect(checkSiteAccessMock).not.toHaveBeenCalled();
+  });
+
   it("is refused with only a read grant (requires manage)", async () => {
     // checkSiteAccess is mocked at the boundary: simulating "read-only grant"
     // means the mock denies when asked for "manage", exactly as the real
     // canAccessSite would for a client holding only a read-level grant.
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     checkSiteAccessMock.mockImplementation((_siteId: string, min?: string) =>
       Promise.resolve(min === "manage" ? DENIED : FAKE_VIEWER));
     const result = await refreshInventoryAction("site-1");

@@ -26,6 +26,16 @@ vi.mock("@/lib/supabase/server", () => ({
   createServiceSupabase: () => ({}) as never,
 }));
 
+// Every prior test in this file resolves to {ok:false}, which returns
+// before ever reaching revalidatePath -- so nothing here needed a real
+// request-scoped store until the site-grant guard tests below, which are
+// the first in this file to exercise a genuine successful write.
+// revalidatePath() throws outside a Next.js request context; mocked to a
+// no-op the same way route handlers mock it elsewhere in this suite.
+vi.mock("next/cache", () => ({
+  revalidatePath: () => {},
+}));
+
 const DENIED = { ok: false, error: "You do not have permission to do that." };
 const FAKE_VIEWER = {
   id: "actor-1", email: "actor@example.com", role: "admin",
@@ -177,6 +187,49 @@ describe("lockout guards reach the caller as denials, not throws", () => {
     const result = await setRolePermissionAction("admin", "users.manage", false);
     expect(result.ok).toBe(false);
     expect(setRolePermission).not.toHaveBeenCalled();
+  });
+});
+
+describe("grantSiteAction — site-grant guard", () => {
+  // Finding 1 of the final whole-branch review: a `manage` grant on a
+  // `client` is a live PHP-execution hole via refreshInventoryAction, not
+  // a theoretical one. This exercises the real canGrantSiteAccess guard
+  // (service is not mocked in this file — see the header), through the
+  // action a signed-in admin actually calls.
+  it("refuses granting manage access to a client", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    const grantSite = vi.fn(async () => {});
+    currentRepo = fakeRepo({
+      getUser: async () => managedUser("u2", "client"),
+      grantSite,
+    });
+    const result = await grantSiteAction("u2", "site-1", "manage");
+    expect(result.ok).toBe(false);
+    expect(grantSite).not.toHaveBeenCalled();
+  });
+
+  it("allows granting read access to a client", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    const grantSite = vi.fn(async () => {});
+    currentRepo = fakeRepo({
+      getUser: async () => managedUser("u2", "client"),
+      grantSite,
+    });
+    const result = await grantSiteAction("u2", "site-1", "read");
+    expect(result.ok).toBe(true);
+    expect(grantSite).toHaveBeenCalledWith("u2", "site-1", "read", "actor-1");
+  });
+
+  it("allows granting manage access to a staff role", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    const grantSite = vi.fn(async () => {});
+    currentRepo = fakeRepo({
+      getUser: async () => managedUser("u2", "developer"),
+      grantSite,
+    });
+    const result = await grantSiteAction("u2", "site-1", "manage");
+    expect(result.ok).toBe(true);
+    expect(grantSite).toHaveBeenCalledWith("u2", "site-1", "manage", "actor-1");
   });
 });
 
