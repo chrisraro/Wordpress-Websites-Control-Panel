@@ -114,7 +114,13 @@ return json_encode(array('ok' => true, 'message' => 'Core updated to ' . $update
       return `
 require_once ABSPATH . 'wp-admin/includes/plugin.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
-global $wp_filesystem; WP_Filesystem();
+global $wp_filesystem;
+// WP_Filesystem() can fail (e.g. no direct filesystem access and no FTP_*
+// creds in wp-config.php). If we ignore that and call delete_plugins()
+// anyway, core's own request_filesystem_credentials() fallback kicks in,
+// which can require_once the wp-admin header and echo/exit mid-request,
+// breaking the JSON contract this whole feature relies on. Bail here instead.
+if (!WP_Filesystem()) { return json_encode(array('ok' => false, 'error' => 'Could not access the filesystem on this host')); }
 $f = ${phpString(pluginFile(action.file))};
 if (!array_key_exists($f, get_plugins())) { return json_encode(array('ok' => false, 'error' => 'Plugin is not installed')); }
 if (is_plugin_active($f) || is_plugin_active_for_network($f)) {
@@ -146,7 +152,13 @@ ${OK("Theme activated")}`.trim();
       return `
 require_once ABSPATH . 'wp-admin/includes/theme.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
-global $wp_filesystem; WP_Filesystem();
+global $wp_filesystem;
+// WP_Filesystem() can fail (e.g. no direct filesystem access and no FTP_*
+// creds in wp-config.php). If we ignore that and call delete_theme()
+// anyway, core's own request_filesystem_credentials() fallback kicks in,
+// which can require_once the wp-admin header and echo/exit mid-request,
+// breaking the JSON contract this whole feature relies on. Bail here instead.
+if (!WP_Filesystem()) { return json_encode(array('ok' => false, 'error' => 'Could not access the filesystem on this host')); }
 $s = ${phpString(themeSlug(action.slug))};
 $all = wp_get_themes();
 if (!isset($all[$s])) { return json_encode(array('ok' => false, 'error' => 'Theme is not installed')); }

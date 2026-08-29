@@ -76,6 +76,12 @@ describe("buildPhp — delete_plugin", () => {
   it("rejects a malformed plugin file", () => {
     expect(() => buildPhp({ kind: "delete_plugin", file: "../../evil.php" })).toThrow();
   });
+
+  it("checks WP_Filesystem()'s return value instead of calling it bare", () => {
+    const php = buildPhp({ kind: "delete_plugin", file: "akismet/akismet.php" });
+    expect(php).not.toContain("WP_Filesystem();");
+    expect(php).toContain("if (!WP_Filesystem())");
+  });
 });
 
 describe("buildPhp — activate_theme", () => {
@@ -114,6 +120,12 @@ describe("buildPhp — delete_theme", () => {
 
   it("rejects a malformed slug", () => {
     expect(() => buildPhp({ kind: "delete_theme", slug: "../evil" })).toThrow();
+  });
+
+  it("checks WP_Filesystem()'s return value instead of calling it bare", () => {
+    const php = buildPhp({ kind: "delete_theme", slug: "storefront" });
+    expect(php).not.toContain("WP_Filesystem();");
+    expect(php).toContain("if (!WP_Filesystem())");
   });
 });
 
