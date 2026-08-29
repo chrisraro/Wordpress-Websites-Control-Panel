@@ -115,9 +115,12 @@ export function SiteGrants({
           {role === "client" ? " — this client's dashboard is empty until you add one." : "."}
         </p>
       ) : (
-        <ul className="divide-y divide-hairline overflow-hidden rounded-2xl border border-hairline">
+        <ul className="divide-y divide-hairline overflow-hidden rounded-3xl border border-hairline">
           {grants.map((g) => {
-            const isConsequential = role === "client" && g.accessLevel === "manage";
+            // A null role is mid-setup and just as consequential as a client
+            // once a manage grant is in place -- see the file header and
+            // Finding 1 of docs/superpowers/sdd/task-5-report.md.
+            const isConsequential = !isStaffRole && g.accessLevel === "manage";
             const removing = pending && busy === g.siteId;
             return (
               <li
@@ -154,8 +157,8 @@ export function SiteGrants({
       )}
 
       {!isStaffRole && (
-        <div className="space-y-2 rounded-2xl border border-hairline p-3">
-          <p className={labelClass}>Add a site</p>
+        <fieldset className="space-y-2 rounded-3xl border border-hairline p-3">
+          <legend className={labelClass}>Add a site</legend>
           {availableSites.length === 0 ? (
             <p className={hintClass}>
               Every connected site is already granted, or none are connected yet.
@@ -197,7 +200,12 @@ export function SiteGrants({
                   Grant
                 </button>
               </div>
-              {addLevel === "manage" && role === "client" && (
+              {addLevel === "manage" && (
+                // This block only renders when !isStaffRole (client or null
+                // role) -- see Finding 1 of docs/superpowers/sdd/
+                // task-5-report.md. A not-yet-roled account is exactly the
+                // state where an admin is most likely to be handing out
+                // access, so it must see this warning too.
                 <p className="flex items-start gap-2 text-caption tracking-normal text-ember">
                   <IconAlert size={14} className="mt-0.5 shrink-0" />
                   Manage-level access lets this client trigger inventory refreshes, which opens a
@@ -208,7 +216,7 @@ export function SiteGrants({
               )}
             </>
           )}
-        </div>
+        </fieldset>
       )}
     </div>
   );

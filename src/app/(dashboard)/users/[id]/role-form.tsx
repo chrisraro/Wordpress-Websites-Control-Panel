@@ -12,8 +12,14 @@
  *   cannot demote themselves, not wonder where the control went. The
  *   server action re-checks against a *fresh* list at write time regardless
  *   of what this verdict says; this is only what the control displays.
- * - Demoting yourself, when the guard allows it, opens a confirmation
- *   naming the consequence before it happens -- see DEMOTE_SELF_WARNING
+ * - Changing your own role, when the guard allows it, opens a confirmation
+ *   naming the consequence before it happens -- but only when the
+ *   consequence is real. The permission matrix is editable (Task 6), so
+ *   whether a role holds `users.manage` is not fixed by the role name alone:
+ *   `rolesWithUsersManage` is read fresh from `role_permissions` by the
+ *   server (page.tsx) and crossed as a plain array of roles, never a guard
+ *   function. The confirmation only fires when the destination role the
+ *   admin actually picked is *not* in that list -- see DEMOTE_SELF_WARNING
  *   below. It is a one-way door from the acting admin's own side.
  */
 import { useState, useTransition } from "react";
@@ -40,12 +46,14 @@ const DEMOTE_SELF_WARNING =
   "yourself -- another administrator will need to change it back for you.";
 
 export function RoleForm({
-  targetId, currentRole, isSelf, verdict,
+  targetId, currentRole, isSelf, verdict, rolesWithUsersManage,
 }: {
   targetId: string;
   currentRole: AppRole | null;
   isSelf: boolean;
   verdict: { allowed: boolean; reason?: string };
+  /** Roles that currently hold `users.manage`, read fresh from `role_permissions`. */
+  rolesWithUsersManage: AppRole[];
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -55,6 +63,10 @@ export function RoleForm({
 
   const changed = role !== "" && role !== currentRole;
   const canSubmit = changed && verdict.allowed && !pending;
+  // Only meaningful for isSelf, but computed regardless of it -- cheap, and
+  // keeps the condition below a single readable expression.
+  const destinationKeepsUsersManage = role !== "" && rolesWithUsersManage.includes(role);
+  const losesUsersManage = isSelf && !destinationKeepsUsersManage;
 
   function submit() {
     if (role === "") return;
@@ -71,10 +83,12 @@ export function RoleForm({
 
   function handleSaveClick() {
     if (!canSubmit) return;
-    // Only the acting admin's own row needs the extra confirmation -- every
-    // other change is guarded server-side but not otherwise consequential
-    // enough to interrupt.
-    if (isSelf) {
+    // Only the acting admin's own row can trigger this, and only when the
+    // destination role actually lacks users.manage -- the permission matrix
+    // is editable, so a self-change is not always a loss of access even when
+    // it looks like a demotion. Every other change is guarded server-side
+    // but not otherwise consequential enough to interrupt.
+    if (losesUsersManage) {
       setConfirmOpen(true);
     } else {
       submit();

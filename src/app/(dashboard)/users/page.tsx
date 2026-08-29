@@ -86,8 +86,9 @@ export default async function UsersPage() {
                       ) : (
                         // A real, reachable state: the account exists and can
                         // sign in, but getViewer() denies it everything. It
-                        // must never render as a blank cell.
-                        <StatusBadge tone="bad">No role — cannot sign in</StatusBadge>
+                        // must never render as a blank cell. See Finding 4 of
+                        // docs/superpowers/sdd/task-5-report.md.
+                        <StatusBadge tone="bad">No role — sees nothing</StatusBadge>
                       )}
                     </td>
                     <td className={`${tableCellClass} text-mid-gray`} data-tabular>

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
@@ -140,9 +141,18 @@ export async function setUserRoleAction(
   return result;
 }
 
+/**
+ * Bound as `deleteUserAction.bind(null, userId)` and handed to `ManageForm`
+ * (see src/app/(dashboard)/sites/[id]/action-form.tsx) exactly like
+ * testConnectionAction and the manage-actions in sites/[id] -- so, like
+ * those, the prevState parameter is typed as the loose `{ ok; error? } |
+ * null` shape ManageForm's useActionState expects, not the stricter
+ * `ActionResult` used for this account's own return value and elsewhere in
+ * this module.
+ */
 export async function deleteUserAction(
   userId: string,
-  _prevState?: ActionResult,
+  _prevState?: { ok: boolean; error?: string } | null,
   _formData?: FormData,
 ): Promise<ActionResult> {
   const user = await requireUser();
@@ -158,6 +168,12 @@ export async function deleteUserAction(
   if (result.ok) {
     revalidatePath("/users");
     revalidatePath(`/users/${userId}`);
+    // Mirrors createSite's redirect() in sites/new/actions.ts: the page this
+    // account was on no longer refers to anything, so leave for the
+    // directory immediately rather than lingering. Called outside the
+    // try/catch above -- redirect() throws a NEXT_REDIRECT digest that must
+    // propagate, not be caught as a failure.
+    redirect("/users");
   }
   return result;
 }
