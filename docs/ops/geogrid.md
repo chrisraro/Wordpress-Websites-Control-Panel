@@ -50,25 +50,33 @@ The panel sends:
 }
 ```
 
-Your workflow replies (any time within 30 minutes):
+Your workflow replies (any time within 30 minutes), echoing `run_id` back
+exactly as received — including its `:<attempt>` suffix if the panel sent
+one (see "The panel sends" above; treat the whole string as opaque):
 
 ```json
-{ "run_id": "<same uuid>", "ranks": [{ "idx": 0, "rank": 4, "measured": true }] }
+{ "run_id": "<run_id exactly as received, e.g. \"abc123:0\">", "ranks": [{ "idx": 0, "rank": 4, "measured": true }] }
 ```
 
-`measured` is optional and defaults to `true`, for compatibility with a workflow
-that hasn't been updated yet — every entry an old workflow posts is a real
-lookup. Send `measured: false` (with `rank` omitted or ignored) for a point
-whose lookup failed; a point missing from `ranks[]` entirely is treated the
-same way. Only a **literal boolean** `false` counts — a stringified
-`"false"` is not recognised as unmeasured, so make sure your workflow doesn't
-coerce it to a string.
+`measured` is optional: **omitting the field entirely** defaults to `true`,
+for compatibility with a workflow that hasn't been updated yet — every entry
+an old workflow posts is a real lookup. Any value that *is* present but is
+not the **literal boolean** `true` is read as **not measured** — this
+correctly catches `false`, but it also catches a stringified `"true"` or
+`"false"`, `1`, or anything else your workflow's Set/Code nodes might coerce
+the field to. That fails closed (an ambiguous value is never promoted to "did
+rank"), but it means a workflow that stringifies booleans and sends
+`measured: "true"` will have every one of its real measurements silently
+recorded as unmeasured, with no error anywhere — make sure your workflow
+emits an actual boolean. Send `measured: false` (with `rank` omitted or
+ignored) for a point whose lookup failed; a point missing from `ranks[]`
+entirely is treated the same way.
 
 Or reports a total failure — nothing could be measured at all — which retries
 the job on the normal backoff and fails it only once that's exhausted:
 
 ```json
-{ "run_id": "<same uuid>", "error": "SERP provider quota exceeded" }
+{ "run_id": "<run_id exactly as received>", "error": "SERP provider quota exceeded" }
 ```
 
 Never send `error` alongside a non-empty `ranks[]`: a body carrying both is
@@ -102,10 +110,16 @@ result — so check them explicitly when adapting an existing workflow.
   An entry whose `idx` is not a number is skipped, as is a second entry for an
   `idx` already seen (the first wins). A `rank` that is not a number in 1–20
   becomes `null` silently — that includes `"3"` as a string. `measured` must
-  be a literal boolean; anything else (including the string `"false"`) is
-  treated as absent, i.e. measured.
-- **`run_id` must be echoed unchanged.** A wrong or stale id gets
-  `404 no run awaiting this id`, which is the clearest signal you have that the
-  callback shape is wrong — check for it when testing.
+  be the literal boolean `true` to count as measured; anything else present —
+  including the string `"false"`, or a stringified `"true"` — is treated as
+  **not measured** (fails closed). Only *omitting* the field entirely
+  defaults to measured, for backward compatibility with workflows that
+  predate this field.
+- **`run_id` must be echoed unchanged**, including its `:<attempt>` suffix if
+  the panel sent one — never parse or regenerate it. A wrong or expired id
+  gets `404 no run awaiting this id`; a `run_id` for an attempt the job has
+  since moved on from (e.g. a late callback from a since-retried execution)
+  gets `404 stale attempt` instead. Either is the clearest signal you have
+  that the callback shape or timing is wrong — check for both when testing.
 - **Deadline is 30 minutes**; runs that never call back fail and retry on the
   normal job backoff.
