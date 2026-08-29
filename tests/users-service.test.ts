@@ -1,0 +1,430 @@
+import { describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { supabaseUsersRepo } from "@/services/users/repo";
+import type { UsersRepo } from "@/services/users/repo";
+import {
+  changeUserRole,
+  deleteManagedUser,
+  setRolePermissionChecked,
+} from "@/services/users/service";
+import type { ManagedUser } from "@/services/users/types";
+
+/**
+ * A fake shaped like a supabase-js client: `auth.admin.*` for the auth admin
+ * API, and `from(table)` returning a chainable, thenable query builder — the
+ * same style as tests/authz-server.test.ts's fakeDb, extended with upsert and
+ * delete so the write paths (setRole, grantSite, ...) are exercised too.
+ */
+type Row = Record<string, unknown>;
+type AdminUser = { id: string; email?: string; last_sign_in_at?: string; action_link?: string };
+
+const CONFLICT_KEYS: Record<string, string[]> = {
+  user_roles: ["user_id"],
+  user_site_access: ["user_id", "site_id"],
+  role_permissions: ["role", "permission"],
+};
+
+function fakeDb(opts: {
+  authUsersPages?: AdminUser[][];
+  userRoles?: Row[];
+  userSiteAccess?: Row[];
+  rolePermissions?: Row[];
+  inviteResult?: { data: { user: AdminUser | null }; error: { message: string } | null };
+}) {
+  const state: Record<string, Row[]> = {
+    user_roles: [...(opts.userRoles ?? [])],
+    user_site_access: [...(opts.userSiteAccess ?? [])],
+    role_permissions: [...(opts.rolePermissions ?? [])],
+  };
+  const calls = {
+    listUsersPages: [] as number[],
+    deleteUser: [] as string[],
+    invite: [] as { email: string; opts: unknown }[],
+  };
+
+  function builder(table: string) {
+    const filters: [string, unknown][] = [];
+    let isDelete = false;
+    const api = {
+      select() {
+        return api;
+      },
+      eq(k: string, v: unknown) {
+        filters.push([k, v]);
+        return api;
+      },
+      delete() {
+        isDelete = true;
+        return api;
+      },
+      upsert(row: Row) {
+        const keyCols = CONFLICT_KEYS[table] ?? [];
+        state[table] = state[table].filter((r) => !keyCols.every((k) => r[k] === row[k]));
+        state[table] = [...state[table], row];
+        return Promise.resolve({ error: null });
+      },
+      then(resolve: (v: unknown) => void, reject?: (e: unknown) => void) {
+        let result: unknown;
+        if (isDelete) {
+          state[table] = state[table].filter(
+            (r) => !filters.every(([k, v]) => r[k] === v),
+          );
+          result = { error: null };
+        } else {
+          let rows = state[table];
+          for (const [k, v] of filters) rows = rows.filter((r) => r[k] === v);
+          result = { data: rows, error: null };
+        }
+        return Promise.resolve(result).then(resolve, reject);
+      },
+    };
+    return api;
+  }
+
+  const pages = opts.authUsersPages ?? [[]];
+  const db = {
+    auth: {
+      admin: {
+        async listUsers({ page }: { page: number; perPage: number }) {
+          calls.listUsersPages.push(page);
+          const users = pages[page - 1] ?? [];
+          return { data: { users, aud: "authenticated" }, error: null };
+        },
+        async getUserById(id: string) {
+          const u = pages.flat().find((u) => u.id === id);
+          return { data: { user: u ?? null }, error: null };
+        },
+        async deleteUser(id: string) {
+          calls.deleteUser.push(id);
+          return { data: {}, error: null };
+        },
+        async inviteUserByEmail(email: string, inviteOpts: unknown) {
+          calls.invite.push({ email, opts: inviteOpts });
+          return (
+            opts.inviteResult ?? {
+              data: { user: { id: "new-user-id", email } },
+              error: null,
+            }
+          );
+        },
+      },
+    },
+    from(table: string) {
+      return builder(table);
+    },
+  } as unknown as SupabaseClient;
+
+  return { db, state, calls };
+}
+
+describe("supabaseUsersRepo — listUsers composition", () => {
+  it("lists a user with no user_roles row, with role: null", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+      userRoles: [],
+    });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    expect(users).toEqual([
+      {
+        id: "u1",
+        email: "u1@example.com",
+        role: null,
+        lastSignInAt: "2026-01-01T00:00:00Z",
+        invitedNotAccepted: false,
+        siteGrants: 0,
+      },
+    ]);
+  });
+
+  it("attaches the role from user_roles when a row exists", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+      userRoles: [{ user_id: "u1", role: "admin" }],
+    });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    expect(users[0].role).toBe("admin");
+  });
+
+  it("counts site grants per user", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [
+        [
+          { id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" },
+          { id: "u2", email: "u2@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" },
+        ],
+      ],
+      userSiteAccess: [
+        { user_id: "u1", site_id: "s1", access_level: "read" },
+        { user_id: "u1", site_id: "s2", access_level: "manage" },
+        { user_id: "u2", site_id: "s1", access_level: "read" },
+      ],
+    });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    const byId = new Map(users.map((u) => [u.id, u]));
+    expect(byId.get("u1")?.siteGrants).toBe(2);
+    expect(byId.get("u2")?.siteGrants).toBe(1);
+  });
+
+  it("marks invitedNotAccepted when last_sign_in_at is null", async () => {
+    const { db } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com" }]],
+    });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    expect(users[0].invitedNotAccepted).toBe(true);
+    expect(users[0].lastSignInAt).toBeNull();
+  });
+
+  it("pages past the default 50-per-page limit instead of silently stopping", async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ({
+      id: `u${i}`,
+      email: `u${i}@example.com`,
+      last_sign_in_at: "2026-01-01T00:00:00Z",
+    }));
+    const page2 = [{ id: "u50", email: "u50@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }];
+    const { db, calls } = fakeDb({ authUsersPages: [page1, page2] });
+    const repo = supabaseUsersRepo(db);
+    const users = await repo.listUsers();
+    expect(users).toHaveLength(51);
+    expect(users.map((u) => u.id)).toContain("u50");
+    expect(calls.listUsersPages).toEqual([1, 2]);
+  });
+
+  it("stops after a single short page", async () => {
+    const { db, calls } = fakeDb({
+      authUsersPages: [[{ id: "u1", email: "u1@example.com", last_sign_in_at: "2026-01-01T00:00:00Z" }]],
+    });
+    const repo = supabaseUsersRepo(db);
+    await repo.listUsers();
+    expect(calls.listUsersPages).toEqual([1]);
+  });
+});
+
+describe("supabaseUsersRepo — writes", () => {
+  it("setRole upserts into user_roles keyed on user_id", async () => {
+    const { db, state } = fakeDb({});
+    const repo = supabaseUsersRepo(db);
+    await repo.setRole("u1", "developer", "actor-1");
+    expect(state.user_roles).toEqual([
+      { user_id: "u1", role: "developer", granted_by: "actor-1" },
+    ]);
+  });
+
+  it("deleteUser calls the auth admin API", async () => {
+    const { db, calls } = fakeDb({});
+    const repo = supabaseUsersRepo(db);
+    await repo.deleteUser("u1");
+    expect(calls.deleteUser).toEqual(["u1"]);
+  });
+
+  it("listGrants returns this user's site grants only", async () => {
+    const { db } = fakeDb({
+      userSiteAccess: [
+        { user_id: "u1", site_id: "s1", access_level: "read" },
+        { user_id: "u2", site_id: "s2", access_level: "manage" },
+      ],
+    });
+    const repo = supabaseUsersRepo(db);
+    const grants = await repo.listGrants("u1");
+    expect(grants).toEqual([{ siteId: "s1", accessLevel: "read" }]);
+  });
+
+  it("grantSite upserts a user_site_access row", async () => {
+    const { db, state } = fakeDb({});
+    const repo = supabaseUsersRepo(db);
+    await repo.grantSite("u1", "s1", "manage", "actor-1");
+    expect(state.user_site_access).toEqual([
+      { user_id: "u1", site_id: "s1", access_level: "manage", granted_by: "actor-1" },
+    ]);
+  });
+
+  it("revokeSite deletes the matching user_site_access row", async () => {
+    const { db, state } = fakeDb({
+      userSiteAccess: [
+        { user_id: "u1", site_id: "s1", access_level: "read" },
+        { user_id: "u1", site_id: "s2", access_level: "read" },
+      ],
+    });
+    const repo = supabaseUsersRepo(db);
+    await repo.revokeSite("u1", "s1");
+    expect(state.user_site_access).toEqual([{ user_id: "u1", site_id: "s2", access_level: "read" }]);
+  });
+
+  it("listRolePermissions returns the whole matrix", async () => {
+    const { db } = fakeDb({
+      rolePermissions: [{ role: "admin", permission: "users.manage" }],
+    });
+    const repo = supabaseUsersRepo(db);
+    expect(await repo.listRolePermissions()).toEqual([{ role: "admin", permission: "users.manage" }]);
+  });
+
+  it("setRolePermission(enabled: true) upserts the row", async () => {
+    const { db, state } = fakeDb({});
+    const repo = supabaseUsersRepo(db);
+    await repo.setRolePermission("developer", "seo.run", true);
+    expect(state.role_permissions).toEqual([{ role: "developer", permission: "seo.run" }]);
+  });
+
+  it("setRolePermission(enabled: false) deletes the row", async () => {
+    const { db, state } = fakeDb({
+      rolePermissions: [{ role: "developer", permission: "seo.run" }],
+    });
+    const repo = supabaseUsersRepo(db);
+    await repo.setRolePermission("developer", "seo.run", false);
+    expect(state.role_permissions).toEqual([]);
+  });
+
+  it("inviteUser returns the action link when Supabase provides one", async () => {
+    const { db } = fakeDb({
+      inviteResult: {
+        data: { user: { id: "new-user", email: "new@example.com", action_link: "https://example.com/verify?token=abc" } },
+        error: null,
+      },
+    });
+    const repo = supabaseUsersRepo(db);
+    const result = await repo.inviteUser("new@example.com", "https://app.example.com/login");
+    expect(result).toEqual({ id: "new-user", inviteLink: "https://example.com/verify?token=abc" });
+  });
+
+  it("inviteUser returns inviteLink: null when Supabase does not provide an action_link", async () => {
+    const { db } = fakeDb({
+      inviteResult: { data: { user: { id: "new-user", email: "new@example.com" } }, error: null },
+    });
+    const repo = supabaseUsersRepo(db);
+    const result = await repo.inviteUser("new@example.com", "https://app.example.com/login");
+    expect(result).toEqual({ id: "new-user", inviteLink: null });
+  });
+
+  it("inviteUser throws when Supabase returns an error", async () => {
+    const { db } = fakeDb({
+      inviteResult: { data: { user: null }, error: { message: "rate limited" } },
+    });
+    const repo = supabaseUsersRepo(db);
+    await expect(repo.inviteUser("new@example.com", "https://app.example.com/login")).rejects.toThrow(
+      /rate limited/,
+    );
+  });
+});
+
+/** In-memory UsersRepo fake for the service layer — see tests/bulk-service.test.ts. */
+function memoryUsersRepo(initialUsers: ManagedUser[]) {
+  let users = [...initialUsers];
+  const setRoleCalls: { userId: string; role: string; grantedBy: string }[] = [];
+  const deleteCalls: string[] = [];
+  const setRolePermissionCalls: { role: string; permission: string; enabled: boolean }[] = [];
+
+  const repo: UsersRepo = {
+    async listUsers() {
+      return users;
+    },
+    async getUser(id) {
+      return users.find((u) => u.id === id) ?? null;
+    },
+    async setRole(userId, role, grantedBy) {
+      setRoleCalls.push({ userId, role, grantedBy });
+      users = users.map((u) => (u.id === userId ? { ...u, role } : u));
+    },
+    async deleteUser(id) {
+      deleteCalls.push(id);
+      users = users.filter((u) => u.id !== id);
+    },
+    async listGrants() {
+      return [];
+    },
+    async grantSite() {},
+    async revokeSite() {},
+    async listRolePermissions() {
+      return [];
+    },
+    async setRolePermission(role, permission, enabled) {
+      setRolePermissionCalls.push({ role, permission, enabled });
+    },
+    async inviteUser(email) {
+      return { id: `invited-${email}`, inviteLink: null };
+    },
+  };
+  return { repo, setRoleCalls, deleteCalls, setRolePermissionCalls, getUsers: () => users };
+}
+
+const managedUser = (id: string, role: ManagedUser["role"]): ManagedUser => ({
+  id,
+  email: `${id}@example.com`,
+  role,
+  lastSignInAt: null,
+  invitedNotAccepted: false,
+  siteGrants: 0,
+});
+
+describe("changeUserRole", () => {
+  it("applies the guard's refusal instead of writing when demoting the last admin", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([managedUser("a1", "admin")]);
+    const result = await changeUserRole(repo, "a1", "a1", "developer");
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/last admin/i) });
+    expect(setRoleCalls).toHaveLength(0);
+  });
+
+  it("writes the new role when the guard allows it", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"),
+      managedUser("a2", "admin"),
+    ]);
+    const result = await changeUserRole(repo, "a1", "a2", "developer");
+    expect(result).toEqual({ ok: true });
+    expect(setRoleCalls).toEqual([{ userId: "a2", role: "developer", grantedBy: "a1" }]);
+  });
+
+  it("evaluates the guard against a freshly read list, not a stale caller-supplied one", async () => {
+    // The repo's live list has two admins even though a caller might be
+    // holding a stale snapshot with only one. The guard must see the fresh
+    // list, so demoting a2 is allowed.
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"),
+      managedUser("a2", "admin"),
+    ]);
+    const result = await changeUserRole(repo, "a1", "a2", "client");
+    expect(result.ok).toBe(true);
+    expect(setRoleCalls).toHaveLength(1);
+  });
+});
+
+describe("deleteManagedUser", () => {
+  it("refuses deleting the last admin", async () => {
+    const { repo, deleteCalls } = memoryUsersRepo([managedUser("a1", "admin"), managedUser("d1", "developer")]);
+    const result = await deleteManagedUser(repo, "d1", "a1");
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/last admin/i) });
+    expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("refuses deleting yourself", async () => {
+    const { repo, deleteCalls } = memoryUsersRepo([managedUser("a1", "admin"), managedUser("a2", "admin")]);
+    const result = await deleteManagedUser(repo, "a1", "a1");
+    expect(result.ok).toBe(false);
+    expect(deleteCalls).toHaveLength(0);
+  });
+
+  it("deletes when the guard allows it", async () => {
+    const { repo, deleteCalls } = memoryUsersRepo([managedUser("a1", "admin"), managedUser("a2", "admin")]);
+    const result = await deleteManagedUser(repo, "a1", "a2");
+    expect(result).toEqual({ ok: true });
+    expect(deleteCalls).toEqual(["a2"]);
+  });
+});
+
+describe("setRolePermissionChecked", () => {
+  it("refuses stripping users.manage from admin", async () => {
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([]);
+    const result = await setRolePermissionChecked(repo, "admin", "users.manage", false);
+    expect(result.ok).toBe(false);
+    expect(setRolePermissionCalls).toHaveLength(0);
+  });
+
+  it("writes when the guard allows it", async () => {
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([]);
+    const result = await setRolePermissionChecked(repo, "developer", "seo.run", false);
+    expect(result).toEqual({ ok: true });
+    expect(setRolePermissionCalls).toEqual([{ role: "developer", permission: "seo.run", enabled: false }]);
+  });
+});

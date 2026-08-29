@@ -1,4 +1,4 @@
-import type { AppRole } from "@/lib/authz/types";
+import type { AppPermission, AppRole, SiteAccessLevel } from "@/lib/authz/types";
 
 /**
  * One row of the user directory. `role` is nullable because an account can
@@ -23,3 +23,15 @@ export type GuardVerdict = { allowed: true } | { allowed: false; reason: string 
 
 export const ALLOWED: GuardVerdict = { allowed: true };
 export const refuse = (reason: string): GuardVerdict => ({ allowed: false, reason });
+
+/** One `user_site_access` row for a single user. */
+export interface SiteGrant {
+  siteId: string;
+  accessLevel: SiteAccessLevel;
+}
+
+/** One `role_permissions` row: `permission` is enabled for `role`. */
+export interface RolePermissionRow {
+  role: AppRole;
+  permission: AppPermission;
+}
