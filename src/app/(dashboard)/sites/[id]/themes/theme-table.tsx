@@ -46,11 +46,14 @@ const KIND_LABEL: Record<ThemeBulkKind, string> = {
 const BULK_KINDS: ThemeBulkKind[] = ["update", "delete"];
 
 export function ThemeTable({
-  siteId, siteName, themes,
+  siteId, siteName, themes, canManage,
 }: {
   siteId: string;
   siteName: string;
   themes: ThemeInfo[];
+  /** Whether the viewer holds wp_toolkit.manage — read-only viewers (clients)
+   *  get the table without selection, per-row actions, or the bulk bar. */
+  canManage: boolean;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -111,14 +114,16 @@ export function ThemeTable({
           <table className="w-full min-w-[640px] text-body">
             <thead>
               <tr className={tableHeadClass}>
-                <th className="w-10 px-2 py-3">
-                  <SelectAllCheckbox allChecked={allChecked} someChecked={someChecked} onChange={toggleAll} />
-                </th>
+                {canManage && (
+                  <th className="w-10 px-2 py-3">
+                    <SelectAllCheckbox allChecked={allChecked} someChecked={someChecked} onChange={toggleAll} />
+                  </th>
+                )}
                 <th className="px-5 py-3 font-medium">Theme</th>
                 <th className="px-5 py-3 font-medium">Version</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Update</th>
-                <th className="px-5 py-3 text-right font-medium">Actions</th>
+                {canManage && <th className="px-5 py-3 text-right font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -143,9 +148,11 @@ export function ThemeTable({
 
                 return (
                   <tr key={t.name} className={tableRowClass}>
-                    <td className="w-10 px-2 py-3">
-                      <RowCheckbox checked={isSelected(t.name)} onChange={() => toggle(t.name)} label={name} />
-                    </td>
+                    {canManage && (
+                      <td className="w-10 px-2 py-3">
+                        <RowCheckbox checked={isSelected(t.name)} onChange={() => toggle(t.name)} label={name} />
+                      </td>
+                    )}
                     <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
                     <td className={`${tableCellClass} text-mid-gray`}>{t.version}</td>
                     <td className={tableCellClass}>
@@ -158,6 +165,7 @@ export function ThemeTable({
                         <span className="text-caption tracking-normal text-mid-gray">current</span>
                       )}
                     </td>
+                    {canManage && (
                     <td className={tableCellClass}>
                       <div className="flex flex-col items-end gap-1.5">
                         <div className="flex flex-wrap justify-end gap-2">
@@ -218,6 +226,7 @@ export function ThemeTable({
                         )}
                       </div>
                     </td>
+                    )}
                   </tr>
                 );
               })}
@@ -226,7 +235,7 @@ export function ThemeTable({
         </div>
       </Card>
 
-      <BulkBar count={selected.length} actions={bulkActions} onClear={clear} />
+      {canManage && <BulkBar count={selected.length} actions={bulkActions} onClear={clear} />}
 
       <ConfirmDialog
         open={confirmKind !== null}

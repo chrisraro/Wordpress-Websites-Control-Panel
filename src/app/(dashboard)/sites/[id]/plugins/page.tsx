@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
 import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
@@ -20,14 +21,17 @@ export const maxDuration = 300;
 
 export default async function PluginsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireSiteAccess(id);
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
   const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
   const plugins = snapshot?.payload.plugins ?? [];
   const updatable = plugins.filter((p) => p.update === "available");
   const active = plugins.filter((p) => p.status === "active").length;
+
+  const canManageToolkit = can(viewer, "wp_toolkit.manage");
+  const canRefresh = canAccessSite(viewer, id, "manage");
 
   const refresh = refreshInventoryAction.bind(null, id);
   const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const });
@@ -56,19 +60,23 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           )}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Link href="/marketplace" className={buttonClass("outline")}>
-            <IconPlus size={16} />
-            Install plugin
-          </Link>
-          <ManageForm
-            action={refresh}
-            label="Refresh inventory"
-            pendingLabel="Refreshing…"
-            success="Inventory refreshed"
-            icon={<IconRefresh size={16} />}
-            showInlineError={false}
-          />
-          {updatable.length > 0 && (
+          {canManageToolkit && (
+            <Link href="/marketplace" className={buttonClass("outline")}>
+              <IconPlus size={16} />
+              Install plugin
+            </Link>
+          )}
+          {canRefresh && (
+            <ManageForm
+              action={refresh}
+              label="Refresh inventory"
+              pendingLabel="Refreshing…"
+              success="Inventory refreshed"
+              icon={<IconRefresh size={16} />}
+              showInlineError={false}
+            />
+          )}
+          {canManageToolkit && updatable.length > 0 && (
             <ManageForm
               action={updateAll}
               label={`Update all (${updatable.length})`}
@@ -99,7 +107,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           </EmptyState>
         </Card>
       ) : (
-        <PluginTable siteId={id} siteName={site.name} plugins={plugins} />
+        <PluginTable siteId={id} siteName={site.name} plugins={plugins} canManage={canManageToolkit} />
       )}
     </main>
   );

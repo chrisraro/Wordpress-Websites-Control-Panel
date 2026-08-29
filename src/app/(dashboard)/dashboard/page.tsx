@@ -2,8 +2,8 @@ import Link from "next/link";
 import { listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
 import { requireViewer } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -32,7 +32,7 @@ function seoTone(score: number): StatusTone {
 
 export default async function DashboardPage() {
   const viewer = await requireViewer();
-  const db = createServiceSupabase();
+  const db = await readDbFor(viewer);
   const sites = await listSitesForViewer({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, viewer);
   const snapshots = supabaseSnapshotsRepo(db);
   const securityRepo = supabaseSecurityRepo(db);

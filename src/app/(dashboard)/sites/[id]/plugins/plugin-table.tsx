@@ -36,11 +36,14 @@ const KIND_LABEL: Record<BulkKind, string> = {
 const BULK_KINDS: BulkKind[] = ["update", "activate", "deactivate", "delete"];
 
 export function PluginTable({
-  siteId, siteName, plugins,
+  siteId, siteName, plugins, canManage,
 }: {
   siteId: string;
   siteName: string;
   plugins: PluginInfo[];
+  /** Whether the viewer holds wp_toolkit.manage — read-only viewers (clients)
+   *  get the table without selection, per-row actions, or the bulk bar. */
+  canManage: boolean;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -101,14 +104,16 @@ export function PluginTable({
           <table className="w-full min-w-[640px] text-body">
             <thead>
               <tr className={tableHeadClass}>
-                <th className="w-10 px-2 py-3">
-                  <SelectAllCheckbox allChecked={allChecked} someChecked={someChecked} onChange={toggleAll} />
-                </th>
+                {canManage && (
+                  <th className="w-10 px-2 py-3">
+                    <SelectAllCheckbox allChecked={allChecked} someChecked={someChecked} onChange={toggleAll} />
+                  </th>
+                )}
                 <th className="px-5 py-3 font-medium">Plugin</th>
                 <th className="px-5 py-3 font-medium">Version</th>
                 <th className="px-5 py-3 font-medium">Status</th>
                 <th className="px-5 py-3 font-medium">Update</th>
-                <th className="px-5 py-3 text-right font-medium">Actions</th>
+                {canManage && <th className="px-5 py-3 text-right font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -128,9 +133,11 @@ export function PluginTable({
                 const name = p.title || p.name;
                 return (
                   <tr key={p.file} className={tableRowClass}>
-                    <td className="w-10 px-2 py-3">
-                      <RowCheckbox checked={isSelected(p.file)} onChange={() => toggle(p.file)} label={name} />
-                    </td>
+                    {canManage && (
+                      <td className="w-10 px-2 py-3">
+                        <RowCheckbox checked={isSelected(p.file)} onChange={() => toggle(p.file)} label={name} />
+                      </td>
+                    )}
                     <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
                     <td className={`${tableCellClass} text-mid-gray`}>{p.version}</td>
                     <td className={tableCellClass}>
@@ -145,6 +152,7 @@ export function PluginTable({
                         <span className="text-caption tracking-normal text-mid-gray">current</span>
                       )}
                     </td>
+                    {canManage && (
                     <td className={tableCellClass}>
                       <div className="flex flex-wrap justify-end gap-2">
                         {p.update === "available" && (
@@ -212,6 +220,7 @@ export function PluginTable({
                         )}
                       </div>
                     </td>
+                    )}
                   </tr>
                 );
               })}
@@ -220,7 +229,7 @@ export function PluginTable({
         </div>
       </Card>
 
-      <BulkBar count={selected.length} actions={bulkActions} onClear={clear} />
+      {canManage && <BulkBar count={selected.length} actions={bulkActions} onClear={clear} />}
 
       <ConfirmDialog
         open={confirmKind !== null}

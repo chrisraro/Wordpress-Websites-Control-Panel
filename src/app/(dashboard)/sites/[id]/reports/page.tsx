@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { getSite } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
-import { createServiceSupabase } from "@/lib/supabase/server";
 import { requireSiteAccess } from "@/lib/authz/server";
+import { readDbFor } from "@/lib/authz/db";
+import { can } from "@/lib/authz/decide";
 import { supabaseReportsRepo } from "@/services/reports/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
@@ -25,11 +26,12 @@ const SECTION_LABELS: Record<string, string> = {
 
 export default async function ReportsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await requireSiteAccess(id);
-  const db = createServiceSupabase();
+  const viewer = await requireSiteAccess(id);
+  const db = await readDbFor(viewer);
   const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient }, id);
   if (!site) notFound();
   const reports = await supabaseReportsRepo(db).listForSite(id, 20);
+  const canManageReports = can(viewer, "reports.manage");
 
   return (
     <main>
@@ -109,22 +111,24 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
                           {r.share_token && (
                             <>
                               <CopyLinkButton path={`/r/${r.share_token}`} />
-                              <ManageForm
-                                action={revoke}
-                                label="Revoke"
-                                pendingLabel="Revoking…"
-                                success="Share link revoked"
-                                size="sm"
-                                variant="danger"
-                                confirm={{
-                                  title: "Revoke this share link?",
-                                  description:
-                                    "Anyone holding the link loses access immediately, and the PDF stops being served. This cannot be undone — generate a new report to share again.",
-                                  confirmLabel: "Revoke link",
-                                  tone: "danger",
-                                }}
-                                showInlineError={false}
-                              />
+                              {canManageReports && (
+                                <ManageForm
+                                  action={revoke}
+                                  label="Revoke"
+                                  pendingLabel="Revoking…"
+                                  success="Share link revoked"
+                                  size="sm"
+                                  variant="danger"
+                                  confirm={{
+                                    title: "Revoke this share link?",
+                                    description:
+                                      "Anyone holding the link loses access immediately, and the PDF stops being served. This cannot be undone — generate a new report to share again.",
+                                    confirmLabel: "Revoke link",
+                                    tone: "danger",
+                                  }}
+                                  showInlineError={false}
+                                />
+                              )}
                             </>
                           )}
                         </div>
