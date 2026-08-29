@@ -8,9 +8,10 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
 import { ManageForm } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
+import { PluginTable } from "./plugin-table";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
-import { Card, EmptyState, StatusBadge } from "@/components/ui/primitives";
-import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
+import { Card, EmptyState } from "@/components/ui/primitives";
+import { buttonClass } from "@/components/ui/styles";
 import { IconPlugins, IconPlus, IconRefresh } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
@@ -83,114 +84,21 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      <Card className="overflow-hidden">
-        {plugins.length === 0 ? (
-          <EmptyState
-            icon={<IconPlugins size={28} />}
-            title={snapshot ? "No plugins installed" : "No inventory yet"}
-          >
-            {snapshot
-              ? "Install one from the Marketplace to get started."
-              : "Refresh the inventory to pull the current plugin list from the site."}
+      {!snapshot ? (
+        <Card className="overflow-hidden">
+          <EmptyState icon={<IconPlugins size={28} />} title="No inventory yet">
+            Refresh the inventory to pull the current plugin list from the site.
           </EmptyState>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-body">
-              <thead>
-                <tr className={tableHeadClass}>
-                  <th className="px-5 py-3 font-medium">Plugin</th>
-                  <th className="px-5 py-3 font-medium">Version</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3 font-medium">Update</th>
-                  <th className="px-5 py-3 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plugins.map((p) => {
-                  const activate = manageAction.bind(null, id, {
-                    kind: "activate_plugin" as const, file: p.file,
-                  });
-                  const deactivate = manageAction.bind(null, id, {
-                    kind: "deactivate_plugin" as const, file: p.file,
-                  });
-                  const update = manageAction.bind(null, id, {
-                    kind: "update_plugin" as const, file: p.file,
-                  });
-                  const name = p.title || p.name;
-                  return (
-                    <tr key={p.file} className={tableRowClass}>
-                      <td className={`${tableCellClass} font-medium text-ink`}>{name}</td>
-                      <td className={`${tableCellClass} text-mid-gray`}>{p.version}</td>
-                      <td className={tableCellClass}>
-                        <StatusBadge tone={p.status === "active" ? "good" : "idle"}>
-                          {p.status}
-                        </StatusBadge>
-                      </td>
-                      <td className={tableCellClass}>
-                        {p.update === "available" ? (
-                          <StatusBadge tone="warn">{p.update_version ?? "available"}</StatusBadge>
-                        ) : (
-                          <span className="text-caption tracking-normal text-mid-gray">current</span>
-                        )}
-                      </td>
-                      <td className={tableCellClass}>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          {p.update === "available" && (
-                            <ManageForm
-                              action={update}
-                              label="Update"
-                              pendingLabel="Updating…"
-                              success={`${name} updated`}
-                              size="sm"
-                              confirm={{
-                                title: `Update ${name}?`,
-                                description: `Version ${p.version} will be replaced with ${p.update_version ?? "the latest release"} on ${site.name}.`,
-                                confirmLabel: "Update",
-                              }}
-                              showInlineError={false}
-                            />
-                          )}
-                          {p.status === "active" ? (
-                            <ManageForm
-                              action={deactivate}
-                              label="Deactivate"
-                              pendingLabel="Deactivating…"
-                              success={`${name} deactivated`}
-                              size="sm"
-                              variant="danger"
-                              confirm={{
-                                title: `Deactivate ${name}?`,
-                                description: `Any functionality this plugin provides will stop working on ${site.name} immediately. You can reactivate it from this page.`,
-                                confirmLabel: "Deactivate",
-                                tone: "danger",
-                              }}
-                              showInlineError={false}
-                            />
-                          ) : (
-                            <ManageForm
-                              action={activate}
-                              label="Activate"
-                              pendingLabel="Activating…"
-                              success={`${name} activated`}
-                              size="sm"
-                              confirm={{
-                                title: `Activate ${name}?`,
-                                description: `The plugin will start running on ${site.name} straight away.`,
-                                confirmLabel: "Activate",
-                              }}
-                              showInlineError={false}
-                            />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+        </Card>
+      ) : plugins.length === 0 ? (
+        <Card className="overflow-hidden">
+          <EmptyState icon={<IconPlugins size={28} />} title="No plugins installed">
+            Install one from the Marketplace to get started.
+          </EmptyState>
+        </Card>
+      ) : (
+        <PluginTable siteId={id} siteName={site.name} plugins={plugins} />
+      )}
     </main>
   );
 }
