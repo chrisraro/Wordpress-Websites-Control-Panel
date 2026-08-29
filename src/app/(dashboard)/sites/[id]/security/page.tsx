@@ -38,6 +38,7 @@ const CHECK_LABELS: Record<string, string> = {
   wp_config_permissions: "wp-config.php permissions", xmlrpc_enabled: "XML-RPC blocked",
   uploads_listing: "Directory listing off", security_headers: "Clickjacking headers",
   core_checksums: "Core files unmodified", wordfence_feed: "Vulnerability feed",
+  wordfence_feed_stale: "Vulnerability feed stale",
 };
 
 export default async function SecurityPage({ params }: { params: Promise<{ id: string }> }) {
