@@ -94,13 +94,15 @@ On the 1st of each month the nightly enqueue queues one report per site
 automatically (marked "Monthly" in the table). Requires migration
 `0004_storage_reports.sql` for the private `reports` bucket.
 
-## Authorization
+## Authorization and user management
 
 Four roles (`admin`, `developer`, `content_writer`, `client`), an editable
 permission matrix, and per-site grants for clients — every server action,
 page, and RLS policy checks against the same rules. A client sees only the
 sites explicitly granted to them, read-only, with credential-adjacent fields
-hidden. Requires migrations `0006`–`0008` and `npm run bootstrap:admin` before
-enforcement goes live — see `docs/ops/authorization.md` for the role matrix,
-how to change a role or grant by SQL, and how to re-run the live database
-check (`npm run verify:rls`).
+hidden. `/users` invites people (a one-time link, since email delivery isn't
+guaranteed), manages roles and site grants, and refuses anything that would
+leave the app unadministrable — see `docs/ops/authorization.md` for the
+migration ledger and what's still pending, the role matrix, the invite flow
+and lockout guards, and how to re-run the live database check
+(`npm run verify:rls`).
