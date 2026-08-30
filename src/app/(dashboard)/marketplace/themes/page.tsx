@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { searchThemes, popularThemes, type WpOrgThemeResult } from "@/lib/adapters/wporg";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
@@ -84,6 +85,21 @@ export default async function MarketplaceThemesPage({
           <EmptyState icon={<IconAlert size={28} />} title="wordpress.org is not responding">
             {searchError}. Installing a theme from a site's own Themes tab still works, since that
             path can also accept an uploaded .zip.
+          </EmptyState>
+        </Card>
+      ) : results!.themes.length === 0 && requestedPage > 1 ? (
+        // An empty page past the end is not an empty search. wordpress.org
+        // answers an out-of-range page with zero results and a zero total, so
+        // there is nothing to clamp against — saying "nothing matched" here
+        // would deny a query that did match.
+        <Card>
+          <EmptyState icon={<IconSearch size={28} />} title={`Page ${requestedPage} is past the end`}>
+            {q
+              ? `There are no more results for “${q}” beyond this point.`
+              : "There are no more themes beyond this point."}{" "}
+            <Link href={q ? `?q=${encodeURIComponent(q)}` : "?"} className="underline">
+              Back to the first page
+            </Link>
           </EmptyState>
         </Card>
       ) : results!.themes.length === 0 ? (

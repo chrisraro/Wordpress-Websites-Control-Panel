@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { searchPlugins, popularPlugins, type WpOrgSearchResult } from "@/lib/adapters/wporg";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
@@ -91,6 +92,19 @@ export default async function MarketplacePage({
           <EmptyState icon={<IconAlert size={28} />} title="wordpress.org is not responding">
             {searchError}. Uploading a plugin still works — that path does not depend on
             wordpress.org.
+          </EmptyState>
+        </Card>
+      ) : results!.plugins.length === 0 && requestedPage > 1 ? (
+        // See the themes page: an out-of-range page is not an empty search,
+        // and wordpress.org gives back nothing to clamp against.
+        <Card>
+          <EmptyState icon={<IconSearch size={28} />} title={`Page ${requestedPage} is past the end`}>
+            {q
+              ? `There are no more results for “${q}” beyond this point.`
+              : "There are no more plugins beyond this point."}{" "}
+            <Link href={q ? `?q=${encodeURIComponent(q)}` : "?"} className="underline">
+              Back to the first page
+            </Link>
           </EmptyState>
         </Card>
       ) : results!.plugins.length === 0 ? (
