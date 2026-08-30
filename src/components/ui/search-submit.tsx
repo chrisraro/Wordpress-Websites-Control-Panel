@@ -16,6 +16,12 @@ import { IconSpinner } from "./icons";
  * a spinner is the wrong way round, so the spinner adapts to the form
  * instead.
  *
+ * (For the record: this revert was once justified partly by a session that
+ * appeared to die on submit. That was a testing artefact — a script calling
+ * requestSubmit() on `document.querySelector('form')`, which on a dashboard
+ * page is the sidebar's sign-out form, not the search box. The search never
+ * had that fault. The reasoning above stands on its own.)
+ *
  * The pending state ends when the browser navigates and this component
  * unmounts, which is exactly the moment the results arrive. `pageshow`
  * resets it for the back/forward cache, where the old page is restored live
