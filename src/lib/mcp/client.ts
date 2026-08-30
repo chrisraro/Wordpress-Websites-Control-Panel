@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Agent } from "undici";
 import { mapConnectError, McpConnectionError, McpToolError } from "./errors";
 
 export interface DiscoveredAbility { name: string; label?: string; description?: string }
@@ -17,11 +18,52 @@ export interface McpConnectOptions {
   username: string;
   appPassword: string;
   timeoutMs?: number;
+  /**
+   * Optional direct-to-origin connection, for a site whose CDN challenges
+   * requests from this app's egress (see 0019_site_origin_override.sql).
+   * Both or neither -- a half-configured override is refused rather than
+   * guessed at.
+   */
+  originIp?: string | null;
+  originSni?: string | null;
 }
 
 export type McpFactory = (opts: McpConnectOptions) => Promise<SiteMcpClient>;
 
 const DEFAULT_TIMEOUT = 30_000;
+
+/**
+ * Builds a dispatcher that connects to `ip` while verifying the certificate
+ * against `sni`, leaving the Host header as whatever the URL says.
+ *
+ * That three-way split is the whole trick, and each part is load-bearing:
+ *
+ *   - `lookup` pins the TCP connection to the origin, so DNS -- which
+ *     currently answers with the CDN's address -- is bypassed.
+ *   - `servername` sets SNI, and Node's default checkServerIdentity verifies
+ *     the presented certificate against it. The site's own hostname cannot
+ *     be used here because the origin's certificate for that name has
+ *     expired behind the CDN.
+ *   - The Host header still carries the real hostname (the URL is
+ *     unchanged), which is what selects the right vhost on shared hosting.
+ *
+ * Verification stays ON. `rejectUnauthorized` is never touched: a WordPress
+ * application password travels over this connection, and trading a bot
+ * challenge for a credential-interception risk would be a bad deal at any
+ * price. What the operator asserts by configuring this is "that IP, holding
+ * a certificate for that name, is my host" -- a narrower claim than "trust
+ * anything that answers", and one they are in a position to make.
+ */
+function originDispatcher(ip: string, sni: string): Agent {
+  return new Agent({
+    connect: {
+      servername: sni,
+      lookup: (_hostname, _options, callback) => {
+        callback(null, [{ address: ip, family: ip.includes(":") ? 6 : 4 }]);
+      },
+    },
+  });
+}
 
 /** Extract the JSON payload from an MCP tool result's content blocks. */
 function parseToolResult(result: {
@@ -42,9 +84,24 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT;
   const basic = Buffer.from(`${opts.username}:${opts.appPassword}`).toString("base64");
 
+  // Both or neither. Half a configuration produces a connection that fails
+  // in a way nobody can read, so refuse it where the mistake was made.
+  const hasIp = Boolean(opts.originIp);
+  const hasSni = Boolean(opts.originSni);
+  if (hasIp !== hasSni) {
+    throw new McpConnectionError(
+      "This site has a partial direct-origin configuration: set both the origin IP and the certificate name, or neither.",
+    );
+  }
+  const dispatcher =
+    hasIp && hasSni ? originDispatcher(opts.originIp!, opts.originSni!) : undefined;
+
   const connectOnce = async () => {
     const transport = new StreamableHTTPClientTransport(new URL(opts.endpoint), {
       requestInit: {
+        // `dispatcher` is Node's undici extension to RequestInit; it is
+        // absent from the DOM RequestInit type, hence the cast.
+        ...(dispatcher ? ({ dispatcher } as Record<string, unknown>) : {}),
         headers: {
           Authorization: `Basic ${basic}`,
           // Identifies the panel to whatever sits in front of WordPress.
@@ -126,6 +183,11 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
     },
     async close() {
       try { await client.close(); } catch { /* best effort */ }
+      // The Agent owns a connection pool. Without this every call that used
+      // an origin override leaks its sockets, which on a serverless function
+      // means they accumulate for the life of the instance -- and this path
+      // is used by the nightly fan-out across every configured site.
+      try { await dispatcher?.close(); } catch { /* best effort */ }
     },
   };
 };

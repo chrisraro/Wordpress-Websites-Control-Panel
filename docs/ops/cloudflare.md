@@ -38,7 +38,12 @@ changes.
 An earlier commit message and code comment claimed the User-Agent fixed
 this. It does not, and both have been corrected.
 
-## The fix
+## The fix, if you have Cloudflare access
+
+(If you do not, skip to **Direct-to-origin connection** below — that is the
+route that needs only the panel.)
+
+### WAF skip rule
 
 This needs a rule on the Cloudflare account. It cannot be fixed from this
 codebase.
@@ -83,3 +88,96 @@ inventory silently starts failing again whenever it changes.
 `src/lib/mcp/client.ts` sends the `wp-control-panel-mcp/1.0` header, and
 `tests/mcp-user-agent.test.ts` pins it — if that string changes, the rule
 above stops matching and these sites go dark again.
+
+
+---
+
+## Direct-to-origin connection (no Cloudflare access needed)
+
+The WAF rule above needs the Cloudflare account holding the zone. Both
+domains' nameservers point at Cloudflare (`rick`/`walk.ns.cloudflare.com`),
+so **cPanel cannot change any of it** — while the nameservers point there,
+Cloudflare is authoritative for DNS and owns the WAF.
+
+The panel can instead connect straight to the origin server, past the CDN.
+Configure it per site: **site page → Connection → Direct connection → Set up**.
+
+Two values:
+
+| Field | What it is | Example |
+|---|---|---|
+| Origin IP address | the hosting server's own address | `192.249.125.21` |
+| Certificate name | the name on the certificate that server presents | `ngx357.inmotionhosting.com` |
+
+Find them by running this on the site (WP Admin → any PHP runner, or the
+panel's own tooling from a network that is not challenged):
+
+```php
+echo $_SERVER['SERVER_ADDR'], ' ', php_uname('n');
+```
+
+### Why two fields and not one
+
+Three things have to differ, and each is load-bearing:
+
+- the **IP** the connection goes to — DNS currently answers with Cloudflare;
+- the **certificate name** verified — the origin's own certificate for the
+  site domain has expired (see below), so verification has to check a name
+  that is still valid, which is the host's shared hostname;
+- the **Host header**, which stays the site's real hostname and is what
+  selects the right vhost on shared hosting. It comes from the endpoint URL
+  and needs no configuration.
+
+**Certificate verification stays on.** It is verified against the name in
+the second field. What changes is that the connection authenticates *the
+server* rather than *the domain* — a narrower claim, and one the operator
+makes explicitly by entering these values. Turning verification off instead
+would trade a bot challenge for a credential-interception risk on a
+connection carrying a WordPress application password;
+`tests/origin-override.test.ts` pins that this was not done.
+
+### Measured
+
+| From | Path | Result |
+|---|---|---|
+| Vercel | `https://azaleabaguio.com/wp-json/mcp/novamira` | challenge page |
+| Anywhere | origin IP, SNI `ngx357.inmotionhosting.com`, Host `azaleabaguio.com` | **`401 rest_forbidden`** — reached WordPress, TLS verified |
+
+`401 rest_forbidden` is the correct answer to an unauthenticated probe.
+
+### Failure mode, and it is silent
+
+Shared hosts migrate accounts between servers. When that happens the origin
+IP goes stale and the site stops connecting with a timeout that names
+nothing. **Test connection** on the site page is the check; re-run the
+snippet above to get the new address.
+
+---
+
+## Unrelated but urgent: the origin certificates have expired
+
+Found while measuring the above.
+
+| Domain | Origin certificate expired |
+|---|---|
+| `azaleabaguio.com` | 14 Aug 2026 |
+| `azaleaboracay.com` | 10 Jul 2026 |
+
+Visitors do not see it because Cloudflare terminates TLS at its edge with a
+valid certificate. The Let's Encrypt certificates on the InMotion origin
+stopped renewing underneath — most likely because Let's Encrypt's HTTP
+validation cannot reach the origin through Cloudflare.
+
+This means Cloudflare's SSL mode is currently **Flexible** or **Full**, not
+**Full (strict)** — strict validates the origin certificate and both sites
+would already be down. So there is a hidden dependency: switching to Full
+(strict), moving off Cloudflare, or changing the DNS breaks both sites
+immediately.
+
+**Fix in cPanel** (this part does not need Cloudflare): *SSL/TLS Status* →
+select both domains → *Run AutoSSL*. If it fails, that confirms Cloudflare
+is blocking validation, and the answer is DNS-01 validation or temporarily
+setting the record to DNS-only while it renews.
+
+Once the origin certificates are valid, the **Certificate name** field can
+simply be the site's own domain, and the shared hostname is no longer needed.

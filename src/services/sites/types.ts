@@ -30,3 +30,21 @@ export interface NewSiteInput {
   clientLabel?: string;
   environment: SiteEnvironment;
 }
+
+/**
+ * Everything needed to open an MCP connection to a site.
+ *
+ * `origin_ip`/`origin_sni` are the optional direct-to-origin override
+ * (0019_site_origin_override.sql). They are part of this type rather than
+ * fetched separately so that no call site can build a connection while
+ * forgetting them -- there are nine, and one that silently omitted the
+ * override would fail only for the sites that need it, which are exactly the
+ * sites nobody tests against.
+ */
+export interface SiteCredentials {
+  mcp_endpoint: string;
+  wp_username: string;
+  app_password_encrypted: string;
+  origin_ip?: string | null;
+  origin_sni?: string | null;
+}

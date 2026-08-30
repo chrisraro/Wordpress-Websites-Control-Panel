@@ -1,4 +1,4 @@
-import { decryptSecret } from "@/lib/crypto/secrets";
+import { connectToSite } from "@/lib/mcp/connect";
 import { fetchPsi, type PsiResult } from "@/lib/adapters/psi";
 import type { McpFactory } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
@@ -44,11 +44,7 @@ export async function seoScan(
   const creds = await deps.sites.getSiteCredentials(siteId);
   if (!creds) throw new Error(`Credentials missing for site: ${siteId}`);
 
-  const client = await deps.mcp({
-    endpoint: creds.mcp_endpoint,
-    username: creds.wp_username,
-    appPassword: await decryptSecret(creds.app_password_encrypted),
-  });
+  const client = await connectToSite(deps.mcp, creds);
   let results: SourceResult[];
   try {
     // Discover abilities live: the stored capability map is written at connect

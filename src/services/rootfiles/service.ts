@@ -1,5 +1,5 @@
+import { connectToSite } from "@/lib/mcp/connect";
 import { runPhp, phpString } from "@/lib/wpphp";
-import { decryptSecret } from "@/lib/crypto/secrets";
 import type { McpFactory } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
 import {
@@ -17,11 +17,7 @@ export interface RootFilesDeps {
 async function connect(deps: RootFilesDeps, siteId: string) {
   const creds = await deps.repo.getSiteCredentials(siteId);
   if (!creds) throw new Error("Site not found");
-  return deps.mcp({
-    endpoint: creds.mcp_endpoint,
-    username: creds.wp_username,
-    appPassword: await decryptSecret(creds.app_password_encrypted),
-  });
+  return connectToSite(deps.mcp, creds);
 }
 
 /**
