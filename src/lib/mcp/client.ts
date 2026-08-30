@@ -47,22 +47,28 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
       requestInit: {
         headers: {
           Authorization: `Basic ${basic}`,
-          // Without this the request goes out under Node's default fetch
-          // agent, which security layers in front of WordPress treat as an
-          // unidentified bot. Two sites in the fleet sit behind Cloudflare
-          // and answered every MCP call with an interstitial challenge page
-          // ("Just a moment…"), so their inventory never collected and they
-          // drifted to `degraded`. Verified against both: with no
-          // User-Agent the challenge fires; with this one the request
-          // reaches WordPress normally.
+          // Identifies the panel to whatever sits in front of WordPress.
+          // Without it the request goes out under Node's default fetch agent
+          // and is indistinguishable from any other unattributed client.
+          //
+          // This does NOT by itself get past a bot challenge, and an earlier
+          // version of this comment wrongly claimed it did. Two sites in the
+          // fleet (both Azalea domains) sit behind Cloudflare and answer
+          // every MCP call from production with an interstitial page ("Just
+          // a moment…"). Measured: from a residential IP, Node fetch reaches
+          // WordPress with or without this header; from Vercel it is
+          // challenged either way. The discriminator is the source IP and
+          // TLS fingerprint of a datacenter egress, which no header changes.
+          // Those sites need a Cloudflare WAF skip rule — see
+          // docs/ops/cloudflare.md — and this header is what such a rule can
+          // key on, which is the reason to send it.
           //
           // Deliberately an honest identifier rather than a copied browser
-          // string. Impersonating Chrome would also get through, but it
-          // lies about what the client is, defeats a protection the site
-          // owner chose, and breaks the day the rules tighten. This name is
-          // greppable in an access log and can be allowlisted precisely if
-          // a site ever does need a rule. Matches the convention already
-          // used by the uptime checker's `wp-control-panel-uptime/1.0`
+          // string. Impersonating Chrome might defeat the challenge, but it
+          // misrepresents the client, defeats a protection the site owner
+          // chose, and breaks the day the rules tighten. This name is
+          // greppable in an access log. Matches the convention already used
+          // by the uptime checker's `wp-control-panel-uptime/1.0`
           // (src/services/security/uptime.ts), which learned this first.
           "User-Agent": MCP_USER_AGENT,
         },
