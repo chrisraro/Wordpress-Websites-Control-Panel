@@ -1,5 +1,6 @@
 import { badgeClass } from "@/components/ui/styles";
 import { isStagingSite } from "@/services/sites/portfolio";
+import type { SiteEnvironment } from "@/services/sites/types";
 
 /**
  * The site's name and its environment, together, on every surface that can
@@ -56,7 +57,7 @@ export function StagingChip({
 /**
  * The environment as a suffix for confirmation-dialog titles.
  *
- * Returns "" for anything not identified as staging — `isStagingSite()` is
+ * Returns "" for anything not identified as staging -- `isStaging()` is
  * deliberately one-directional and `false` means "not identified", never
  * "confirmed production", so this must never render a PRODUCTION label it
  * cannot stand behind.
@@ -64,7 +65,20 @@ export function StagingChip({
  * This goes in the dialog *title* rather than the body: the body is a
  * paragraph people skim past on the way to the confirm button, and the point
  * is to be read before the click, not after.
+ *
+ * Returns "" when the site's own name already says it, so a dialog reads
+ * "Delete x from Azalea Baguio (Staging)?" rather than "... Azalea Baguio
+ * (Staging) (STAGING)?". All four staging sites are named that way today, so
+ * without this the suffix is redundant on every dialog it appears in -- and a
+ * label people read twice is a label they stop reading.
  */
-export function environmentSuffix(site: { url: string; client_label: string | null }): string {
-  return isStagingSite(site) ? " (STAGING)" : "";
+export function environmentSuffix(site: {
+  name?: string;
+  url: string;
+  client_label: string | null;
+  environment?: SiteEnvironment;
+}): string {
+  if (!isStagingSite(site)) return "";
+  if (site.name && /staging/i.test(site.name)) return "";
+  return " (STAGING)";
 }
