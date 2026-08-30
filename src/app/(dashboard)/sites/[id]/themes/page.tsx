@@ -8,6 +8,7 @@ import { readDbFor } from "@/lib/authz/db";
 import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
+import { SiteHeading, environmentSuffix } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { refreshInventoryAction } from "../manage-actions";
 import { createChildThemeAction } from "../child-theme-actions";
@@ -51,7 +52,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           { label: "Themes" },
         ]}
       />
-      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} />
       <SiteTabs siteId={id} active="themes" />
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -75,7 +76,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
             pendingLabel="Refreshing…"
             success="Inventory refreshed"
             icon={<IconRefresh size={16} />}
-            showInlineError={false}
+
           />
         )}
       </div>
@@ -93,7 +94,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           </EmptyState>
         </Card>
       ) : (
-        <ThemeTable siteId={id} siteName={site.name} themes={themes} canManage={canManageToolkit} />
+        <ThemeTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} themes={themes} canManage={canManageToolkit} />
       )}
 
       {canManageToolkit && (
@@ -123,7 +124,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
                 description: `A child of ${activeTheme ? activeTheme.title || activeTheme.name : "the active theme"} will be written to ${site.name}. The active theme does not change.`,
                 confirmLabel: "Create",
               }}
-              showInlineError={false}
+
             />
             <ManageForm
               action={createAndActivate}
@@ -137,7 +138,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
                 confirmLabel: "Create and activate",
                 tone: "danger",
               }}
-              showInlineError={false}
+
             />
           </div>
         </div>

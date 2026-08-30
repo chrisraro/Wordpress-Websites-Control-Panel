@@ -46,10 +46,13 @@ const KIND_LABEL: Record<ThemeBulkKind, string> = {
 const BULK_KINDS: ThemeBulkKind[] = ["update", "delete"];
 
 export function ThemeTable({
-  siteId, siteName, themes, canManage,
+  siteId, siteName, siteEnv, themes, canManage,
 }: {
   siteId: string;
   siteName: string;
+  /** Rendered into every confirm title, so the environment is read before
+      the click rather than inferred from a name. */
+  siteEnv: string;
   themes: ThemeInfo[];
   /** Whether the viewer holds wp_toolkit.manage — read-only viewers (clients)
    *  get the table without selection, per-row actions, or the bulk bar. */
@@ -77,7 +80,11 @@ export function ThemeTable({
         toast({
           tone: "success",
           title: `Queued ${queued} item${queued === 1 ? "" : "s"}`,
-          description: result.skipped ? `${result.skipped} item(s) skipped as ineligible.` : undefined,
+          // "ineligible" named the check, not the reason. The dialog already
+          // lists each skipped item with its own reason; this is the count.
+          description: result.skipped
+            ? `${result.skipped} item${result.skipped === 1 ? "" : "s"} skipped — nothing to do for ${result.skipped === 1 ? "it" : "them"}.`
+            : undefined,
         });
         clear();
         router.push(`/marketplace/batches/${result.batchId}`);
@@ -110,20 +117,20 @@ export function ThemeTable({
   return (
     <>
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="scroll-x-hint">
           <table className="w-full min-w-[640px] text-body">
             <thead>
               <tr className={tableHeadClass}>
                 {canManage && (
-                  <th className="w-10 px-2 py-3">
+                  <th scope="col" className="w-10 px-2 py-3">
                     <SelectAllCheckbox allChecked={allChecked} someChecked={someChecked} onChange={toggleAll} />
                   </th>
                 )}
-                <th className="px-5 py-3 font-medium">Theme</th>
-                <th className="px-5 py-3 font-medium">Version</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Update</th>
-                {canManage && <th className="px-5 py-3 text-right font-medium">Actions</th>}
+                <th scope="col" className="px-5 py-3 font-medium">Theme</th>
+                <th scope="col" className="px-5 py-3 font-medium">Version</th>
+                <th scope="col" className="px-5 py-3 font-medium">Status</th>
+                <th scope="col" className="px-5 py-3 font-medium">Update</th>
+                {canManage && <th scope="col" className="px-5 py-3 text-right font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -177,11 +184,11 @@ export function ThemeTable({
                               success={`${name} updated`}
                               size="sm"
                               confirm={{
-                                title: `Update ${name}?`,
+                                title: `Update ${name} on ${siteName}${siteEnv}?`,
                                 description: `Version ${t.version} will be replaced with ${t.update_version ?? "the latest release"} on ${siteName}. If this theme has been edited directly, those changes will be lost — that is what child themes are for.`,
                                 confirmLabel: "Update",
                               }}
-                              showInlineError={false}
+
                             />
                           )}
                           {!isActive && activateVerdict?.allowed && (
@@ -192,11 +199,11 @@ export function ThemeTable({
                               success={`${name} activated`}
                               size="sm"
                               confirm={{
-                                title: `Activate ${name}?`,
+                                title: `Activate ${name} on ${siteName}${siteEnv}?`,
                                 description: `${siteName} will switch to ${name} immediately.`,
                                 confirmLabel: "Activate",
                               }}
-                              showInlineError={false}
+
                             />
                           )}
                           {!isActive && deleteVerdict?.allowed && (
@@ -208,12 +215,12 @@ export function ThemeTable({
                               size="sm"
                               variant="danger"
                               confirm={{
-                                title: `Delete ${name}?`,
+                                title: `Delete ${name} on ${siteName}${siteEnv}?`,
                                 description: DELETE_CONSEQUENCE,
                                 confirmLabel: "Delete",
                                 tone: "danger",
                               }}
-                              showInlineError={false}
+
                             />
                           )}
                         </div>
@@ -239,7 +246,13 @@ export function ThemeTable({
 
       <ConfirmDialog
         open={confirmKind !== null}
-        title={confirmKind ? `${KIND_LABEL[confirmKind]} ${confirmSplit?.included.length ?? 0} theme(s)?` : ""}
+        title={
+          confirmKind
+            ? `${KIND_LABEL[confirmKind]} ${confirmSplit?.included.length ?? 0} theme${
+                (confirmSplit?.included.length ?? 0) === 1 ? "" : "s"
+              } on ${siteName}${siteEnv}?`
+            : ""
+        }
         tone={confirmKind === "delete" ? "danger" : "default"}
         confirmLabel={confirmKind ? KIND_LABEL[confirmKind] : "Confirm"}
         onCancel={() => setConfirmKind(null)}
@@ -249,12 +262,14 @@ export function ThemeTable({
             <div className="space-y-2">
               {confirmKind === "delete" && <p>{DELETE_CONSEQUENCE}</p>}
               <p>
-                {confirmSplit.included.length} theme(s) on {siteName} will be queued:{" "}
+                {confirmSplit.included.length} theme{confirmSplit.included.length === 1 ? "" : "s"} on{" "}
+                {siteName}{siteEnv} will be queued:{" "}
                 {confirmSplit.included.map((i) => i.label).join(", ")}.
               </p>
               {confirmSplit.excluded.length > 0 && (
                 <p className="text-caption tracking-normal text-mid-gray">
-                  {confirmSplit.excluded.length} item(s) will be skipped —{" "}
+                  {confirmSplit.excluded.length} item{confirmSplit.excluded.length === 1 ? "" : "s"} will be
+                  skipped —{" "}
                   {confirmSplit.excluded.map((e) => `${e.label} (${e.reason})`).join("; ")}.
                 </p>
               )}

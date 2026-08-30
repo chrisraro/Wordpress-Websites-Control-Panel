@@ -87,10 +87,17 @@ export function GridMap({
             // --i drives the stagger; the delay is capped in globals.css so a
             // 9×9 grid never outlasts the glance it exists to serve.
             html:
+              // The marker's own colours go through token() like every other
+              // colour in this file. They were raw literals, and
+              // grid-map-tokens.test.ts only matches `"#rrggbb"` in double
+              // quotes, so a 3-digit hex inside this template literal was
+              // invisible to the test that exists to catch exactly this.
               `<div class="grid-point" style="--i:${i};background:${colourFor(p.rank, measured)};` +
-              `color:#fff;border-radius:9999px;width:28px;height:28px;display:flex;` +
+              `color:${token("--color-paper", "#ffffff")};border-radius:9999px;` +
+              `width:28px;height:28px;display:flex;` +
               `align-items:center;justify-content:center;` +
-              `font:600 12px var(--font-geist, system-ui);border:2px solid #fff;` +
+              `font:600 12px var(--font-geist, system-ui);` +
+              `border:2px solid ${token("--color-paper", "#ffffff")};` +
               `box-shadow:0 1px 3px rgba(0,0,0,.35)">${label}</div>`,
             iconSize: [28, 28],
             iconAnchor: [14, 14],
@@ -127,12 +134,59 @@ export function GridMap({
       </div>
     );
   }
+  // Leaflet paints absolutely-positioned markers with no reading order and
+  // no positional semantics, and `role="application"` additionally suppresses
+  // the screen reader's browse mode -- so the product's most distinctive view
+  // was completely opaque to anyone not looking at it. The summary below
+  // carries the same measurements as text: it is the map's alt text, not a
+  // second feature. `img` rather than `application` because nothing inside
+  // the map is focusable or interactive by keyboard.
+  const measured = points.filter((p) => p.measured !== false);
+  const ranked = measured.filter((p) => p.rank !== null) as (RankPoint & { rank: number })[];
+  const best = ranked.length > 0 ? Math.min(...ranked.map((p) => p.rank)) : null;
+  const worst = ranked.length > 0 ? Math.max(...ranked.map((p) => p.rank)) : null;
+
   return (
-    <div
-      ref={ref}
-      className="h-80 w-full overflow-hidden rounded-3xl border border-hairline sm:h-96"
-      role="application"
-      aria-label="GeoGrid rank map"
-    />
+    <>
+      <div
+        ref={ref}
+        className="h-80 w-full overflow-hidden rounded-3xl border border-hairline sm:h-96"
+        role="img"
+        aria-label={
+          `Rank map for ${businessName}: ${points.length} grid points. ` +
+          (ranked.length > 0
+            ? `${ranked.length} ranked, best ${best}, worst ${worst}. `
+            : "None ranked in the top 20. ") +
+          (measured.length < points.length
+            ? `${points.length - measured.length} not measured.`
+            : "")
+        }
+      />
+      {/* The per-point detail, for anyone who needs more than the summary.
+          Visually hidden rather than absent: the map already shows it. */}
+      <table className="sr-only">
+        <caption>Rank at each grid point for {businessName}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Point</th>
+            <th scope="col">Rank</th>
+          </tr>
+        </thead>
+        <tbody>
+          {points.map((p, i) => (
+            <tr key={`${p.lat},${p.lng},${i}`}>
+              <th scope="row">{i + 1}</th>
+              <td>
+                {p.measured === false
+                  ? "Not measured — lookup failed"
+                  : p.rank === null
+                    ? "Outside the top 20"
+                    : p.rank}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }

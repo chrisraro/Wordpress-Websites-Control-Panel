@@ -9,6 +9,7 @@ import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
+import { StagingChip, environmentSuffix } from "./site-heading";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
@@ -96,7 +97,10 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="break-words text-heading-sm font-semibold text-ink">{site.name}</h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 className="break-words text-heading-sm font-semibold text-ink">{site.name}</h1>
+            <StagingChip site={site} />
+          </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <StatusBadge tone={STATUS_TONE[site.status]}>
               {site.status.replace("_", " ")}
@@ -126,8 +130,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 label="Refresh inventory"
                 pendingLabel="Refreshing…"
                 success="Inventory refreshed"
-                icon={<IconRefresh size={16} />}
-                showInlineError={false}
+                icon={<IconRefresh size={16} />}
               />
             )}
             {canTestConnection && (
@@ -135,8 +138,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 action={testConnection}
                 label="Test connection"
                 pendingLabel="Testing…"
-                success="Connection is healthy"
-                showInlineError={false}
+                success="Connection is healthy"
               />
             )}
             {canViewAdminUsers && (
@@ -167,6 +169,37 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
       <SiteTabs siteId={id} active="overview" />
 
+      {/* Above every other banner on the page, including the core update.
+          A site behind a maintenance page is not serving its visitors right
+          now, which outranks anything else this page has to say about it. */}
+      {inv?.maintenance === true && (
+        <div
+          className={`${cardClass} mb-6 flex flex-wrap items-center justify-between gap-4 p-5`}
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge tone="bad">Maintenance mode</StatusBadge>
+              <p className="text-body font-medium text-ink">
+                Visitors can’t reach this site
+              </p>
+            </div>
+            <p className="mt-1 text-body text-mid-gray">
+              {site.name} is showing a maintenance page to everyone. It stays that way until
+              maintenance mode is turned off.
+            </p>
+          </div>
+          {canManageToolkit && (
+            <ManageForm
+              action={maintenanceOff}
+              label="Turn maintenance off"
+              pendingLabel="Disabling…"
+              success="Site is live again"
+              variant="primary"
+            />
+          )}
+        </div>
+      )}
+
       {inv?.core_update && (
         <div className={`${cardClass} mb-6 flex flex-wrap items-center justify-between gap-4 p-5`}>
           <div className="min-w-0">
@@ -186,11 +219,10 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               success={`WordPress updated to ${inv.core_update}`}
               variant="primary"
               confirm={{
-                title: "Update WordPress core?",
+                title: `Update WordPress core on ${site.name}${environmentSuffix(site)}?`,
                 description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
                 confirmLabel: "Update core",
-              }}
-              showInlineError={false}
+              }}
             />
           )}
         </div>
@@ -262,39 +294,47 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         <Card>
           <CardTitle>Tools</CardTitle>
           <div className="flex flex-wrap gap-2 p-5">
-            <ManageForm
-              action={maintenanceOn}
-              label="Maintenance on"
-              pendingLabel="Enabling…"
-              success="Maintenance mode is on"
-              confirm={{
-                title: "Put the site into maintenance mode?",
-                description: `Visitors to ${site.name} will see a maintenance page until you turn it off.`,
-                confirmLabel: "Enable maintenance",
-                tone: "danger",
-              }}
-              showInlineError={false}
-            />
-            <ManageForm
-              action={maintenanceOff}
-              label="Maintenance off"
-              pendingLabel="Disabling…"
-              success="Site is live again"
-              showInlineError={false}
-            />
+            {/* One control that reflects the current state, not two blind
+                buttons. Maintenance mode puts a client's live site behind a
+                maintenance page for its visitors, and nothing in the panel
+                used to report that it was still on -- a site could be left
+                down indefinitely with the panel showing no trace of it.
+                `undefined` means the snapshot predates the field, so the
+                offer stays "turn it on" and the state line says so rather
+                than claiming the site is live. */}
+            {inv?.maintenance === true ? (
+              <ManageForm
+                action={maintenanceOff}
+                label="Turn maintenance off"
+                pendingLabel="Disabling…"
+                success="Site is live again"
+                variant="primary"
+              />
+            ) : (
+              <ManageForm
+                action={maintenanceOn}
+                label="Maintenance on"
+                pendingLabel="Enabling…"
+                success="Maintenance mode is on"
+                confirm={{
+                  title: `Put ${site.name}${environmentSuffix(site)} into maintenance mode?`,
+                  description: `Visitors to ${site.name} will see a maintenance page until you turn it off. Nothing else on the site changes.`,
+                  confirmLabel: "Enable maintenance",
+                  tone: "danger",
+                }}
+              />
+            )}
             <ManageForm
               action={flushCache}
               label="Flush cache"
               pendingLabel="Flushing…"
-              success="Object cache flushed"
-              showInlineError={false}
+              success="Object cache flushed"
             />
             <ManageForm
               action={flushPermalinks}
               label="Flush permalinks"
               pendingLabel="Flushing…"
-              success="Rewrite rules flushed"
-              showInlineError={false}
+              success="Rewrite rules flushed"
             />
           </div>
         </Card>
@@ -314,8 +354,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                     label="Refresh inventory"
                     pendingLabel="Refreshing…"
                     success="Inventory refreshed"
-                    icon={<IconRefresh size={16} />}
-                    showInlineError={false}
+                    icon={<IconRefresh size={16} />}
                   />
                 ) : undefined
               }

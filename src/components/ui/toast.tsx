@@ -5,6 +5,7 @@ import {
   type ReactNode,
 } from "react";
 import { IconAlert, IconCheck, IconClose, IconInfo } from "./icons";
+import { iconButtonClass } from "./styles";
 
 export type ToastTone = "success" | "error" | "info";
 
@@ -27,11 +28,20 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-/** Errors stay long enough to read a plugin name and a reason. */
-const LIFETIME: Record<ToastTone, number> = {
+/**
+ * How long a toast lingers. `null` means it never auto-dismisses.
+ *
+ * Errors are null on purpose. This product queues background work precisely
+ * because it takes minutes, so the person who triggered an action is often
+ * not watching when it fails -- the batch poller's own comment concedes "the
+ * user may have looked away for minutes". A nine-second window was the wrong
+ * unit for that: the failure announced itself once, removed itself from the
+ * DOM, and left nothing behind. Errors now stay until dismissed.
+ */
+const LIFETIME: Record<ToastTone, number | null> = {
   success: 4500,
   info: 5000,
-  error: 9000,
+  error: null,
 };
 
 const EXIT_MS = 140;
@@ -74,9 +84,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (input: ToastInput) => {
       const id = nextId.current++;
       const tone = input.tone ?? "info";
-      setToasts((list) => [...list.slice(-3), { ...input, id, tone }]);
-      const timer = setTimeout(() => remove(id), LIFETIME[tone]);
-      timers.current.set(id, timer);
+      // Errors are never evicted by newer toasts either: a bulk failure can
+      // emit several at once, and capping the list would drop the first
+      // reasons on the floor while keeping the last.
+      setToasts((list) => {
+        const keep = list.filter((t) => t.tone === "error");
+        const rest = list.filter((t) => t.tone !== "error").slice(-3);
+        return [...keep, ...rest, { ...input, id, tone }];
+      });
+      const ttl = LIFETIME[tone];
+      if (ttl !== null) {
+        const timer = setTimeout(() => remove(id), ttl);
+        timers.current.set(id, timer);
+      }
     },
     [remove],
   );
@@ -96,16 +116,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         // Fixed, so a toast is never clipped by an overflow ancestor.
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex flex-col items-center
-          gap-2 p-4 sm:inset-x-auto sm:right-0 sm:items-end"
+        // Top on a phone, bottom-right from `sm` up. It used to be
+        // bottom-anchored and full-width at every size, which put it directly
+        // over the sticky BulkBar -- so confirming a bulk update covered the
+        // bulk bar with the toast confirming it. BulkBar's own comment
+        // asserted "the toast region is fixed at bottom-right", which was
+        // only true from `sm` up; this makes the two agree.
+        className="pointer-events-none fixed inset-x-0 top-0 z-50 flex flex-col items-center
+          gap-2 p-4 sm:inset-x-auto sm:top-auto sm:bottom-0 sm:right-0 sm:items-end"
         role="status"
         aria-live="polite"
       >
+        {/* Errors are announced assertively via a nested role="alert". A
+            failed bulk delete announced `polite` waits behind whatever the
+            reader is already saying, which on this surface is often the
+            success toast for the items that did succeed. */}
         {toasts.map((t) => {
           const Mark = TONE_ICON[t.tone];
           return (
             <div
               key={t.id}
+              role={t.tone === "error" ? "alert" : undefined}
               className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-3xl
                 border border-hairline bg-paper p-4 shadow-overlay
                 ${t.leaving ? "animate-toast-out" : "animate-toast-in"}`}
@@ -123,8 +154,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => remove(t.id)}
                 aria-label="Dismiss notification"
-                className="-m-1 shrink-0 rounded-2xl p-1 text-mid-gray transition-colors
-                  hover:bg-canvas hover:text-ink"
+                className={iconButtonClass("-m-1 shrink-0")}
               >
                 <IconClose size={16} />
               </button>

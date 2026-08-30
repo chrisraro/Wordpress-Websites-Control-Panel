@@ -3,12 +3,18 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createInstallBatchAction } from "./actions";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ConfirmDialog } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { buttonClass } from "@/components/ui/styles";
+import { buttonClass, badgeClass } from "@/components/ui/styles";
 import { IconAlert, IconSpinner } from "@/components/ui/icons";
+import { isStaging } from "@/services/sites/portfolio";
 
-export interface SiteOption { id: string; name: string }
+export interface SiteOption {
+  id: string;
+  name: string;
+  url: string;
+  client_label: string | null;
+}
 
 export function InstallPanel({
   slug, name, sites, target = "plugin",
@@ -22,6 +28,7 @@ export function InstallPanel({
   // action and "Create and activate" child theme, which both carry a confirm
   // dialog naming the consequence before it happens.
   const [activate, setActivate] = useState(target !== "theme");
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -34,7 +41,11 @@ export function InstallPanel({
     setSelected(next);
   };
 
+  const chosen = sites.filter((s) => selected.has(s.id));
+  const stagingCount = chosen.filter(isStaging).length;
+
   const submit = () => {
+    setConfirming(false);
     setError(null);
     startTransition(async () => {
       const res = await createInstallBatchAction({
@@ -80,7 +91,7 @@ export function InstallPanel({
             </button>
             <button
               type="button"
-              onClick={submit}
+              onClick={() => setConfirming(true)}
               disabled={pending || selected.size === 0}
               className={buttonClass("primary")}
             >
@@ -98,7 +109,7 @@ export function InstallPanel({
           {sites.map((s) => (
             <label
               key={s.id}
-              className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3
+              className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3 py-2
                 transition-colors duration-150 hover:bg-canvas"
             >
               <input
@@ -107,7 +118,23 @@ export function InstallPanel({
                 onChange={() => toggle(s.id)}
                 className="size-4 shrink-0 rounded-md accent-ink"
               />
-              <span className="min-w-0 flex-1 truncate text-body text-ink">{s.name}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="truncate text-body text-ink">{s.name}</span>
+                  {isStaging(s) && (
+                    <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>
+                      Staging
+                    </span>
+                  )}
+                </span>
+                {/* The host, not just the name: two sites can share a display
+                    name, and a staging copy often lives in a subdirectory of
+                    another client's domain where the name alone gives nothing
+                    away. */}
+                <span className="block truncate text-caption tracking-normal text-mid-gray">
+                  {s.url.replace(/^https?:\/\//, "")}
+                </span>
+              </span>
             </label>
           ))}
         </div>
@@ -139,6 +166,59 @@ export function InstallPanel({
           </p>
         )}
       </Modal>
+
+      {/* The per-row plugin and theme actions have carried a confirm dialog
+          since they shipped; this path -- which can install and activate code
+          on every connected client site at once -- had none, while "Refresh
+          all inventory" (read-only) had one. The friction was spent exactly
+          backwards. Listing the sites by name is the point: the footer button
+          said "Install on 5 sites" and never said which five. */}
+      <ConfirmDialog
+        open={confirming}
+        tone={activate ? "danger" : "default"}
+        title={`Install ${name} on ${chosen.length} site${chosen.length === 1 ? "" : "s"}?`}
+        confirmLabel={activate ? "Install and activate" : "Install"}
+        onCancel={() => setConfirming(false)}
+        onConfirm={submit}
+        description={
+          <>
+            <p>
+              {activate
+                ? `${name} will be installed and activated on each of these sites.`
+                : `${name} will be installed on each of these sites, but not activated.`}
+              {target === "theme" && activate
+                ? " Activating switches the live theme immediately."
+                : ""}
+            </p>
+            <ul className="mt-3 space-y-1">
+              {chosen.map((s) => (
+                <li key={s.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-body font-medium text-ink">{s.name}</span>
+                  {isStaging(s) && (
+                    <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>
+                      Staging
+                    </span>
+                  )}
+                  <span className="text-caption tracking-normal text-mid-gray">
+                    {s.url.replace(/^https?:\/\//, "")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {/* Says how many are NOT staging, because that is the number that
+                can cost something. isStaging() is one-directional -- an
+                unmarked site is "not identified as staging", never "confirmed
+                production" -- so this counts the unmarked rather than
+                asserting anything about them. */}
+            {chosen.length > stagingCount && (
+              <p className="mt-3 text-body text-ember">
+                {chosen.length - stagingCount} of these{" "}
+                {chosen.length - stagingCount === 1 ? "is" : "are"} not marked staging.
+              </p>
+            )}
+          </>
+        }
+      />
     </>
   );
 }

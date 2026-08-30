@@ -9,6 +9,7 @@ import { readDbFor } from "@/lib/authz/db";
 import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { SiteTabs } from "../tabs";
+import { SiteHeading, environmentSuffix } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
 import { PluginTable } from "./plugin-table";
@@ -51,7 +52,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           { label: "Plugins" },
         ]}
       />
-      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} />
       <SiteTabs siteId={id} active="plugins" />
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -79,7 +80,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
               pendingLabel="Refreshing…"
               success="Inventory refreshed"
               icon={<IconRefresh size={16} />}
-              showInlineError={false}
+
             />
           )}
           {canManageToolkit && updatable.length > 0 && (
@@ -87,14 +88,14 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
               action={updateAll}
               label={`Update all (${updatable.length})`}
               pendingLabel="Updating…"
-              success={`${updatable.length} plugin(s) updated`}
+              success={`${updatable.length} plugin${updatable.length === 1 ? "" : "s"} updated`}
               variant="primary"
               confirm={{
-                title: `Update ${updatable.length} plugin(s)?`,
+                title: `Update ${updatable.length} plugin${updatable.length === 1 ? "" : "s"} on ${site.name}${environmentSuffix(site)}?`,
                 description: `Every plugin with an available update on ${site.name} will be updated in one pass. Plugin updates can change how the site behaves — take a backup if you are unsure.`,
                 confirmLabel: "Update all",
               }}
-              showInlineError={false}
+
             />
           )}
         </div>
@@ -113,7 +114,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           </EmptyState>
         </Card>
       ) : (
-        <PluginTable siteId={id} siteName={site.name} plugins={plugins} canManage={canManageToolkit} />
+        <PluginTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} plugins={plugins} canManage={canManageToolkit} />
       )}
     </main>
   );

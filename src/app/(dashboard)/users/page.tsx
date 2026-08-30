@@ -69,16 +69,16 @@ export default async function UsersPage() {
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="scroll-x-hint">
             <table className="w-full min-w-[640px] text-body">
               <thead>
                 <tr className={tableHeadClass}>
-                  <th className="px-5 py-3 font-medium">Email</th>
-                  <th className="px-5 py-3 font-medium">Role</th>
-                  <th className="px-5 py-3 font-medium">Sites</th>
-                  <th className="px-5 py-3 font-medium">Last sign-in</th>
-                  <th className="px-5 py-3 font-medium">Status</th>
-                  <th className="px-5 py-3">
+                  <th scope="col" className="px-5 py-3 font-medium">Email</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Role</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Sites</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Last sign-in</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Status</th>
+                  <th scope="col" className="px-5 py-3">
                     <span className="sr-only">Manage</span>
                   </th>
                 </tr>

@@ -363,3 +363,30 @@
     background-image: none;
   }
 }
+
+/**
+ * Horizontal-scroll affordance for wide tables.
+ *
+ * Ten tables sit in `overflow-x-auto` with a `min-w-[640px]`–`min-w-[760px]`
+ * inner table. On a 375px viewport that puts whole columns — the plugins
+ * Actions column, the batch Error column — off-screen right with nothing
+ * indicating there is more to see. PRODUCT.md makes phone use a primary
+ * target, so "scroll to discover it" was not a discoverable affordance.
+ *
+ * Pure CSS: two background-attachment layers, a paper-coloured cover pinned
+ * to each edge and a shadow behind it. The cover scrolls with the content
+ * and the shadow does not, so each shadow is hidden exactly when that edge
+ * is fully scrolled. No JS, no scroll listeners, no layout shift.
+ */
+.scroll-x-hint {
+  overflow-x: auto;
+  background-image:
+    linear-gradient(to right, var(--color-paper) 30%, transparent),
+    linear-gradient(to left, var(--color-paper) 30%, transparent),
+    linear-gradient(to right, rgb(0 0 0 / 0.10), transparent 12px),
+    linear-gradient(to left, rgb(0 0 0 / 0.10), transparent 12px);
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}

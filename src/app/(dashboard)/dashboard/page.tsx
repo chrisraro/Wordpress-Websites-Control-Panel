@@ -52,6 +52,27 @@ interface Row {
  * that matters; rows in a single container scan in one pass down the left
  * edge, which is what a portfolio sweep actually needs.
  */
+/**
+ * One definition, rendered twice: once stacked inside the text column below
+ * `sm`, once as a right-hand cluster above it. Two copies of the badge list
+ * would drift the moment a metric is added.
+ */
+function MetricBadges({
+  updates, grade, seo,
+}: { updates?: number; grade?: string; seo?: number }) {
+  return (
+    <>
+      {updates !== undefined && updates > 0 && (
+        <StatusBadge tone="warn">
+          {updates}&nbsp;update{updates === 1 ? "" : "s"}
+        </StatusBadge>
+      )}
+      {grade && <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>Security&nbsp;{grade}</StatusBadge>}
+      {seo !== undefined && <StatusBadge tone={seoTone(seo)}>SEO&nbsp;{seo}</StatusBadge>}
+    </>
+  );
+}
+
 function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
   const { site, staging, severity, reasons, updates, grade, seo } = row;
   return (
@@ -113,6 +134,20 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
               ))}
             </ul>
           )}
+
+          {/* Below `sm` the metrics move onto their own line inside the text
+              column rather than disappearing. They used to be `hidden
+              sm:flex`, which meant a healthy row on a phone was a name, a URL
+              and a chevron -- and PRODUCT.md makes phone use a primary
+              target, with the portfolio sweep the job most likely to happen
+              there. That was a viewport escape hatch in a codebase which
+              otherwise refuses them: see `pointer-coarse` in styles.ts, which
+              keys on input device rather than width for exactly this reason. */}
+          {!showReasons && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:hidden">
+              <MetricBadges updates={updates} grade={grade} seo={seo} />
+            </div>
+          )}
         </div>
 
         {/* The two sections carry different information, so they show
@@ -122,11 +157,7 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
             problems to state, so the metrics are what there is to show. */}
         {!showReasons && (
           <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-            {updates !== undefined && updates > 0 && (
-              <StatusBadge tone="warn">{updates}&nbsp;updates</StatusBadge>
-            )}
-            {grade && <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>Security&nbsp;{grade}</StatusBadge>}
-            {seo !== undefined && <StatusBadge tone={seoTone(seo)}>SEO&nbsp;{seo}</StatusBadge>}
+            <MetricBadges updates={updates} grade={grade} seo={seo} />
           </div>
         )}
 
@@ -254,7 +285,7 @@ export default async function DashboardPage() {
                   pendingLabel="Queuing…"
                   variant="outline"
                   icon={<IconRefresh size={16} />}
-                  showInlineError={false}
+
                   confirm={{
                     title: `Refresh inventory for ${refreshTargets.length} site${refreshTargets.length === 1 ? "" : "s"}?`,
                     description:
@@ -315,7 +346,7 @@ export default async function DashboardPage() {
                           "below — the jobs stay in the record for diagnosis, this only clears the alert.",
                         confirmLabel: "Dismiss",
                       }}
-                      showInlineError={false}
+
                     />
                   </div>
                   <p className="mt-1 break-words text-body text-mid-gray">

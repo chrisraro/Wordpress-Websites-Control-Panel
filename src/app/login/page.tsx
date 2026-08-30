@@ -44,9 +44,13 @@ export default function LoginPage() {
         />
 
         <div className="relative max-w-md">
-          <h2 className="text-heading-lg font-semibold tracking-[-0.025em] text-white text-balance">
+          {/* A <p>, not an <h2>: this panel precedes the form in DOM order (see
+              above), so an <h2> here made the document's first heading an h2
+              and pushed the <h1> that names the page into second place. The
+              line is brand copy, not a section of the document. */}
+          <p className="text-heading-lg font-semibold tracking-[-0.025em] text-white text-balance">
             Every client site, one panel.
-          </h2>
+          </p>
           {/* Tinted from the panel's own accent rather than gray — gray on a
               near-black brand surface reads as a disabled state. */}
           <p className="mt-3 text-body-lg" style={{ color: "#c9cfba" }}>
