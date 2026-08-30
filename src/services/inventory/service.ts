@@ -56,6 +56,12 @@ return json_encode(array(
   'wp_version' => get_bloginfo('version'),
   'php_version' => PHP_VERSION,
   'admin_url' => admin_url(),
+  // The same file manage/service.ts writes and unlinks for the maintenance
+  // action. Reading it here is what lets the panel show whether a site is
+  // currently behind a maintenance page instead of offering two blind
+  // buttons -- a site left in maintenance mode is invisible to the panel
+  // otherwise, and its visitors see the maintenance page indefinitely.
+  'maintenance' => file_exists(ABSPATH . '.maintenance'),
   'core_update' => $core,
   'plugins' => $plugins,
   'themes' => $themes,

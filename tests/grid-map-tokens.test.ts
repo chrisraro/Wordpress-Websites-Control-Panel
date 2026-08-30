@@ -27,12 +27,30 @@ describe("the GeoGrid map draws from design tokens", () => {
   // drifted from the rest of the app without anything failing.
 
   it("reads every colour through a CSS custom property", () => {
-    // A bare hex outside a token() call is a copy waiting to go stale.
-    const bareHex = MAP.match(/(?<!token\([^)]{0,80})"#[0-9a-fA-F]{6}"/g) ?? [];
-    const inTokenCall = MAP.match(/token\("[^"]+",\s*"#[0-9a-fA-F]{6}"\)/g) ?? [];
-    const allHex = MAP.match(/"#[0-9a-fA-F]{6}"/g) ?? [];
-    expect(allHex.length).toBe(inTokenCall.length);
-    expect(bareHex.length).toBeLessThanOrEqual(inTokenCall.length);
+    // Comments are stripped first: this file's docblock quotes #737373 and
+    // #707070 as prose while explaining the drift it exists to prevent, and
+    // those are not colours the map paints with.
+    //
+    // Matches hex in ANY quoting, 3- or 6-digit, not just a double-quoted
+    // 6-digit one. The previous version required `"#rrggbb"`, so `color:#fff`
+    // and `border:2px solid #fff` inside the divIcon template literal sat
+    // here unseen for as long as the test did -- the exact drift this is for.
+    // Line filtering rather than a comment-stripping regex: the escapes that
+    // pattern needs are exactly the ones that collapse when written inline,
+    // and this file has already been broken that way twice.
+    const code = MAP.split("\n")
+      .filter((line) => {
+        const t = line.trim();
+        return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+      })
+      .join("\n");
+    const allHex = code.match(/#[0-9a-fA-F]{3,8}/g) ?? [];
+    const inTokenCall = code.match(/token\(\s*"[^"]+",\s*"#[0-9a-fA-F]{3,8}"\s*\)/g) ?? [];
+    expect(allHex.length, `hex in code: ${allHex.join(", ")}`).toBeGreaterThan(0);
+    // Every hex the map paints with must be a token() fallback.
+    expect(allHex.length, `bare hex outside token(): ${allHex.join(", ")}`).toBe(
+      inTokenCall.length,
+    );
   });
 
   it.each([

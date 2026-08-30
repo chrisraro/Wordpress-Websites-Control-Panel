@@ -8,6 +8,7 @@ import { readDbFor } from "@/lib/authz/db";
 import { can } from "@/lib/authz/decide";
 import { supabaseReportsRepo } from "@/services/reports/repo";
 import { SiteTabs } from "../tabs";
+import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { revokeReportAction } from "../reports-actions";
 import { GenerateReportForm } from "./generate-form";
@@ -44,7 +45,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
           { label: "Reports" },
         ]}
       />
-      <h1 className="text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} className="mb-0" />
       <p className="mb-6 mt-1 text-body text-mid-gray">
         Branded PDFs built from data your scans already collected.
       </p>
@@ -69,15 +70,15 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
             first of each month.
           </EmptyState>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="scroll-x-hint">
             <table className="w-full min-w-[720px] text-body">
               <thead>
                 <tr className={tableHeadClass}>
-                  <th className="px-5 py-3 font-medium">Generated</th>
-                  <th className="px-5 py-3 font-medium">Sections</th>
-                  <th className="px-5 py-3 font-medium">Source</th>
-                  <th className="px-5 py-3 font-medium">Share link</th>
-                  <th className="px-5 py-3 text-right font-medium">Actions</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Generated</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Sections</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Source</th>
+                  <th scope="col" className="px-5 py-3 font-medium">Share link</th>
+                  <th scope="col" className="px-5 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,7 +134,6 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
                                     confirmLabel: "Revoke link",
                                     tone: "danger",
                                   }}
-                                  showInlineError={false}
                                 />
                               )}
                             </>

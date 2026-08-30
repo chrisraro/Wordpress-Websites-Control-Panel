@@ -33,7 +33,11 @@ export default async function MarketplacePage({
   const db = await readDbFor(viewer);
   const sites = (await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }))
     .filter((s) => s.status !== "disabled")
-    .map((s) => ({ id: s.id, name: s.name }));
+    // url and client_label travel with the option so the install modal can
+    // show which host each name points at and mark staging copies. Dropping
+    // them here was what left the widest-blast-radius action in the product
+    // showing twelve bare names.
+    .map((s) => ({ id: s.id, name: s.name, url: s.url, client_label: s.client_label }));
 
   let results: WpOrgSearchResult | null = null;
   let searchError: string | null = null;

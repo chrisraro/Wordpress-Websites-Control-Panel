@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
 import { buttonClass, iconButtonClass } from "@/components/ui/styles";
 import { SubmitButton } from "@/components/ui/submit-button";
+import { SitePalette, type PaletteSite } from "./site-palette";
 import {
   IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
 } from "@/components/ui/icons";
@@ -75,7 +76,7 @@ function NavLinks({
 }
 
 function SidebarBody({
-  email, pathname, onNavigate, showConnectSite, showMarketplace, showUsers,
+  email, pathname, onNavigate, showConnectSite, showMarketplace, showUsers, sites,
 }: {
   email: string;
   pathname: string;
@@ -83,6 +84,7 @@ function SidebarBody({
   showConnectSite: boolean;
   showMarketplace: boolean;
   showUsers: boolean;
+  sites: PaletteSite[];
 }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
@@ -105,6 +107,8 @@ function SidebarBody({
           Connect site
         </Link>
       )}
+
+      {sites.length > 0 && <SitePalette sites={sites} />}
 
       <NavLinks
         pathname={pathname}
@@ -132,8 +136,14 @@ function SidebarBody({
 }
 
 export function Sidebar({
-  email, showConnectSite, showMarketplace, showUsers,
-}: { email: string; showConnectSite: boolean; showMarketplace: boolean; showUsers: boolean }) {
+  email, showConnectSite, showMarketplace, showUsers, sites,
+}: {
+  email: string;
+  showConnectSite: boolean;
+  showMarketplace: boolean;
+  showUsers: boolean;
+  sites: PaletteSite[];
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -158,6 +168,7 @@ export function Sidebar({
           email={email}
           pathname={pathname}
           showConnectSite={showConnectSite}
+          sites={sites}
           showMarketplace={showMarketplace}
           showUsers={showUsers}
         />
@@ -211,6 +222,7 @@ export function Sidebar({
             pathname={pathname}
             onNavigate={() => setOpen(false)}
             showConnectSite={showConnectSite}
+            sites={sites}
             showMarketplace={showMarketplace}
             showUsers={showUsers}
           />

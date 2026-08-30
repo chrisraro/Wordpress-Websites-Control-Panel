@@ -33,6 +33,15 @@ export interface InventoryPayload {
   php_version: string;
   /** WordPress's own admin_url() — correct for subdirectory installs. */
   admin_url: string;
+  /**
+   * Whether ABSPATH/.maintenance exists right now.
+   *
+   * Optional because snapshots collected before this field existed have no
+   * value for it, and `undefined` has to keep meaning "not measured" rather
+   * than collapsing into `false`. Reporting "Live" for a site that is
+   * actually behind a maintenance page would be worse than saying nothing.
+   */
+  maintenance?: boolean;
   core_update: string | null;
   plugins: PluginInfo[];
   themes: ThemeInfo[];

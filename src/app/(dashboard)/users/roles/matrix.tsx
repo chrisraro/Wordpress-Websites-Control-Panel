@@ -194,13 +194,13 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
       </div>
 
       <div className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-x-auto">
+        <div className="scroll-x-hint">
           <table className="w-full min-w-[760px] text-body">
             <thead>
               <tr className={tableHeadClass}>
-                <th className="px-5 py-3 font-medium">Permission</th>
+                <th scope="col" className="px-5 py-3 font-medium">Permission</th>
                 {APP_ROLES.map((role) => (
-                  <th key={role} className="px-5 py-3 text-center font-medium">
+                  <th scope="col" key={role} className="px-5 py-3 text-center font-medium">
                     {ROLE_LABEL[role]}
                   </th>
                 ))}

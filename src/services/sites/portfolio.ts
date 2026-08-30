@@ -25,7 +25,14 @@ export interface AttentionInput {
 
 export interface Attention {
   severity: Severity;
-  /** Plain-language reasons, worst first. Empty when nothing is wrong. */
+  /**
+   * Plain-language reasons, worst first.
+   *
+   * Can be non-empty while `severity` is "ok": pending updates are reported
+   * as a reason but do not raise severity, so a site with nothing wrong
+   * except a maintenance backlog stays out of "Needs attention" and still
+   * has something to say on the surfaces that ask.
+   */
   reasons: string[];
 }
 
@@ -69,9 +76,23 @@ export function siteAttention(input: AttentionInput): Attention {
     raise("warn");
   }
 
+  // Deliberately does NOT raise severity. Pending updates are work to do,
+  // not a fault that appeared -- the same distinction already applied to SEO
+  // score above, and it has to apply here for the same reason.
+  //
+  // Measured against the live portfolio before this changed: every one of
+  // the twelve connected sites had at least one pending update, so every one
+  // of them was `warn`, every severity dot rendered the same amber, and
+  // "Needs attention" listed the entire portfolio in alphabetical order. A
+  // list that contains everything ranks nothing: a site whose connection had
+  // died sorted level with a staging copy that had one plugin update, and
+  // the only genuine security finding (grade D) sat last on the page.
+  //
+  // Updates still surface -- as a metric badge on the row, and as a reason
+  // line on sites that are in the list for some other cause -- so the
+  // maintenance job keeps its entry point without drowning the fault list.
   if (input.updates !== undefined && input.updates > 0) {
     reasons.push(`${input.updates} update${input.updates === 1 ? "" : "s"} pending`);
-    raise("warn");
   }
 
   return { severity, reasons };

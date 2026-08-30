@@ -40,7 +40,9 @@ const BULK_VERB: Record<string, string> = {
 function describeBatch(jobs: BatchJob[]): string {
   const first = jobs[0];
   if (!first) return "Batch";
-  const noun = first.target === "theme" ? "theme(s)" : "plugin(s)";
+  // "plugin(s)" is a schema string, not a sentence. The count is known here.
+  const kind = first.target === "theme" ? "theme" : "plugin";
+  const noun = `${jobs.length} ${kind}${jobs.length === 1 ? "" : "s"}`;
   if (first.type === "bulk_manage") {
     const verb = BULK_VERB[first.kind ?? ""] ?? "Running";
     return `${verb} ${noun}`;
@@ -99,7 +101,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
         // Neutral on purpose: this batch could be an install, an update, or a
         // delete, and the toast must be correct for all of them — see
         // describeBatch() above.
-        : { tone: "success", title: "Batch complete", description: `${ok} of ${jobs.length} item(s) finished.` },
+        : { tone: "success", title: "Batch complete", description: `${ok} of ${jobs.length} item${jobs.length === 1 ? "" : "s"} finished.` },
     );
   }, [done, jobs, toast]);
 
@@ -111,6 +113,8 @@ export function BatchPoller({ batchId }: { batchId: string }) {
 
   if (!jobs) {
     return (
+      <>
+        <Skeleton className="mb-6 h-8 w-64" />
       <Card className="overflow-hidden">
         <div className="space-y-3 p-5" aria-label="Loading batch">
           {[0, 1, 2].map((i) => (
@@ -121,6 +125,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
           ))}
         </div>
       </Card>
+      </>
     );
   }
 
@@ -131,9 +136,15 @@ export function BatchPoller({ batchId }: { batchId: string }) {
 
   return (
     <div>
+      {/* The heading names the work, not the row that recorded it. Every bulk
+          action in the product lands here, so by the peak-end rule this
+          screen sets the memory of the whole interaction -- and it used to
+          read "Batch" over a raw UUID. describeBatch() already had the
+          sentence; it was rendered as a 12px grey caption underneath the
+          schema's word for the table. */}
+      <h1 className="mb-4 text-heading-sm font-semibold text-ink">{describeBatch(jobs)}</h1>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-caption tracking-normal text-mid-gray">{describeBatch(jobs)}</p>
           <p className="text-body text-ink" aria-live="polite">
             {done
               ? `Finished — ${doneCount} succeeded, ${failedCount} failed.`
@@ -169,15 +180,15 @@ export function BatchPoller({ batchId }: { batchId: string }) {
       )}
 
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="scroll-x-hint">
           <table className="w-full min-w-[720px] text-body">
             <thead>
               <tr className={tableHeadClass}>
-                <th className="px-5 py-3 font-medium">Item</th>
-                <th className="px-5 py-3 font-medium">Site</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Attempts</th>
-                <th className="px-5 py-3 font-medium">Error</th>
+                <th scope="col" className="px-5 py-3 font-medium">Item</th>
+                <th scope="col" className="px-5 py-3 font-medium">Site</th>
+                <th scope="col" className="px-5 py-3 font-medium">Status</th>
+                <th scope="col" className="px-5 py-3 font-medium">Attempts</th>
+                <th scope="col" className="px-5 py-3 font-medium">Error</th>
               </tr>
             </thead>
             <tbody>
@@ -191,11 +202,14 @@ export function BatchPoller({ batchId }: { batchId: string }) {
                     </StatusBadge>
                   </td>
                   <td className={`${tableCellClass} text-mid-gray`}>{j.attempts}</td>
-                  <td
-                    className={`${tableCellClass} max-w-64 truncate text-ember`}
-                    title={j.last_error ?? undefined}
-                  >
-                    {j.last_error ?? ""}
+                  {/* Wraps rather than truncating. The reason a job failed
+                      was previously readable only by hovering for a `title`
+                      tooltip -- not focusable, not announced, and unreachable
+                      on a phone, which is where this page is most likely to
+                      be read. Job #4 in PRODUCT.md is chasing a failure; this
+                      column is the answer to it. */}
+                  <td className={`${tableCellClass} max-w-md text-ember`}>
+                    <span className="block break-words">{j.last_error ?? ""}</span>
                   </td>
                 </tr>
               ))}

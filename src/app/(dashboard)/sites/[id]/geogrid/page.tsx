@@ -11,6 +11,7 @@ import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { averageRank, coverage, measuredCount, resolveRunPreview } from "@/services/geogrid/types";
 import { isOpenJobStatus } from "@/services/jobs/service";
 import { SiteTabs } from "../tabs";
+import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { runGeoGridAction, dismissFailedGeoGridRunsAction } from "../geogrid-actions";
 import { drainQueueAction } from "../../../queue-actions";
@@ -96,7 +97,7 @@ export default async function GeoGridPage({
           { label: "GeoGrid" },
         ]}
       />
-      <h1 className="text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} className="mb-0" />
       <p className="mb-6 mt-1 text-body text-mid-gray">
         Where this business ranks in the local pack, measured point by point.
       </p>
@@ -150,7 +151,6 @@ export default async function GeoGridPage({
                   }`,
                   confirmLabel: "Queue scan",
                 }}
-                showInlineError={false}
               />
             )}
           </div>
@@ -176,7 +176,6 @@ export default async function GeoGridPage({
                   label="Process queue now"
                   pendingLabel="Processing…"
                   success="Queue processed"
-                  showInlineError={false}
                 />
               )}
             </div>
@@ -204,7 +203,6 @@ export default async function GeoGridPage({
                         "This dismisses all failed GeoGrid runs for this site, not just the ones shown above — the runs stay in the record for diagnosis, this only clears the alert.",
                       confirmLabel: "Dismiss",
                     }}
-                    showInlineError={false}
                   />
                 )}
               </div>
@@ -282,15 +280,27 @@ export default async function GeoGridPage({
               <p className="mt-2 flex flex-wrap items-center gap-x-2 text-caption tracking-normal text-mid-gray">
                 <span>{keyword}</span>
                 <span>· scanned {new Date(previewed.run_at).toLocaleString()}</span>
-                <span className="inline-flex items-center gap-1.5">
+                {/* Every stop the map can paint, not just the ends. The
+                    legend named "top 3" and "outside the top 20" while
+                    colourFor() in grid-map.tsx uses five ramp colours, so
+                    ranks 4-15 -- three of the five -- had no entry and the
+                    legend was wrong by omission. Kept in the same order as
+                    the ramp so it reads as a scale. */}
+                <span className="inline-flex flex-wrap items-center gap-x-1.5">
                   ·
-                  <span aria-hidden className="size-1.5 rounded-full bg-status-good" />
-                  top 3
-                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-status-bad" />
-                  outside the top 20
+                  <span aria-hidden className="size-1.5 rounded-full bg-rank-1" />
+                  1–3
+                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-rank-2" />
+                  4–7
+                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-rank-3" />
+                  8–10
+                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-rank-4" />
+                  11–15
+                  <span aria-hidden className="ml-1 size-1.5 rounded-full bg-rank-5" />
+                  16+
                   {currentHasGap && (
                     <>
-                      <span aria-hidden className="ml-1 size-1.5 rounded-full bg-mid-gray" />
+                      <span aria-hidden className="ml-1 size-1.5 rounded-full bg-rank-unmeasured" />
                       not measured
                     </>
                   )}
@@ -309,13 +319,13 @@ export default async function GeoGridPage({
               <p className="px-5 pb-2 pt-4 text-caption tracking-normal text-mid-gray sm:hidden">
                 Tap a run to preview it on the map above.
               </p>
-              <div className="overflow-x-auto">
+              <div className="scroll-x-hint">
                 <table className="w-full min-w-[420px] text-body">
                   <thead>
                     <tr className={tableHeadClass}>
-                      <th className="px-5 py-3 font-medium">Run</th>
-                      <th className="px-5 py-3 font-medium">Average rank</th>
-                      <th className="px-5 py-3 font-medium">Coverage</th>
+                      <th scope="col" className="px-5 py-3 font-medium">Run</th>
+                      <th scope="col" className="px-5 py-3 font-medium">Average rank</th>
+                      <th scope="col" className="px-5 py-3 font-medium">Coverage</th>
                     </tr>
                   </thead>
                   <tbody>

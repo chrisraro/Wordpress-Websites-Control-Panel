@@ -12,6 +12,7 @@ import type {
   AiVisibilityPayload, AuditPayload, KeywordsPayload, LinkStats, PageScore, PsiPayload,
 } from "@/services/seo/types";
 import { SiteTabs } from "../tabs";
+import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { runSeoScanAction } from "../seo-actions";
 import { Sparkline } from "./sparkline";
@@ -85,7 +86,7 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
           { label: "SEO & AEO" },
         ]}
       />
-      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} />
       <SiteTabs siteId={id} active="seo" />
 
       <div className={`${cardClass} mb-4 flex flex-wrap items-center justify-between gap-6 p-5`}>
@@ -116,7 +117,6 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
               description: `Collects the Rank Math audit, per-page scores, Search Console keywords, AI visibility, and PageSpeed data for ${site.name}. It reads only, and can take a few minutes.`,
               confirmLabel: "Run scan",
             }}
-            showInlineError={false}
           />
         )}
       </div>
@@ -202,13 +202,13 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
               {noteOf(latest.rankmath_scores) ?? "No page scores collected yet."}
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="scroll-x-hint">
               <table className="w-full min-w-[420px] text-body">
                 <thead>
                   <tr className={tableHeadClass}>
-                    <th className="px-5 py-3 font-medium">Page</th>
-                    <th className="px-5 py-3 font-medium">Focus keyword</th>
-                    <th className="px-5 py-3 font-medium">Score</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Page</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Focus keyword</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Score</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -250,14 +250,14 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
               No impressions recorded in the last 30 days.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="scroll-x-hint">
               <table className="w-full min-w-[420px] text-body">
                 <thead>
                   <tr className={tableHeadClass}>
-                    <th className="px-5 py-3 font-medium">Keyword</th>
-                    <th className="px-5 py-3 font-medium">Clicks</th>
-                    <th className="px-5 py-3 font-medium">Impr.</th>
-                    <th className="px-5 py-3 font-medium">Pos.</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Keyword</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Clicks</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Impr.</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Pos.</th>
                   </tr>
                 </thead>
                 <tbody>

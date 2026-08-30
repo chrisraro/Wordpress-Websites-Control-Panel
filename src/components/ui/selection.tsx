@@ -161,7 +161,8 @@ export function BulkBar({
   if (count === 0) return null;
 
   return (
-    // Sticky, not fixed: the toast region is fixed at bottom-right, and a
+    // Sticky, not fixed: the toast region is bottom-right from `sm` up and
+    // top-anchored below it (see toast.tsx), so the two never overlap, and a
     // fixed bar would sit on top of the notification confirming the action.
     <div
       className="sticky bottom-0 z-20 mt-4 flex flex-col gap-3 rounded-3xl border border-hairline
@@ -181,13 +182,24 @@ export function BulkBar({
           const reasonId = a.disabled && a.disabledReason ? `bulk-action-reason-${a.key}` : undefined;
           return (
             <span key={a.key} className="inline-flex flex-col">
+              {/* aria-disabled, not the `disabled` attribute: a disabled
+                  button is removed from the tab order entirely, so a keyboard
+                  or screen-reader user never landed on it and never heard the
+                  aria-describedby reason this component builds for them. The
+                  `title` fallback is mouse-hover only, so the explanation
+                  reached everyone except the people it was written for. The
+                  click handler is gated instead. */}
               <button
                 type="button"
-                onClick={a.onClick}
-                disabled={a.disabled}
+                onClick={a.disabled ? undefined : a.onClick}
+                aria-disabled={a.disabled || undefined}
                 title={a.disabled ? a.disabledReason : undefined}
                 aria-describedby={reasonId}
-                className={buttonClass(a.tone === "danger" ? "danger" : "outline", "md")}
+                className={buttonClass(
+                  a.tone === "danger" ? "danger" : "outline",
+                  "md",
+                  a.disabled ? "cursor-not-allowed opacity-50" : undefined,
+                )}
               >
                 {a.label}
               </button>

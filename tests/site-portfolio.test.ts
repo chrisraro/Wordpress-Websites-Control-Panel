@@ -39,6 +39,31 @@ describe("siteAttention", () => {
     );
   });
 
+  it("does not let pending updates alone put a site in the attention list", () => {
+    // The gap that produced the collapse: the test above pinned the reason
+    // *text* and never the severity, so `raise("warn")` on any pending
+    // update went unnoticed. Measured against the live portfolio, all twelve
+    // connected sites had at least one pending update, so all twelve were
+    // warn, every severity dot rendered the same amber, and "Needs
+    // attention" listed the whole portfolio alphabetically -- a dead
+    // connection sorted level with a staging copy that had one update.
+    expect(siteAttention({ status: "connected", updates: 1 }).severity).toBe("ok");
+    expect(siteAttention({ status: "connected", updates: 17 }).severity).toBe("ok");
+    // Still reported -- it just isn't a fault.
+    expect(siteAttention({ status: "connected", updates: 17 }).reasons).toContain(
+      "17 updates pending",
+    );
+  });
+
+  it("still raises for the things that are actually faults", () => {
+    // The other half of the same contract: narrowing what counts as
+    // attention must not narrow it to nothing.
+    expect(siteAttention({ status: "degraded", updates: 8 }).severity).toBe("warn");
+    expect(siteAttention({ status: "connected", grade: "D", updates: 8 }).severity).toBe("warn");
+    expect(siteAttention({ status: "reconnect_needed", updates: 8 }).severity).toBe("critical");
+    expect(siteAttention({ status: "connected", grade: "F", updates: 8 }).severity).toBe("critical");
+  });
+
   it("distinguishes never-scanned from up-to-date", () => {
     // undefined means no snapshot has ever been taken; 0 means scanned and
     // clean. Collapsing them would invent a clean bill of health.

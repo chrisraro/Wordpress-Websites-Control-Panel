@@ -8,6 +8,7 @@ import { readDbFor } from "@/lib/authz/db";
 import { can } from "@/lib/authz/decide";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { SiteTabs } from "../tabs";
+import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { runSecurityScanAction } from "../security-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
@@ -71,7 +72,6 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
         description: `Checks ${site.name} against the Wordfence vulnerability feed, verifies core file checksums, and runs the hardening checklist. It reads only — nothing on the site is changed — and can take a few minutes.`,
         confirmLabel: "Run scan",
       }}
-      showInlineError={false}
     />
   ) : null;
 
@@ -84,7 +84,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
           { label: "Security" },
         ]}
       />
-      <h1 className="mb-6 text-heading-sm font-semibold text-ink">{site.name}</h1>
+      <SiteHeading site={site} />
       <SiteTabs siteId={id} active="security" />
 
       <div className={`${cardClass} mb-4 flex flex-wrap items-center justify-between gap-4 p-5`}>
@@ -168,15 +168,15 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
           </p>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="scroll-x-hint">
               <table className="w-full min-w-[720px] text-body">
                 <thead>
                   <tr className={tableHeadClass}>
-                    <th className="px-5 py-3 font-medium">Component</th>
-                    <th className="px-5 py-3 font-medium">Vulnerability</th>
-                    <th className="px-5 py-3 font-medium">Severity</th>
-                    <th className="px-5 py-3 font-medium">Installed</th>
-                    <th className="px-5 py-3 font-medium">Fixed in</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Component</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Vulnerability</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Severity</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Installed</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Fixed in</th>
                   </tr>
                 </thead>
                 <tbody>
