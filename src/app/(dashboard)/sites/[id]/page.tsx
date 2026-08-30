@@ -10,8 +10,9 @@ import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/invent
 import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
 import { StagingChip, environmentSuffix } from "./site-heading";
+import { siteEnvironment } from "@/services/sites/portfolio";
 import { ManageForm } from "./action-form";
-import { manageAction, refreshInventoryAction } from "./manage-actions";
+import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, EmptyState, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { buttonClass, cardClass } from "@/components/ui/styles";
@@ -90,6 +91,11 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const maintenanceOff = manageAction.bind(null, id, { kind: "maintenance" as const, enable: false });
   const flushCache = manageAction.bind(null, id, { kind: "flush_cache" as const });
   const flushPermalinks = manageAction.bind(null, id, { kind: "flush_permalinks" as const });
+  const environment = siteEnvironment(site);
+  // Flips to the other one; the button label and confirm say which.
+  const flipEnvironment = setEnvironmentAction.bind(
+    null, id, environment === "staging" ? "production" : "staging",
+  );
 
   return (
     <main>
@@ -130,7 +136,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 label="Refresh inventory"
                 pendingLabel="Refreshing…"
                 success="Inventory refreshed"
-                icon={<IconRefresh size={16} />}
+                icon={<IconRefresh size={16} />}
+
               />
             )}
             {canTestConnection && (
@@ -138,7 +145,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 action={testConnection}
                 label="Test connection"
                 pendingLabel="Testing…"
-                success="Connection is healthy"
+                success="Connection is healthy"
+
               />
             )}
             {canViewAdminUsers && (
@@ -222,7 +230,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 title: `Update WordPress core on ${site.name}${environmentSuffix(site)}?`,
                 description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
                 confirmLabel: "Update core",
-              }}
+              }}
+
             />
           )}
         </div>
@@ -252,6 +261,49 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               </div>
             ))}
           </dl>
+
+          {/* Environment sits in the site's own record, beside the other
+              facts about the connection, because that is what it is -- and
+              because it must be correctable. The twelve existing rows were
+              backfilled by a regex (0017) and bulk imports still get the
+              regex's answer, so a wrong label has to be fixable here rather
+              than in a database console. Changing it changes every
+              confirmation dialog on every tab, so it carries a confirm of
+              its own. */}
+          {canTestConnection && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+              <div className="min-w-0">
+                <p className="text-body text-mid-gray">Environment</p>
+                <p className="text-body text-ink">
+                  {environment === "staging" ? "Staging" : "Production"}
+                </p>
+              </div>
+              <ManageForm
+                action={flipEnvironment}
+                size="sm"
+                label={environment === "staging" ? "Mark as production" : "Mark as staging"}
+                pendingLabel="Saving…"
+                success={
+                  environment === "staging"
+                    ? `${site.name} is now marked production`
+                    : `${site.name} is now marked staging`
+                }
+                confirm={{
+                  title:
+                    environment === "staging"
+                      ? `Mark ${site.name} as production?`
+                      : `Mark ${site.name} as staging?`,
+                  description:
+                    environment === "staging"
+                      ? `${site.name} will stop showing the STAGING chip, and confirmations before destructive actions will no longer warn that it is a copy. Only do this if it really is the live site.`
+                      : `${site.name} will be marked STAGING everywhere, including in every confirmation before an action runs.`,
+                  confirmLabel: environment === "staging" ? "Mark as production" : "Mark as staging",
+                  tone: environment === "staging" ? "danger" : "default",
+                }}
+              />
+            </div>
+          )}
+
           <details className="group border-t border-hairline px-5 py-3">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 text-body text-mid-gray transition-colors duration-150 hover:text-ink">
               <IconChevronRight
@@ -328,13 +380,15 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               action={flushCache}
               label="Flush cache"
               pendingLabel="Flushing…"
-              success="Object cache flushed"
+              success="Object cache flushed"
+
             />
             <ManageForm
               action={flushPermalinks}
               label="Flush permalinks"
               pendingLabel="Flushing…"
-              success="Rewrite rules flushed"
+              success="Rewrite rules flushed"
+
             />
           </div>
         </Card>
@@ -354,7 +408,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                     label="Refresh inventory"
                     pendingLabel="Refreshing…"
                     success="Inventory refreshed"
-                    icon={<IconRefresh size={16} />}
+                    icon={<IconRefresh size={16} />}
+
                   />
                 ) : undefined
               }

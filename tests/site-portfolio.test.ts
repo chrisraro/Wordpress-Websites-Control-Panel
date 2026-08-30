@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { siteAttention, isStaging, SEVERITY_RANK } from "@/services/sites/portfolio";
+import {
+  siteAttention, isStaging, isStagingSite, siteEnvironment, SEVERITY_RANK,
+} from "@/services/sites/portfolio";
 
 describe("siteAttention", () => {
   it("reports nothing for a healthy, up-to-date site", () => {
@@ -125,5 +127,79 @@ describe("isStaging", () => {
 
   it("treats a missing label as unknown rather than staging", () => {
     expect(isStaging(label(null))).toBe(false);
+  });
+});
+
+describe("siteEnvironment", () => {
+  // 0017_site_environment.sql made this a recorded fact. isStaging() below is
+  // now only the rule that backfilled the column and a fallback for a row
+  // that predates it -- these pin that precedence, because getting it
+  // backwards would silently restore the regex as the source of truth for the
+  // constraint PRODUCT.md calls hardest.
+
+  it("prefers the recorded column over the regex, in both directions", () => {
+    // A production site whose URL happens to say "staging" -- e.g. a client
+    // whose live domain is staging-collective.com. The regex says staging;
+    // the operator said production, and the operator wins.
+    expect(
+      siteEnvironment({
+        url: "https://staging-collective.com",
+        client_label: null,
+        environment: "production",
+      }),
+    ).toBe("production");
+
+    // And the inverse: a staging copy the regex cannot see, because it lives
+    // in a subdirectory of another client's domain. This is the case
+    // isStaging()'s own docblock admits it cannot detect.
+    expect(
+      siteEnvironment({
+        url: "https://onlinecreativesolutions.com/cherrybus",
+        client_label: null,
+        environment: "staging",
+      }),
+    ).toBe("staging");
+  });
+
+  it("falls back to the regex when the column is absent", () => {
+    // A row predating the migration, or a fake in a test.
+    expect(siteEnvironment({ url: "https://staging.elnidoguide.ph", client_label: null }))
+      .toBe("staging");
+    expect(siteEnvironment({ url: "https://elnidoguide.ph", client_label: null }))
+      .toBe("production");
+  });
+
+  it("resolves an unknown environment to production, the cautious direction", () => {
+    // Per isStaging()'s asymmetry: a staging site mistaken for production is
+    // treated with unnecessary care, which costs nothing; a production site
+    // mistaken for staging is the catastrophe. So the fallback must never be
+    // "staging".
+    expect(siteEnvironment({ url: "https://example.com", client_label: null }))
+      .toBe("production");
+    expect(isStagingSite({ url: "https://example.com", client_label: null })).toBe(false);
+  });
+
+  it("agrees with the SQL backfill on every currently connected site", () => {
+    // The twelve live rows, as the dashboard showed them before 0017 ran.
+    // If this drifts from the migration's regex the backfill silently
+    // relabels sites on the next environment someone provisions.
+    const expected: [string, string | null, boolean][] = [
+      ["https://aralabroad.com", "Aral Abroad", false],
+      ["https://azaleabaguio.com", "Azalea Baguio", false],
+      ["https://azaleabaguio.com/staging2-baguio", "Azalea Baguio (Staging)", true],
+      ["https://azaleaboracay.com", "Azalea Boracay", false],
+      ["https://azaleaboracay.com/staging2", "Azalea Boracay (Staging)", true],
+      ["https://beachbus.ph", "Beach Bus", false],
+      ["https://onlinecreativesolutions.com/cherrybus", "Cherry Bus (Staging)", true],
+      ["https://cherrybuspalawan.ph", "Cherry Bus Palawan", false],
+      ["https://elnidoguide.ph", "El Nido Guide", false],
+      ["https://staging.elnidoguide.ph", "El Nido Guide Staging Site", true],
+      ["https://graceland.ph", "Graceland Production", false],
+      ["https://onlinecreativesolutions.com", "Online Creative Solutions", false],
+    ];
+    for (const [url, client_label, staging] of expected) {
+      expect(isStaging({ url, client_label }), url).toBe(staging);
+    }
+    expect(expected.filter((r) => r[2])).toHaveLength(4);
   });
 });

@@ -10,7 +10,8 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates } from "@/services/inventory/types";
-import { siteAttention, isStaging, SEVERITY_RANK, type Severity } from "@/services/sites/portfolio";
+import { siteAttention, isStagingSite, SEVERITY_RANK, type Severity } from "@/services/sites/portfolio";
+import { ClientHome } from "./client-home";
 import type { SiteRow } from "@/services/sites/types";
 import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
 import { vulnFeedStatus } from "@/services/security/scan";
@@ -181,6 +182,36 @@ export default async function DashboardPage() {
   );
   const canConnectSite = can(viewer, "sites.manage");
 
+  // A client gets a different screen, not this one with pieces missing.
+  //
+  // This is the one place in the app that branches on the role name rather
+  // than a permission, and the distinction is deliberate: every read below
+  // is permission-gated on its own, and ClientHome's data is the same
+  // viewer-scoped listSites the staff path uses. Branching here chooses a
+  // *presentation*, and grants nothing -- so the objection the comment on
+  // sites/[id]/page.tsx raises against role gates (they keep serving data the
+  // database itself would refuse) does not apply. PRODUCT.md describes this
+  // audience by role, not by capability: "someone who does not work at OCS
+  // and did not ask for a control panel."
+  if (viewer.role === "client") {
+    const clientRows = await Promise.all(
+      sites.map(async (site) => {
+        const snap = await supabaseSnapshotsRepo(db).latestSnapshot(site.id);
+        const updates = snap ? pendingUpdates(snap.payload) : undefined;
+        const grade = (await supabaseSecurityRepo(db).latestGrade(site.id))?.grade;
+        return {
+          site,
+          severity: siteAttention({ status: site.status, updates, grade }).severity,
+          // null means never measured, and ClientHome must keep that
+          // distinct from healthy -- this audience is the least able to tell
+          // the difference (PRODUCT.md principle 4).
+          lastCheckedIso: snap?.taken_at ?? null,
+        };
+      }),
+    );
+    return <ClientHome rows={clientRows} now={Date.now()} />;
+  }
+
   // refreshAllInventoryAction (./actions.ts) checks both wp_toolkit.manage
   // and, per site, a "manage" grant -- the same pair refreshInventoryAction
   // (../sites/[id]/manage-actions.ts) enforces for a single site. This has
@@ -246,7 +277,7 @@ export default async function DashboardPage() {
       const { severity, reasons } = siteAttention({ status: site.status, updates, grade });
       return {
         site,
-        staging: isStaging(site),
+        staging: isStagingSite(site),
         severity,
         reasons,
         updates,
@@ -346,7 +377,6 @@ export default async function DashboardPage() {
                           "below — the jobs stay in the record for diagnosis, this only clears the alert.",
                         confirmLabel: "Dismiss",
                       }}
-
                     />
                   </div>
                   <p className="mt-1 break-words text-body text-mid-gray">

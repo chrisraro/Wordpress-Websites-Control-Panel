@@ -30,6 +30,18 @@ export interface JobsRepo {
    * than a value, matching `pendingExists`'s null handling above.
    */
   dismissFailed(siteId: string | null, type: JobType): Promise<void>;
+  /**
+   * Calls off still-queued jobs in a batch. Returns how many were stopped.
+   *
+   * Scoped to `pending` on purpose. A `running` job is executing PHP on a
+   * live WordPress install and cannot be reached from here, so cancelling it
+   * would be a lie; `awaiting_callback` is waiting on n8n and is equally out
+   * of reach. The count is what the UI reports, so it must reflect what was
+   * actually stopped rather than what was asked for.
+   */
+  cancelBatch(batchId: string): Promise<number>;
+  /** Puts every failed job in a batch back on the queue. Returns the count. */
+  retryFailedInBatch(batchId: string): Promise<number>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -79,6 +91,33 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .update({ status: "failed", last_error: err, finished_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
+    },
+    async cancelBatch(batchId) {
+      const { data, error } = await db.from("jobs")
+        .update({ cancelled_at: new Date().toISOString() })
+        .eq("batch_id", batchId)
+        .eq("status", "pending")
+        .is("cancelled_at", null)
+        .select("id");
+      if (error) throw new Error(`jobs.cancelBatch failed: ${error.message}`, { cause: error });
+      return (data ?? []).length;
+    },
+    async retryFailedInBatch(batchId) {
+      // scheduled_for now, attempts left alone: the operator asking for this
+      // is the retry decision, and resetting attempts would hand the job a
+      // fresh automatic-retry budget it has already spent.
+      const { data, error } = await db.from("jobs")
+        .update({
+          status: "pending",
+          scheduled_for: new Date().toISOString(),
+          cancelled_at: null,
+          dismissed_at: null,
+        })
+        .eq("batch_id", batchId)
+        .eq("status", "failed")
+        .select("id");
+      if (error) throw new Error(`jobs.retryFailedInBatch failed: ${error.message}`, { cause: error });
+      return (data ?? []).length;
     },
     async batchJobs(batchId) {
       const { data, error } = await db.from("jobs").select("*")

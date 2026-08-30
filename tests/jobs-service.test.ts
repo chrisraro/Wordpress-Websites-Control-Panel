@@ -50,6 +50,8 @@ function memoryJobsRepo() {
     async listGlobalFailures() {
       return rows.filter((r) => r.site_id === null && r.status === "failed" && !r.dismissed_at);
     },
+    async cancelBatch() { return 0; },
+    async retryFailedInBatch() { return 0; },
     async dismissFailed(siteId, type) {
       rows
         .filter((r) => r.site_id === siteId && r.type === type && r.status === "failed")

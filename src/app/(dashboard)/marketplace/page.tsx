@@ -37,7 +37,7 @@ export default async function MarketplacePage({
     // show which host each name points at and mark staging copies. Dropping
     // them here was what left the widest-blast-radius action in the product
     // showing twelve bare names.
-    .map((s) => ({ id: s.id, name: s.name, url: s.url, client_label: s.client_label }));
+    .map((s) => ({ id: s.id, name: s.name, url: s.url, client_label: s.client_label, environment: s.environment }));
 
   let results: WpOrgSearchResult | null = null;
   let searchError: string | null = null;

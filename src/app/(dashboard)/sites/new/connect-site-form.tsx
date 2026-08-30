@@ -71,6 +71,53 @@ export function ConnectSiteForm() {
         </p>
       </div>
 
+      {/* Required, and deliberately not pre-selected. This is the one moment
+          the operator knows the answer for certain -- before this field, a
+          regex over the URL guessed it and the guess became permanent truth
+          for the constraint PRODUCT.md calls hardest. A pre-filled default
+          would let a wrong guess through unread, which is the failure this
+          field exists to stop, so neither option starts checked.
+
+          Radios rather than a select: two mutually exclusive options that
+          both need to be read before choosing, and a closed select shows
+          only one of them. */}
+      <fieldset className="space-y-1.5">
+        <legend className={labelClass}>Environment</legend>
+        <p className={hintClass}>
+          Which one this is. It is shown beside the site’s name everywhere, and in every
+          confirmation before an action runs.
+        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          {(
+            [
+              ["production", "Production", "The live site your client’s visitors see."],
+              ["staging", "Staging", "A copy for testing. Marked everywhere as STAGING."],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <label
+              key={value}
+              className="flex flex-1 cursor-pointer items-start gap-3 rounded-2xl border
+                border-hairline p-3 transition-colors duration-150 hover:bg-canvas
+                has-[:checked]:border-ink has-[:checked]:bg-canvas
+                has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2
+                has-[:focus-visible]:outline-ink"
+            >
+              <input
+                type="radio"
+                name="environment"
+                value={value}
+                required
+                className="mt-0.5 size-4 shrink-0 accent-ink"
+              />
+              <span className="min-w-0">
+                <span className="block text-body font-medium text-ink">{label}</span>
+                <span className="block text-caption tracking-normal text-mid-gray">{hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
       <div className="space-y-1.5">
         <label htmlFor="clientLabel" className={labelClass}>
           Client label <span className="font-normal text-mid-gray">(optional)</span>

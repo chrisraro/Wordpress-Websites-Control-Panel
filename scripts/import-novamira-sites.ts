@@ -214,6 +214,7 @@ async function main() {
     });
   }
 
+  const { isStaging } = await import("@/services/sites/portfolio");
   const { supabaseSitesRepo } = await import("@/services/sites/repo");
   const { supabaseJobsRepo } = await import("@/services/jobs/repo");
   const { createSiteMcpClient } = await import("@/lib/mcp/client");
@@ -253,7 +254,17 @@ async function main() {
       try {
         await addSite(
           deps,
-          { name: meta.name, url: derived.url, wpUsername: c.username, appPassword: c.appPassword, clientLabel: meta.clientLabel },
+          {
+            name: meta.name, url: derived.url, wpUsername: c.username,
+            appPassword: c.appPassword, clientLabel: meta.clientLabel,
+            // A bulk importer has no operator standing by to answer, so it
+            // applies the same rule 0017 used to backfill the existing rows.
+            // Anything it gets wrong is correctable from the site's page --
+            // which is exactly why that control exists.
+            environment: isStaging({ url: derived.url, client_label: meta.clientLabel ?? null })
+              ? "staging"
+              : "production",
+          },
           adminId!,
         );
         rows.push({

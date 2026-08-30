@@ -1,4 +1,4 @@
-import type { SiteStatus } from "./types";
+import type { SiteEnvironment, SiteStatus } from "./types";
 
 /**
  * Portfolio triage for the dashboard.
@@ -116,6 +116,38 @@ export function siteAttention(input: AttentionInput): Attention {
  * live in a subdirectory of another domain (`.../AralAbroad`) and are not
  * detectable from the URL at all.
  */
+/**
+ * The site's environment, preferring what the operator declared.
+ *
+ * `environment` (0017_site_environment.sql) is set at connect time and is
+ * editable from the site's own page, so it is the answer whenever it exists.
+ * `isStaging()` below is now only the rule that backfilled the column and a
+ * fallback for a row that somehow predates it -- it is no longer the source
+ * of truth for the constraint PRODUCT.md calls hardest.
+ *
+ * Falls back to "production" rather than "unknown" for the reason isStaging's
+ * own docblock gives: a production site mistaken for staging is the
+ * catastrophe, so an unresolved environment must read as the one that earns
+ * more caution.
+ */
+export function siteEnvironment(site: {
+  url: string;
+  client_label: string | null;
+  environment?: SiteEnvironment;
+}): SiteEnvironment {
+  if (site.environment) return site.environment;
+  return isStaging(site) ? "staging" : "production";
+}
+
+/** Convenience for the many render sites that only ask "is this staging?". */
+export function isStagingSite(site: {
+  url: string;
+  client_label: string | null;
+  environment?: SiteEnvironment;
+}): boolean {
+  return siteEnvironment(site) === "staging";
+}
+
 export function isStaging(site: { url: string; client_label: string | null }): boolean {
   const url = site.url.toLowerCase();
   if (/(^|\/\/|\.)staging|\/staging|\bstage\d*\b|\.test\b|\.local\b/.test(url)) return true;
