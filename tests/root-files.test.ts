@@ -6,6 +6,7 @@ import {
   WP_CORE_ROOT_FILES, MAX_ROOT_FILE_BYTES,
 } from "@/services/rootfiles/types";
 import { environmentSuffix } from "@/app/(dashboard)/sites/[id]/site-heading";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 /**
  * This name is the only thing between an operator-supplied string and a write
@@ -145,5 +146,58 @@ describe("environmentSuffix", () => {
       name: "Aral Abroad", url: "https://aralabroad.com",
       client_label: null, environment: "production",
     })).toBe("");
+  });
+});
+
+describe("friendlySiteError", () => {
+  // A Cloudflare challenge arrives as the entire interstitial page. Rendered
+  // verbatim -- which is what happened once showInlineError stopped being
+  // switched off -- it filled the card with kilobytes of minified challenge
+  // JavaScript and buried the only fact that mattered.
+  const CF_CHALLENGE =
+    'Streamable HTTP error: Error POSTing to endpoint: <!DOCTYPE html><html lang="en-US">' +
+    '<head><title>Just a moment...</title></head><body>' +
+    'window._cf_chl_opt={cvId:"3",cType:"managed"};' +
+    "x".repeat(4000) +
+    "</body></html>";
+
+  it("replaces the Cloudflare interstitial with one actionable sentence", () => {
+    const out = friendlySiteError(new Error(CF_CHALLENGE));
+    expect(out).toMatch(/Cloudflare is challenging/);
+    expect(out).toMatch(/never reached WordPress/);
+    expect(out).toContain("docs/ops/cloudflare.md");
+    expect(out).not.toContain("<!DOCTYPE");
+    expect(out).not.toContain("_cf_chl_opt");
+  });
+
+  it("bounds every message, including ones it has no special case for", () => {
+    const out = friendlySiteError(new Error("z".repeat(5000)));
+    expect(out.length).toBeLessThanOrEqual(201);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("collapses newlines so a message stays one readable line", () => {
+    expect(friendlySiteError(new Error("a\n\n   b\tc"))).toBe("a b c");
+  });
+
+  it("keeps a short, already-useful message intact", () => {
+    expect(friendlySiteError(new Error("That file is already gone"))).toBe(
+      "That file is already gone",
+    );
+  });
+
+  it.each([
+    ["401 rest_forbidden", /refused the credentials/],
+    ["fetch failed ECONNREFUSED", /Could not reach this site/],
+  ])("translates %j", (raw, expected) => {
+    expect(friendlySiteError(new Error(raw))).toMatch(expected);
+  });
+
+  it("never returns an empty string, so a fallback is never needed", () => {
+    // The call sites read `friendlySiteError(e) || "..."`; this pins that the
+    // fallback is belt-and-braces rather than load-bearing.
+    for (const v of [null, undefined, "", new Error("")]) {
+      expect(friendlySiteError(v).length).toBeGreaterThan(0);
+    }
   });
 });

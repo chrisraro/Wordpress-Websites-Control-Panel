@@ -8,6 +8,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 export async function bulkAction(
   siteId: string, kind: BulkKind, target: BulkTarget, ids: string[],
@@ -42,6 +43,6 @@ export async function bulkAction(
     }
     return { ok: true, batchId, queued: split.included.length, skipped: split.excluded.length };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not queue the bulk action" };
+    return { ok: false, error: friendlySiteError(e) || "Could not queue the bulk action" };
   }
 }

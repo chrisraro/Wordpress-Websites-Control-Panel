@@ -6,6 +6,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { buildJobHandlers } from "@/services/jobs/handlers";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 const ROUNDS = 5;          // up to 15 jobs per click
 const BUDGET_MS = 120_000; // stay well inside the route's duration limit
@@ -38,7 +39,7 @@ export async function processQueueNowAction(
       if (res.claimed === 0) break;   // queue drained
     }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Queue processing failed" };
+    return { ok: false, error: friendlySiteError(e) || "Queue processing failed" };
   }
 
   if (revalidate) revalidatePath(revalidate);
@@ -84,7 +85,7 @@ export async function cancelBatchAction(
     revalidatePath(`/marketplace/batches/${batchId}`);
     return { ok: true, cancelled };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not cancel the batch" };
+    return { ok: false, error: friendlySiteError(e) || "Could not cancel the batch" };
   }
 }
 
@@ -100,6 +101,6 @@ export async function retryBatchAction(
     revalidatePath(`/marketplace/batches/${batchId}`);
     return { ok: true, retried };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not retry the batch" };
+    return { ok: false, error: friendlySiteError(e) || "Could not retry the batch" };
   }
 }

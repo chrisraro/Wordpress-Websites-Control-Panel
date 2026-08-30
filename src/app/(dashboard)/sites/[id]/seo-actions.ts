@@ -7,6 +7,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 export async function runSeoScanAction(
   siteId: string,
@@ -28,7 +29,7 @@ export async function runSeoScanAction(
       actor: user.id, site_id: siteId, action: "site.seo_scan", detail: { manual: true },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "SEO scan failed" };
+    return { ok: false, error: friendlySiteError(e) || "SEO scan failed" };
   }
   revalidatePath(`/sites/${siteId}/seo`);
   revalidatePath("/dashboard");

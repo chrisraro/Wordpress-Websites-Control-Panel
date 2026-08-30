@@ -92,7 +92,7 @@ export function ManageForm({
       {showInlineError && state && !state.ok && (
         // Persistent copy of the failure. aria-live is off because the toast
         // already announced it; this exists so the reason survives the toast.
-        <p aria-live="off" className="mt-1.5 max-w-72 text-caption tracking-normal text-ember">
+        <p aria-live="off" className="mt-1.5 max-w-72 break-words text-caption tracking-normal text-ember">
           {state.error ?? "Action failed"}
         </p>
       )}

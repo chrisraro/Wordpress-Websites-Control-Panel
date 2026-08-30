@@ -137,9 +137,13 @@ export function RootFilesCard({
       </div>
 
       {loadError && (
+        // break-words as well as the bounded message from friendlySiteError:
+        // the Cloudflare interstitial is minified JavaScript with no spaces in
+        // it, so without this it renders as one unbroken line that runs off
+        // the side of the card instead of wrapping.
         <p className="flex items-start gap-2 px-5 pb-3 text-body text-ember">
           <IconAlert size={16} className="mt-0.5 shrink-0" />
-          {loadError}
+          <span className="min-w-0 break-words">{loadError}</span>
         </p>
       )}
 

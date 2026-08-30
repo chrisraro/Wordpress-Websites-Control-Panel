@@ -10,6 +10,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 import type { SiteEnvironment } from "@/services/sites/types";
 
 function revalidateSite(siteId: string) {
@@ -39,7 +40,7 @@ export async function manageAction(
     return { ok: result.ok, ...(result.error ? { error: result.error } : {}) };
   } catch (e) {
     revalidateSite(siteId);
-    return { ok: false, error: e instanceof Error ? e.message : "Action failed" };
+    return { ok: false, error: friendlySiteError(e) || "Action failed" };
   }
 }
 
@@ -70,7 +71,7 @@ export async function refreshInventoryAction(
       siteId,
     );
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Refresh failed" };
+    return { ok: false, error: friendlySiteError(e) || "Refresh failed" };
   }
   revalidateSite(siteId);
   return { ok: true };
@@ -114,6 +115,6 @@ export async function setEnvironmentAction(
     revalidateSite(siteId);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not change the environment" };
+    return { ok: false, error: friendlySiteError(e) || "Could not change the environment" };
   }
 }

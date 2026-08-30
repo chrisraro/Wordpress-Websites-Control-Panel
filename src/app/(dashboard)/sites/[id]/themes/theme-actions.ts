@@ -11,6 +11,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, getViewer, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 const UPLOAD_PATH_RE = /^uploads\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+\.zip$/i;
 
@@ -110,6 +111,6 @@ export async function searchWpThemesAction(
     const result = q.trim() ? await searchThemes(q.trim()) : await popularThemes();
     return { ok: true, result };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "wordpress.org search failed" };
+    return { ok: false, error: friendlySiteError(e) || "wordpress.org search failed" };
   }
 }

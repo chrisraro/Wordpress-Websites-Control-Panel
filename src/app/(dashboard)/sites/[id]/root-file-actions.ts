@@ -5,6 +5,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 import {
   listRootFiles, putRootFile, deleteRootFile, readRootFile,
 } from "@/services/rootfiles/service";
@@ -64,7 +65,7 @@ export async function listRootFilesAction(
   try {
     return { ok: true, files: await listRootFiles(deps(), siteId) };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not list files" };
+    return { ok: false, error: friendlySiteError(e) || "Could not list files" };
   }
 }
 
@@ -77,7 +78,7 @@ export async function readRootFileAction(
     const { content, isText } = await readRootFile(deps(), siteId, name);
     return { ok: true, content, isText };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not read the file" };
+    return { ok: false, error: friendlySiteError(e) || "Could not read the file" };
   }
 }
 
@@ -122,7 +123,7 @@ export async function uploadRootFileAction(
     revalidatePath(`/sites/${siteId}`);
     return { ok: true, url: res.url, sha256: res.sha256, replaced: res.replaced };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "The upload failed" };
+    return { ok: false, error: friendlySiteError(e) || "The upload failed" };
   }
 }
 
@@ -142,7 +143,7 @@ export async function saveRootFileAction(
     revalidatePath(`/sites/${siteId}`);
     return { ok: true, url: res.url, sha256: res.sha256 };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not save the file" };
+    return { ok: false, error: friendlySiteError(e) || "Could not save the file" };
   }
 }
 
@@ -157,6 +158,6 @@ export async function deleteRootFileAction(
     revalidatePath(`/sites/${siteId}`);
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "The delete failed" };
+    return { ok: false, error: friendlySiteError(e) || "The delete failed" };
   }
 }

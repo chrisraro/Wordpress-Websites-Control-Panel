@@ -8,6 +8,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -45,7 +46,7 @@ export async function createSite(_prev: { error?: string } | undefined, formData
   try {
     ({ id } = await addSite({ repo, mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, parsed.data, user.id));
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Failed to connect site" };
+    return { error: friendlySiteError(e) || "Failed to connect site" };
   }
   redirect(`/sites/${id}`);
 }

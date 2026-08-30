@@ -8,6 +8,7 @@ import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/invent
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 export async function runSecurityScanAction(
   siteId: string,
@@ -33,7 +34,7 @@ export async function runSecurityScanAction(
       actor: user.id, site_id: siteId, action: "site.security_scan", detail: { manual: true },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Scan failed" };
+    return { ok: false, error: friendlySiteError(e) || "Scan failed" };
   }
   revalidatePath(`/sites/${siteId}/security`);
   revalidatePath("/dashboard");

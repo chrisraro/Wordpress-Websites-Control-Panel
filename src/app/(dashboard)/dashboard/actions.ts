@@ -9,6 +9,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
 import { canAccessSite } from "@/lib/authz/decide";
+import { friendlySiteError } from "@/lib/mcp/errors";
 import type { JobType } from "@/services/jobs/types";
 import type { ManageResult } from "../sites/[id]/action-form";
 
@@ -101,7 +102,7 @@ export async function dismissGlobalFailedJobsAction(
   try {
     await supabaseJobsRepo(db).dismissFailed(null, jobType);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not dismiss the failed jobs" };
+    return { ok: false, error: friendlySiteError(e) || "Could not dismiss the failed jobs" };
   }
   revalidatePath("/dashboard");
   return { ok: true };

@@ -36,3 +36,44 @@ export function mapConnectError(e: unknown): McpError {
   }
   return new McpError(msg, e);
 }
+
+/**
+ * Turns a raw transport failure into something a person can act on.
+ *
+ * The motivating case: when Cloudflare challenges a request, the MCP
+ * transport surfaces the entire interstitial page as the error message --
+ * doctype, minified challenge JavaScript and all. Rendered into a card that
+ * showed the error verbatim, that filled the panel with several kilobytes of
+ * red minified JS and buried the one fact that mattered, which is that the
+ * request never reached WordPress.
+ *
+ * Bounded unconditionally, not just for the cases named here. Any message
+ * that reaches a user should be a sentence; the full text stays in the server
+ * log for diagnosis, which is where a stack of minified JS belongs.
+ */
+export function friendlySiteError(raw: unknown): string {
+  const msg = raw instanceof Error ? raw.message : String(raw ?? "");
+
+  // Cloudflare's managed challenge / "Just a moment..." interstitial.
+  if (/just a moment|cf_chl_opt|cf-browser-verification|__cf_chl/i.test(msg)) {
+    return (
+      "Cloudflare is challenging this request, so it never reached WordPress. " +
+      "This affects requests from the deployed app rather than the site itself — " +
+      "see docs/ops/cloudflare.md for the WAF rule that fixes it."
+    );
+  }
+  if (/\b(401|403)\b|unauthorized|forbidden|rest_forbidden/i.test(msg)) {
+    return "WordPress refused the credentials for this site. Reconnect it to update the application password.";
+  }
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timed out|timeout|fetch failed/i.test(msg)) {
+    return "Could not reach this site. It may be down, or the address may have changed.";
+  }
+  if (/<!doctype html|<html/i.test(msg)) {
+    // Some other HTML page where JSON was expected — a host error page, a
+    // maintenance splash, a login wall.
+    return "The site returned a web page instead of a response, so the request did not reach WordPress.";
+  }
+
+  const oneLine = msg.replace(/\s+/g, " ").trim();
+  return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine || "Something went wrong.";
+}

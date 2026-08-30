@@ -11,6 +11,7 @@ import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 function reportDeps(db: ReturnType<typeof createServiceSupabase>) {
   return {
@@ -52,7 +53,7 @@ export async function generateReportAction(
       detail: { sections, period_days: periodDays },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Report generation failed" };
+    return { ok: false, error: friendlySiteError(e) || "Report generation failed" };
   }
   revalidatePath(`/sites/${siteId}/reports`);
   return { ok: true };
@@ -76,7 +77,7 @@ export async function revokeReportAction(
       actor: user.id, site_id: siteId, action: "site.report_revoke", detail: { report_id: reportId },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not revoke the link" };
+    return { ok: false, error: friendlySiteError(e) || "Could not revoke the link" };
   }
   revalidatePath(`/sites/${siteId}/reports`);
   return { ok: true };

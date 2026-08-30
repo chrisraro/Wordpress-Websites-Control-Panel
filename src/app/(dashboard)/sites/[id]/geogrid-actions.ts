@@ -7,6 +7,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import { friendlySiteError } from "@/lib/mcp/errors";
 
 /**
  * useActionState calls the action as (prevState, formData); binding siteId puts
@@ -38,7 +39,7 @@ export async function saveGeoGridConfigAction(
       },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not save configuration" };
+    return { ok: false, error: friendlySiteError(e) || "Could not save configuration" };
   }
   revalidatePath(`/sites/${siteId}/geogrid`);
   return { ok: true };
@@ -75,7 +76,7 @@ export async function runGeoGridAction(
     revalidatePath(`/sites/${siteId}/geogrid`);
     return { ok: true, queued: config.keywords.length };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not queue the run" };
+    return { ok: false, error: friendlySiteError(e) || "Could not queue the run" };
   }
 }
 
@@ -102,7 +103,7 @@ export async function dismissFailedGeoGridRunsAction(
       actor: user.id, site_id: siteId, action: "site.geogrid_dismiss_failed",
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not dismiss the failed runs" };
+    return { ok: false, error: friendlySiteError(e) || "Could not dismiss the failed runs" };
   }
   revalidatePath(`/sites/${siteId}/geogrid`);
   return { ok: true };
