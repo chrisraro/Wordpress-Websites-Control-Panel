@@ -10,6 +10,7 @@ import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/invent
 import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
 import { StagingChip, environmentSuffix } from "./site-heading";
+import { RootFilesCard } from "./root-files-card";
 import { siteEnvironment } from "@/services/sites/portfolio";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
@@ -392,6 +393,17 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             />
           </div>
         </Card>
+        )}
+
+        {/* Same gate as Tools: this writes to the live filesystem, so it needs
+            wp_toolkit.manage plus a per-site manage grant, which is what
+            canManageToolkit already resolves to. */}
+        {canManageToolkit && (
+          <RootFilesCard
+            siteId={id}
+            siteName={site.name}
+            siteEnv={environmentSuffix(site)}
+          />
         )}
 
         {canViewAdminUsers && (
