@@ -58,8 +58,22 @@ function originDispatcher(ip: string, sni: string): Agent {
   return new Agent({
     connect: {
       servername: sni,
-      lookup: (_hostname, _options, callback) => {
-        callback(null, [{ address: ip, family: ip.includes(":") ? 6 : 4 }]);
+      // Both callback shapes. Node calls `lookup` with `all: true` when
+      // autoSelectFamily is on (the default since Node 20) and expects an
+      // array; without it, it expects `(err, address, family)`. Getting this
+      // wrong throws inside connect and surfaces as a generic "fetch
+      // failed", which is indistinguishable from the origin refusing the
+      // connection -- so supporting both removes a variable that would
+      // otherwise be impossible to tell apart from a network block.
+      lookup: (_hostname, options, callback) => {
+        const family = ip.includes(":") ? 6 : 4;
+        if (options && (options as { all?: boolean }).all) {
+          (callback as (e: null, a: Array<{ address: string; family: number }>) => void)(
+            null, [{ address: ip, family }],
+          );
+        } else {
+          (callback as (e: null, a: string, f: number) => void)(null, ip, family);
+        }
       },
     },
   });

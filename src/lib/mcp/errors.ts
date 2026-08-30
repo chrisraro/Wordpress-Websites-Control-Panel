@@ -66,7 +66,7 @@ export function friendlySiteError(raw: unknown): string {
     return "WordPress refused the credentials for this site. Reconnect it to update the application password.";
   }
   if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timed out|timeout|fetch failed/i.test(msg)) {
-    return "Could not reach this site. It may be down, or the address may have changed.";
+    return "Could not reach this site. If a direct connection is configured, the origin address may be stale or the host may be refusing connections from this app; otherwise the site may be down.";
   }
   if (/<!doctype html|<html/i.test(msg)) {
     // Some other HTML page where JSON was expected — a host error page, a
