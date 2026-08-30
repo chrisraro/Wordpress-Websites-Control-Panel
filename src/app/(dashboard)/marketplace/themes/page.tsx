@@ -7,10 +7,12 @@ import { requirePermission } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
 import { InstallPanel } from "../install-panel";
 import { MarketplaceTabs } from "../marketplace-tabs";
+import { Pager } from "../pager";
 import { Card, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { SearchSubmit } from "@/components/ui/search-submit";
 import { cardClass, inputClass, labelClass } from "@/components/ui/styles";
 import { IconAlert, IconSearch, IconStar } from "@/components/ui/icons";
+import { parsePage, clampToLastPage } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +24,9 @@ function formatInstalls(n: number): string {
 
 export default async function MarketplaceThemesPage({
   searchParams,
-}: { searchParams: Promise<{ q?: string }> }) {
-  const { q } = await searchParams;
+}: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const { q, page: pageParam } = await searchParams;
+  const requestedPage = parsePage(pageParam);
   const viewer = await requirePermission("wp_toolkit.manage");
   const db = await readDbFor(viewer);
   const sites = (await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }))
@@ -33,10 +36,13 @@ export default async function MarketplaceThemesPage({
   let results: WpOrgThemeResult | null = null;
   let searchError: string | null = null;
   try {
-    results = q ? await searchThemes(q) : await popularThemes();
+    results = q ? await searchThemes(q, requestedPage) : await popularThemes(requestedPage);
   } catch (e) {
     searchError = e instanceof Error ? e.message : "wordpress.org search failed";
   }
+  // See the plugins page for why this is clamped against the response's own
+  // total rather than trusted as sent.
+  const page = results ? clampToLastPage(requestedPage, results.pages) : requestedPage;
 
   return (
     <main>
@@ -128,6 +134,10 @@ export default async function MarketplaceThemesPage({
             </li>
           ))}
         </ul>
+      )}
+
+      {results && results.themes.length > 0 && (
+        <Pager basePath="/marketplace/themes" q={q} page={page} totalPages={results.pages} />
       )}
     </main>
   );

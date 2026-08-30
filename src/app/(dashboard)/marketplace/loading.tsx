@@ -24,6 +24,7 @@ export default function MarketplaceLoading() {
           </div>
         ))}
       </div>
+      <Skeleton className="mx-auto mt-6 h-9 w-48 rounded-2xl" />
     </main>
   );
 }

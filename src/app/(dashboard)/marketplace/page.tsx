@@ -8,10 +8,12 @@ import { readDbFor } from "@/lib/authz/db";
 import { InstallPanel } from "./install-panel";
 import { UploadCard } from "./upload-card";
 import { MarketplaceTabs } from "./marketplace-tabs";
+import { Pager } from "./pager";
 import { Card, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { SearchSubmit } from "@/components/ui/search-submit";
 import { cardClass, inputClass, labelClass } from "@/components/ui/styles";
 import { IconAlert, IconSearch, IconStar } from "@/components/ui/icons";
+import { parsePage, clampToLastPage } from "@/lib/pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +25,9 @@ function formatInstalls(n: number): string {
 
 export default async function MarketplacePage({
   searchParams,
-}: { searchParams: Promise<{ q?: string }> }) {
-  const { q } = await searchParams;
+}: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const { q, page: pageParam } = await searchParams;
+  const requestedPage = parsePage(pageParam);
   const viewer = await requirePermission("wp_toolkit.manage");
   const db = await readDbFor(viewer);
   const sites = (await listSites({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }))
@@ -34,10 +37,15 @@ export default async function MarketplacePage({
   let results: WpOrgSearchResult | null = null;
   let searchError: string | null = null;
   try {
-    results = q ? await searchPlugins(q) : await popularPlugins();
+    results = q ? await searchPlugins(q, requestedPage) : await popularPlugins(requestedPage);
   } catch (e) {
     searchError = e instanceof Error ? e.message : "wordpress.org search failed";
   }
+  // wordpress.org reinterprets an out-of-range page rather than rejecting it
+  // (probed live), so the page shown is clamped to what this response
+  // actually reports having, keeping the pager's "Page X of Y" internally
+  // consistent even for a bookmarked or hand-edited ?page=.
+  const page = results ? clampToLastPage(requestedPage, results.pages) : requestedPage;
 
   return (
     <main>
@@ -141,6 +149,10 @@ export default async function MarketplacePage({
             </li>
           ))}
         </ul>
+      )}
+
+      {results && results.plugins.length > 0 && (
+        <Pager basePath="/marketplace" q={q} page={page} totalPages={results.pages} />
       )}
     </main>
   );
