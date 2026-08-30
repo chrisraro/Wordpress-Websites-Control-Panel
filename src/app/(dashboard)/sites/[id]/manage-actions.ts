@@ -118,3 +118,62 @@ export async function setEnvironmentAction(
     return { ok: false, error: friendlySiteError(e) || "Could not change the environment" };
   }
 }
+
+/**
+ * Sets or clears the direct-to-origin override (0019_site_origin_override.sql).
+ *
+ * Validated here as well as by the database's check constraints, so the
+ * person gets a sentence rather than a Postgres error. Both fields or
+ * neither: a half-configured override is a connection that fails in a way
+ * nobody can read.
+ */
+export async function setOriginAction(
+  siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const gate = await checkPermission("sites.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
+
+  const ip = String(formData?.get("origin_ip") ?? "").trim();
+  const sni = String(formData?.get("origin_sni") ?? "").trim();
+
+  if (!ip && !sni) {
+    try {
+      await supabaseSitesRepo(createServiceSupabase()).setSiteOrigin(siteId, null);
+      revalidateSite(siteId);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: friendlySiteError(e) || "Could not clear the override" };
+    }
+  }
+  if (!ip || !sni) {
+    return { ok: false, error: "Set both the origin IP and the certificate name, or clear both." };
+  }
+  // A hostname here would be resolved by the same DNS that answers with the
+  // CDN, which defeats the entire point of the field.
+  const isIpv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split(".").every((o) => Number(o) <= 255);
+  const isIpv6 = /^[0-9a-fA-F:]+$/.test(ip) && ip.includes(":");
+  if (!isIpv4 && !isIpv6) {
+    return { ok: false, error: `“${ip}” is not an IP address. This must be a literal address, not a hostname.` };
+  }
+  if (!/^[a-zA-Z0-9.-]+$/.test(sni) || !sni.includes(".")) {
+    return { ok: false, error: `“${sni}” is not a hostname. Use the name on the origin’s certificate.` };
+  }
+
+  try {
+    const sites = supabaseSitesRepo(createServiceSupabase());
+    await sites.setSiteOrigin(siteId, { ip, sni });
+    await sites.insertActivity({
+      actor: user.id, site_id: siteId, action: "site.origin_override",
+      detail: { origin_ip: ip, origin_sni: sni },
+    });
+    revalidateSite(siteId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: friendlySiteError(e) || "Could not save the override" };
+  }
+}

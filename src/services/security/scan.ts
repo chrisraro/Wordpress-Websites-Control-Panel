@@ -1,4 +1,4 @@
-import { decryptSecret } from "@/lib/crypto/secrets";
+import { connectToSite } from "@/lib/mcp/connect";
 import { getOptionalEnv } from "@/lib/env";
 import { fetchWordfenceFeed } from "@/lib/adapters/vulnfeed/wordfence";
 import type { McpFactory } from "@/lib/mcp/client";
@@ -140,11 +140,7 @@ export async function securityScan(
 
     const creds = await deps.sites.getSiteCredentials(siteId);
     if (!creds) throw new Error(`Credentials missing for site: ${siteId}`);
-    const client = await deps.mcp({
-      endpoint: creds.mcp_endpoint,
-      username: creds.wp_username,
-      appPassword: await decryptSecret(creds.app_password_encrypted),
-    });
+    const client = await connectToSite(deps.mcp, creds);
     try {
       checks.push(...(await runPhpHardening(client)));
       checks.push(await runChecksums(client));

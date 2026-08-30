@@ -11,6 +11,7 @@ import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
 import { StagingChip, environmentSuffix } from "./site-heading";
 import { RootFilesCard } from "./root-files-card";
+import { OriginOverrideForm } from "./origin-override-form";
 import { siteEnvironment } from "@/services/sites/portfolio";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
@@ -303,6 +304,21 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 }}
               />
             </div>
+          )}
+
+          {/* Direct-to-origin override. Lives beside the other connection
+              facts because that is what it is: how this panel reaches the
+              site. Only offered to someone who can already manage the site
+              record, and only when the credential-adjacent connection block
+              is visible -- these two values describe a route past the CDN
+              and belong with mcp_endpoint, not on a page a client can see. */}
+          {canTestConnection && connection && (
+            <OriginOverrideForm
+              siteId={id}
+              siteName={site.name}
+              originIp={connection.origin_ip ?? null}
+              originSni={connection.origin_sni ?? null}
+            />
           )}
 
           <details className="group border-t border-hairline px-5 py-3">

@@ -1,5 +1,5 @@
+import { connectToSite } from "@/lib/mcp/connect";
 import { runPhp } from "@/lib/wpphp";
-import { decryptSecret } from "@/lib/crypto/secrets";
 import type { McpFactory, SiteMcpClient } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
 import type { AdminUsersRepo, SnapshotsRepo } from "./repo";
@@ -106,11 +106,7 @@ export interface InventoryDeps {
 export async function refreshSnapshot(deps: InventoryDeps, siteId: string): Promise<InventoryPayload> {
   const creds = await deps.sites.getSiteCredentials(siteId);
   if (!creds) throw new Error(`Site not found: ${siteId}`);
-  const client = await deps.mcp({
-    endpoint: creds.mcp_endpoint,
-    username: creds.wp_username,
-    appPassword: await decryptSecret(creds.app_password_encrypted),
-  });
+  const client = await connectToSite(deps.mcp, creds);
   try {
     const { payload, adminUsers } = await collectInventory(client);
     await deps.snapshots.insertSnapshot(siteId, payload);

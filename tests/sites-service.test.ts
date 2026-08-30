@@ -17,6 +17,7 @@ function memoryRepo() {
   const activity: Array<Record<string, unknown>> = [];
   const repo: SitesRepo = {
     async setSiteEnvironment() {},
+    async setSiteOrigin() {},
     async insertSite(row) {
       const id = `site-${sites.length + 1}`;
       sites.push({ id, status: "connected", ...row });
@@ -37,7 +38,11 @@ function memoryRepo() {
     async getSiteConnection(id) {
       const s = sites.find((x) => x.id === id);
       return s
-        ? { mcp_endpoint: s.mcp_endpoint as string, wp_username: s.wp_username as string }
+        ? {
+            mcp_endpoint: s.mcp_endpoint as string, wp_username: s.wp_username as string,
+            origin_ip: (s.origin_ip as string | null) ?? null,
+            origin_sni: (s.origin_sni as string | null) ?? null,
+          }
         : null;
     },
     async updateSiteStatus(id, status: SiteStatus) {

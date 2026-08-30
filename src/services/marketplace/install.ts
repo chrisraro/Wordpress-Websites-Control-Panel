@@ -1,5 +1,5 @@
+import { connectToSite } from "@/lib/mcp/connect";
 import { runPhp, phpString } from "@/lib/wpphp";
-import { decryptSecret } from "@/lib/crypto/secrets";
 import { SLUG_RE } from "@/services/manage/service";
 import type { McpFactory } from "@/lib/mcp/client";
 import type { SitesRepo } from "@/services/sites/repo";
@@ -99,11 +99,7 @@ export async function installPlugin(
   let output = "";
   let error: string | undefined;
   try {
-    const client = await deps.mcp({
-      endpoint: creds.mcp_endpoint,
-      username: creds.wp_username,
-      appPassword: await decryptSecret(creds.app_password_encrypted),
-    });
+    const client = await connectToSite(deps.mcp, creds);
     try {
       const result = await runPhp<{ ok: boolean; message?: string; error?: string }>(
         client, code, INSTALL_TIMEOUT_MS,

@@ -110,13 +110,23 @@ describe("SITE_COLUMNS (shared by listSites and getSite)", () => {
 });
 
 describe("supabaseSitesRepo.getSiteConnection", () => {
-  it("selects exactly mcp_endpoint and wp_username, nothing else", async () => {
+  it("selects the staff-only connection columns and never the password", async () => {
     const captured: { table?: string; selected: string[] } = { selected: [] };
     await supabaseSitesRepo(fakeDb(captured)).getSiteConnection("site-1");
 
     expect(captured.table).toBe("sites");
     expect(captured.selected).toHaveLength(1);
-    const columns = captured.selected[0].split(",").map((c) => c.trim());
-    expect(columns.sort()).toEqual(["mcp_endpoint", "wp_username"]);
+    const columns = captured.selected[0].split(",").map((c) => c.trim()).sort();
+
+    // origin_ip/origin_sni joined this read with 0019: they describe a route
+    // to the origin past a CDN, which is staff-only information of the same
+    // class as mcp_endpoint. Like the rest of this list they are deliberately
+    // NOT in SITE_COLUMNS and NOT granted to `authenticated`, so a client can
+    // never select them -- the two tests above pin that boundary.
+    expect(columns).toEqual(["mcp_endpoint", "origin_ip", "origin_sni", "wp_username"]);
+
+    // The invariant that must never relax, stated separately from the exact
+    // list so that widening the list above can never quietly admit it.
+    expect(captured.selected[0]).not.toContain("app_password_encrypted");
   });
 });

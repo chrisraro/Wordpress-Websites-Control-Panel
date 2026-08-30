@@ -1,3 +1,4 @@
+import { connectToSite } from "@/lib/mcp/connect";
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secrets";
 import { McpAuthError, McpConnectionError } from "@/lib/mcp/errors";
 import type { McpFactory } from "@/lib/mcp/client";
@@ -107,11 +108,7 @@ export async function testSiteConnection(
   let status: SiteStatus = "connected";
   let errorMsg: string | undefined;
   try {
-    const client = await deps.mcp({
-      endpoint: creds.mcp_endpoint,
-      username: creds.wp_username,
-      appPassword: await decryptSecret(creds.app_password_encrypted),
-    });
+    const client = await connectToSite(deps.mcp, creds);
     try {
       await client.discoverAbilities();
     } finally {
