@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
 import { buttonClass, iconButtonClass } from "@/components/ui/styles";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { SitePalette, type PaletteSite } from "./site-palette";
+import { SitePalette, SitePaletteTrigger, type PaletteSite } from "./site-palette";
 import {
   IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
 } from "@/components/ui/icons";
@@ -76,7 +76,8 @@ function NavLinks({
 }
 
 function SidebarBody({
-  email, pathname, onNavigate, showConnectSite, showMarketplace, showUsers, sites,
+  email, pathname, onNavigate, showConnectSite, showMarketplace, showUsers,
+  hasSites, onOpenPalette,
 }: {
   email: string;
   pathname: string;
@@ -84,7 +85,8 @@ function SidebarBody({
   showConnectSite: boolean;
   showMarketplace: boolean;
   showUsers: boolean;
-  sites: PaletteSite[];
+  hasSites: boolean;
+  onOpenPalette: () => void;
 }) {
   return (
     <div className="flex h-full flex-col gap-6 p-4">
@@ -108,7 +110,7 @@ function SidebarBody({
         </Link>
       )}
 
-      {sites.length > 0 && <SitePalette sites={sites} />}
+      {hasSites && <SitePaletteTrigger onOpen={onOpenPalette} />}
 
       <NavLinks
         pathname={pathname}
@@ -146,6 +148,7 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -168,7 +171,8 @@ export function Sidebar({
           email={email}
           pathname={pathname}
           showConnectSite={showConnectSite}
-          sites={sites}
+          hasSites={sites.length > 0}
+          onOpenPalette={() => setPaletteOpen(true)}
           showMarketplace={showMarketplace}
           showUsers={showUsers}
         />
@@ -222,12 +226,24 @@ export function Sidebar({
             pathname={pathname}
             onNavigate={() => setOpen(false)}
             showConnectSite={showConnectSite}
-            sites={sites}
+            hasSites={sites.length > 0}
+            onOpenPalette={() => {
+              setOpen(false);
+              setPaletteOpen(true);
+            }}
             showMarketplace={showMarketplace}
             showUsers={showUsers}
           />
         </div>
       </dialog>
+
+      {/* Exactly one palette for the whole shell, outside both SidebarBody
+          instances. Rendered here rather than inside them because
+          SidebarBody mounts twice (desktop aside + mobile sheet) and two
+          open modal dialogs put the first into the inert layer. */}
+      {sites.length > 0 && (
+        <SitePalette sites={sites} open={paletteOpen} onOpenChange={setPaletteOpen} />
+      )}
     </>
   );
 }

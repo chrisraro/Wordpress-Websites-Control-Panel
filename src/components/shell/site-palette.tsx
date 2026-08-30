@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
 import { badgeClass, inputClass } from "@/components/ui/styles";
@@ -27,32 +27,65 @@ export interface PaletteSite {
  * different halves of the identity: a staging copy often shares its parent's
  * name and is distinguishable only by host.
  */
-export function SitePalette({ sites }: { sites: PaletteSite[] }) {
-  const [open, setOpen] = useState(false);
+/**
+ * The trigger button. Rendered once per sidebar instance -- there are two,
+ * the desktop <aside> and the mobile sheet -- while the dialog below is
+ * rendered exactly once by Sidebar.
+ *
+ * They are separate components because they were not: the whole palette
+ * lived inside SidebarBody, which mounts twice, so ⌘K opened two modal
+ * <dialog>s at once. The second one took the top layer and made the first
+ * inert, and the input the user was looking at could not be focused at all
+ * -- .focus() on it silently did nothing.
+ */
+export function SitePaletteTrigger({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mb-4 flex min-h-10 w-full items-center gap-2 rounded-2xl bg-canvas px-3
+        text-body text-mid-gray transition-colors duration-150 hover:text-ink
+        focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink
+        pointer-coarse:min-h-11"
+    >
+      <IconSearch size={16} className="shrink-0" />
+      <span className="flex-1 text-left">Find a site</span>
+      {/* Hidden from assistive tech: the shortcut is a pointer-user hint, and
+          read aloud it is noise appended to the button's name. */}
+      <span aria-hidden className="text-caption tracking-normal">
+        ⌘K
+      </span>
+    </button>
+  );
+}
+
+export function SitePalette({
+  sites, open, onOpenChange,
+}: {
+  sites: PaletteSite[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const router = useRouter();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const setOpen = onOpenChange;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((v) => !v);
+        onOpenChange(!open);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [open, onOpenChange]);
 
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setActive(0);
-      // The Modal mounts its content in the same commit, so focus has to wait
-      // a frame for the input to exist.
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
+    if (!open) return;
+    setQuery("");
+    setActive(0);
   }, [open]);
 
   const matches = useMemo(() => {
@@ -72,32 +105,21 @@ export function SitePalette({ sites }: { sites: PaletteSite[] }) {
   };
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mb-4 flex min-h-10 w-full items-center gap-2 rounded-2xl bg-canvas px-3
-          text-body text-mid-gray transition-colors duration-150 hover:text-ink
-          focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink
-          pointer-coarse:min-h-11"
-      >
-        <IconSearch size={16} className="shrink-0" />
-        <span className="flex-1 text-left">Find a site</span>
-        {/* Hidden from assistive tech: the shortcut is a mouse-user hint, and
-            read aloud it is noise appended to the button's name. */}
-        <span aria-hidden className="text-caption tracking-normal">
-          ⌘K
-        </span>
-      </button>
-
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title="Find a site"
         description="Search by name, address or client."
       >
+        {/* autoFocus, not a focus() call: Modal opens via the native
+            showModal(), which moves focus to the first focusable element in
+            the dialog -- the close button -- and beats anything scheduled
+            from an effect. showModal() honours the autofocus attribute, so
+            this is the one thing it will not overrule. Without it the palette
+            opened with the input unfocused and typing went nowhere. */}
         <input
-          ref={inputRef}
+          autoFocus
+
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -153,6 +175,5 @@ export function SitePalette({ sites }: { sites: PaletteSite[] }) {
           )}
         </ul>
       </Modal>
-    </>
   );
 }
