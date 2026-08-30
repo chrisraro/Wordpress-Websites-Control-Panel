@@ -7,8 +7,10 @@ import { requirePermission } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
 import { InstallPanel } from "../install-panel";
 import { MarketplaceTabs } from "../marketplace-tabs";
+import { searchThemesAction } from "../search-actions";
 import { Card, EmptyState, PageHeader } from "@/components/ui/primitives";
-import { buttonClass, cardClass, inputClass, labelClass } from "@/components/ui/styles";
+import { SubmitButton } from "@/components/ui/submit-button";
+import { cardClass, inputClass, labelClass } from "@/components/ui/styles";
 import { IconAlert, IconSearch, IconStar } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +48,7 @@ export default async function MarketplaceThemesPage({
 
       <MarketplaceTabs active="themes" />
 
-      <form action="/marketplace/themes" method="get" className={`${cardClass} mb-6 p-5`}>
+      <form action={searchThemesAction} className={`${cardClass} mb-6 p-5`}>
         <label htmlFor="q" className={labelClass}>
           Search themes
         </label>
@@ -64,7 +66,7 @@ export default async function MarketplaceThemesPage({
               className={`${inputClass} pl-9`}
             />
           </div>
-          <button className={buttonClass("primary")}>Search</button>
+          <SubmitButton label="Search" pendingLabel="Searching…" />
         </div>
         <p className="mt-2 text-caption tracking-normal text-mid-gray">
           {q ? `Results for “${q}”` : "Most popular right now"}

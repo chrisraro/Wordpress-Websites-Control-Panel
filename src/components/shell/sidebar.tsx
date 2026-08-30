@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
 import { buttonClass } from "@/components/ui/styles";
+import { SubmitButton } from "@/components/ui/submit-button";
 import {
   IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
 } from "@/components/ui/icons";
@@ -117,10 +118,13 @@ function SidebarBody({
           {email}
         </p>
         <form action={logout} className="mt-1">
-          <button className={buttonClass("ghost", "md", "w-full justify-start")}>
-            <IconLogout size={16} />
-            Sign out
-          </button>
+          <SubmitButton
+            label="Sign out"
+            pendingLabel="Signing out…"
+            icon={<IconLogout size={16} />}
+            variant="ghost"
+            className={buttonClass("ghost", "md", "w-full justify-start")}
+          />
         </form>
       </div>
     </div>
