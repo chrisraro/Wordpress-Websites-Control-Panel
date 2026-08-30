@@ -10,8 +10,39 @@ const API = "https://api.wordpress.org/plugins/info/1.2/";
 const FIELDS =
   "&request[fields][icons]=true&request[fields][active_installs]=true&request[fields][short_description]=true";
 
+/**
+ * wordpress.org returns display titles HTML-encoded — "Yoast SEO &#8211;
+ * Advanced SEO" — and React renders a string as text, so an undecoded entity
+ * reaches the user literally. Every plugin or theme whose name contains a
+ * dash, ampersand or ellipsis was showing its entity on the marketplace.
+ *
+ * Decoding is safe here precisely because the result is rendered as text:
+ * React escapes it on the way out, so turning "&lt;script&gt;" back into
+ * "<script>" produces visible characters, never markup. Do not pass the
+ * result to dangerouslySetInnerHTML.
+ *
+ * `&amp;` is decoded last, otherwise "&amp;#8211;" — an escaped literal —
+ * would decode twice and silently become a dash the source never contained.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'", "&#039;": "'",
+  "&nbsp;": " ", "&hellip;": "…", "&ndash;": "–", "&mdash;": "—",
+  "&lsquo;": "‘", "&rsquo;": "’", "&ldquo;": "“", "&rdquo;": "”",
+};
+
+function decodeEntities(s: string): string {
+  let out = s.replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+    String.fromCodePoint(parseInt(hex, 16)),
+  );
+  out = out.replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)));
+  for (const [entity, char] of Object.entries(NAMED_ENTITIES)) {
+    out = out.split(entity).join(char);
+  }
+  return out.split("&amp;").join("&");
+}
+
 function stripHtml(s: unknown): string {
-  return String(s ?? "").replace(/<[^>]*>/g, "").trim();
+  return decodeEntities(String(s ?? "").replace(/<[^>]*>/g, "")).trim();
 }
 function orNull(v: unknown): string | null {
   return typeof v === "string" && v ? v : null;
@@ -107,9 +138,11 @@ export function authorName(a: RawTheme["author"]): string {
 function normaliseTheme(t: RawTheme): WpOrgTheme {
   return {
     slug: t.slug,
-    name: t.name,
+    // Themes come back HTML-encoded exactly as plugins do; this path was
+    // passing the raw value straight through.
+    name: stripHtml(t.name),
     version: t.version,
-    author: authorName(t.author),
+    author: stripHtml(authorName(t.author)),
     // The API returns protocol-relative URLs ("//ts.w.org/..."), which break
     // in an <img src> on some browsers; force https.
     screenshot_url: t.screenshot_url ? t.screenshot_url.replace(/^\/\//, "https://") : null,
