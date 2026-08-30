@@ -73,7 +73,9 @@ export function Modal({
               {description}
             </div>
           )}
-          {children && <div className="px-5 pt-4">{children}</div>}
+          {children && (
+            <div className={`px-5 pt-4 ${footer ? "" : "pb-5"}`}>{children}</div>
+          )}
           {footer && (
             <div className="flex flex-col-reverse gap-2 p-5 sm:flex-row sm:justify-end">
               {footer}
