@@ -29,10 +29,40 @@ const BUTTON_VARIANT: Record<ButtonVariant, string> = {
   danger: "border border-hairline bg-transparent text-ember hover:bg-ember/[0.06]",
 };
 
+/**
+ * DESIGN.md sets a compact density, and 36/40px reads correctly under a
+ * mouse. A finger is not a mouse: PRODUCT.md records phone use as a hard
+ * constraint, and 36px is below every touch guideline (WCAG 2.5.5 AAA, Apple
+ * HIG and Material all land at 44-48px).
+ *
+ * `pointer-coarse` resolves that without a compromise in either direction —
+ * touch devices get 44px, pointer devices keep the compact scale the design
+ * system asks for. It keys on the input device rather than the viewport, so a
+ * touchscreen laptop gets the larger target and a narrow desktop window does
+ * not.
+ */
 const BUTTON_SIZE: Record<ButtonSize, string> = {
-  sm: "min-h-9 px-3 text-caption tracking-normal",
-  md: "min-h-10 px-4 text-body",
+  sm: "min-h-9 px-3 text-caption tracking-normal pointer-coarse:min-h-11",
+  md: "min-h-10 px-4 text-body pointer-coarse:min-h-11",
 };
+
+/**
+ * An icon-only control has no label to widen it, so it needs both dimensions
+ * pinned or it stays a small square however tall the row is. The modal close
+ * was 26x26 (an 18px glyph in p-1) — over WCAG 2.5.8's 24px floor by two
+ * pixels, and the primary way to dismiss a bottom sheet on a phone.
+ */
+export function iconButtonClass(extra?: string): string {
+  return [
+    "inline-flex items-center justify-center rounded-2xl",
+    "text-mid-gray transition-colors duration-150 hover:bg-canvas hover:text-ink",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
+    "size-8 pointer-coarse:size-11",
+    extra,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
 
 export function buttonClass(
   variant: ButtonVariant = "outline",
@@ -57,7 +87,7 @@ export const cardFooterClass =
 
 /** Resting fill, hairline ring on focus — no border at rest. */
 export const inputClass =
-  "min-h-10 w-full rounded-2xl border border-transparent bg-canvas px-4 py-2 " +
+  "min-h-10 pointer-coarse:min-h-11 w-full rounded-2xl border border-transparent bg-canvas px-4 py-2 " +
   "text-body text-ink placeholder:text-mid-gray transition-colors duration-150 " +
   "focus:border-hairline focus:bg-paper focus:outline-none " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";

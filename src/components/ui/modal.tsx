@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
-import { buttonClass } from "./styles";
+import { buttonClass, iconButtonClass } from "./styles";
 import { IconClose } from "./icons";
 
 /**
@@ -63,7 +63,7 @@ export function Modal({
               type="button"
               onClick={onClose}
               aria-label="Close dialog"
-              className="-m-1 rounded-2xl p-1 text-mid-gray transition-colors hover:bg-canvas hover:text-ink"
+              className={iconButtonClass("-m-1.5 shrink-0")}
             >
               <IconClose size={18} />
             </button>

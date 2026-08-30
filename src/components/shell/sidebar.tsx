@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { logout } from "@/app/login/actions";
-import { buttonClass } from "@/components/ui/styles";
+import { buttonClass, iconButtonClass } from "@/components/ui/styles";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
   IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
@@ -59,7 +59,7 @@ function NavLinks({
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={`flex min-h-10 items-center gap-3 rounded-2xl px-3 text-body transition-colors
-              duration-150 ${
+              duration-150 pointer-coarse:min-h-11 ${
                 active
                   ? "bg-canvas font-medium text-ink"
                   : "text-mid-gray hover:bg-canvas hover:text-ink"
@@ -89,7 +89,7 @@ function SidebarBody({
       <Link
         href="/dashboard"
         onClick={onNavigate}
-        className="flex items-center gap-2 px-3 text-body font-semibold leading-tight tracking-[-0.02em] text-ink"
+        className="flex min-h-8 items-center gap-2 px-3 text-body font-semibold leading-tight tracking-[-0.02em] text-ink pointer-coarse:min-h-11"
       >
         <Image src="/brand/icon-192.png" alt="" width={24} height={24} className="shrink-0" />
         <span>OCS Wordpress Control Panel</span>
@@ -170,13 +170,13 @@ export function Sidebar({
           onClick={() => setOpen(true)}
           aria-label="Open navigation"
           aria-expanded={open}
-          className={buttonClass("ghost", "sm", "px-2")}
+          className={iconButtonClass("shrink-0")}
         >
           <IconMenu size={20} />
         </button>
         <Link
           href="/dashboard"
-          className="flex items-center gap-2 text-body font-semibold tracking-[-0.02em] text-ink"
+          className="flex min-h-8 items-center gap-2 text-body font-semibold tracking-[-0.02em] text-ink pointer-coarse:min-h-11"
         >
           <Image src="/brand/icon-192.png" alt="" width={24} height={24} className="shrink-0" />
           <span>OCS Wordpress Control Panel</span>
@@ -202,7 +202,7 @@ export function Sidebar({
             type="button"
             onClick={() => setOpen(false)}
             aria-label="Close navigation"
-            className="absolute right-3 top-3 rounded-2xl p-2 text-mid-gray transition-colors hover:bg-canvas hover:text-ink"
+            className={iconButtonClass("absolute right-3 top-3")}
           >
             <IconClose size={18} />
           </button>
