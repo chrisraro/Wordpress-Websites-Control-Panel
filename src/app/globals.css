@@ -44,6 +44,20 @@
   --color-status-bad: #b91c1c;
   --color-status-info: #1e40af;
 
+  /* GeoGrid rank ramp. A rank is a position, not a status, so it needs five
+     bands where the severity scale has four — hence one value of its own for
+     4-7, sitting between good and warn. Declared here rather than as literals
+     in grid-map.tsx because Leaflet draws outside React and cannot use
+     classes: that file previously hard-coded all six colours, and its copy of
+     mid-gray was still #737373 months after the token was darkened to #707070
+     for contrast. Aliases, not duplicates, so the ramp cannot drift again. */
+  --color-rank-1: var(--color-status-good);
+  --color-rank-2: #4d7c0f;
+  --color-rank-3: var(--color-status-warn);
+  --color-rank-4: var(--color-status-alert);
+  --color-rank-5: var(--color-status-bad);
+  --color-rank-unmeasured: var(--color-mid-gray);
+
   /* Type — Geist, loaded by next/font in layout.tsx */
   --font-geist: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

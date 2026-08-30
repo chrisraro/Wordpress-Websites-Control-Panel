@@ -3,6 +3,25 @@
 import { useEffect, useRef } from "react";
 import type { RankPoint } from "@/services/geogrid/types";
 
+/**
+ * Reads a design token off the document.
+ *
+ * Leaflet paints into its own DOM with inline styles, so it cannot use
+ * Tailwind classes and needs literal colour strings. Resolving them from CSS
+ * custom properties keeps globals.css the single source of truth: this file
+ * used to carry its own copies, and its mid-gray was still #737373 long after
+ * the token was darkened to #707070 to clear the contrast floor — the map had
+ * silently drifted from the rest of the app.
+ *
+ * The fallback is only for the case where the stylesheet has not applied
+ * (a token renamed, CSS failing to load); an unreadable token should leave a
+ * visible marker rather than an invisible one.
+ */
+function token(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 /** Popup content as real DOM so untrusted text can never become markup. */
 function popupNode(businessName: string, label: string, measured: boolean): HTMLElement {
   const wrap = document.createElement("div");
@@ -10,7 +29,7 @@ function popupNode(businessName: string, label: string, measured: boolean): HTML
   const name = document.createElement("strong");
   name.textContent = businessName;
   const rank = document.createElement("div");
-  rank.style.color = "#737373";
+  rank.style.color = token("--color-mid-gray", "#707070");
   rank.textContent = measured ? `Rank: ${label}` : "Not measured — lookup failed";
   wrap.append(name, rank);
   return wrap;
@@ -18,20 +37,20 @@ function popupNode(businessName: string, label: string, measured: boolean): HTML
 
 /**
  * The rank ramp is the one place colour carries the whole meaning, so it uses
- * the data-status scale from globals.css rather than the monochrome chrome.
- * An unmeasured point gets mid-gray, not the "outside the top 20" red: a
- * failed lookup carries no information about whether the business ranks
- * there, and colouring it the same as a confirmed non-rank would say
+ * the `--color-rank-*` scale from globals.css rather than the monochrome
+ * chrome. An unmeasured point gets mid-gray, not the "outside the top 20"
+ * red: a failed lookup carries no information about whether the business
+ * ranks there, and colouring it the same as a confirmed non-rank would say
  * otherwise.
  */
 function colourFor(rank: number | null, measured: boolean): string {
-  if (!measured) return "#707070";
-  if (rank === null) return "#b91c1c";
-  if (rank <= 3) return "#15803d";
-  if (rank <= 7) return "#4d7c0f";
-  if (rank <= 10) return "#a16207";
-  if (rank <= 15) return "#c2410c";
-  return "#b91c1c";
+  if (!measured) return token("--color-rank-unmeasured", "#707070");
+  if (rank === null) return token("--color-rank-5", "#b91c1c");
+  if (rank <= 3) return token("--color-rank-1", "#15803d");
+  if (rank <= 7) return token("--color-rank-2", "#4d7c0f");
+  if (rank <= 10) return token("--color-rank-3", "#a16207");
+  if (rank <= 15) return token("--color-rank-4", "#c2410c");
+  return token("--color-rank-5", "#b91c1c");
 }
 
 export function GridMap({
@@ -84,7 +103,7 @@ export function GridMap({
       });
 
       L.circleMarker([center.lat, center.lng], {
-        radius: 4, color: "#0a0a0a", weight: 2, fillOpacity: 1,
+        radius: 4, color: token("--color-ink", "#0a0a0a"), weight: 2, fillOpacity: 1,
       })
         .addTo(map)
         .bindPopup("Grid centre");
