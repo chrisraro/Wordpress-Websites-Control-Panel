@@ -32,6 +32,53 @@ function formatAge(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+export type VulnFeedState = "never" | "stale" | "fresh";
+
+export interface VulnFeedStatus {
+  state: VulnFeedState;
+  /** Copy for the dashboard's system-health panel. Null when fresh — a
+   *  healthy feed has nothing to say (see dashboard/page.tsx). */
+  message: string | null;
+}
+
+/**
+ * The vulnerability feed's condition, independent of any job's outcome.
+ *
+ * This is deliberately not derived from whether `vuln_feed_refresh` last
+ * succeeded: `refreshVulnFeed` returns `{skipped: true}` when the cached feed
+ * is already fresh, and the job handler marks that outcome `done` — so a job
+ * history full of "done" rows tells you nothing about whether the feed itself
+ * has ever been populated. `newestFeedUpdatedAt()` (SecurityRepo) is the one
+ * source of truth for that, because it reads the table the feed actually
+ * lives in.
+ *
+ * "Never populated" and "stale" get different sentences on purpose (see the
+ * dashboard spec this implements): an empty feed means every security grade
+ * to date has excluded vulnerability matching entirely, while a stale one
+ * means grades are being matched against an out-of-date list. Conflating them
+ * points an operator at the wrong remedy.
+ */
+export function vulnFeedStatus(newestUpdatedAt: string | null, now: number = Date.now()): VulnFeedStatus {
+  if (!newestUpdatedAt) {
+    return {
+      state: "never",
+      message:
+        "The vulnerability feed has never been populated. No security grade has ever included " +
+        "vulnerability matching — set WORDFENCE_API_KEY and run the feed refresh.",
+    };
+  }
+  const ageMs = now - new Date(newestUpdatedAt).getTime();
+  if (ageMs > VULN_FEED_STALE_WARN_MS) {
+    return {
+      state: "stale",
+      message:
+        `The vulnerability feed is stale — last refreshed ${formatAge(ageMs)} ago. Security grades ` +
+        "are being matched against an out-of-date vulnerability list.",
+    };
+  }
+  return { state: "fresh", message: null };
+}
+
 export interface ScanDeps {
   sites: SitesRepo;
   snapshots: SnapshotsRepo;

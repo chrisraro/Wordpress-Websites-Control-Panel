@@ -12,11 +12,13 @@ import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates } from "@/services/inventory/types";
 import { siteAttention, isStaging, SEVERITY_RANK, type Severity } from "@/services/sites/portfolio";
 import type { SiteRow } from "@/services/sites/types";
+import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
+import { vulnFeedStatus } from "@/services/security/scan";
 import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
 import { IconAlert, IconCheck, IconChevronRight, IconPlus, IconRefresh, IconSites } from "@/components/ui/icons";
 import { ManageForm } from "../sites/[id]/action-form";
-import { refreshAllInventoryAction } from "./actions";
+import { refreshAllInventoryAction, dismissGlobalFailedJobsAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -141,8 +143,9 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
 export default async function DashboardPage() {
   const viewer = await requireViewer();
   const db = await readDbFor(viewer);
+  const jobsRepo = supabaseJobsRepo(db);
   const sites = await listSitesForViewer(
-    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) },
+    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: jobsRepo },
     viewer,
   );
   const canConnectSite = can(viewer, "sites.manage");
@@ -161,6 +164,40 @@ export default async function DashboardPage() {
   const snapshots = supabaseSnapshotsRepo(db);
   const securityRepo = supabaseSecurityRepo(db);
   const seoRepo = supabaseSeoRepo(db);
+
+  // System health: operator information, not customer information, so it's
+  // gated the same as the queue-drain controls (queue.process) and both
+  // extra reads below are skipped entirely for a viewer who can't see the
+  // panel — a client's landing-page load pays nothing for this.
+  //
+  // These two reads are the only ones this feature adds to the dashboard,
+  // and both are bounded (one row per failed job type, one row for the
+  // feed's newest timestamp) — not one per site.
+  const canSeeSystemHealth = can(viewer, "queue.process");
+  const [globalFailures, feedStatus] = canSeeSystemHealth
+    ? await Promise.all([
+        jobsRepo.listGlobalFailures(),
+        securityRepo.newestFeedUpdatedAt().then(vulnFeedStatus),
+      ])
+    : [[] as JobRow[], vulnFeedStatus(null)];
+  // vuln_feed_refresh is the only job type enqueued with site_id: null today
+  // (see handlers.ts), but grouping by type rather than assuming a single
+  // group means a future site-less job type shows up correctly instead of
+  // being silently merged into this one's alert.
+  const failureGroups = Array.from(
+    globalFailures.reduce((map, job) => {
+      const arr = map.get(job.type) ?? [];
+      arr.push(job);
+      map.set(job.type, arr);
+      return map;
+    }, new Map<JobType, JobRow[]>()),
+  ).map(([type, jobs]) => ({ type, jobs, latest: jobs[0] }));
+  // canSeeSystemHealth guards this too: feedStatus is computed from a real
+  // read only when the panel can be seen, so "fresh" (the harmless default
+  // above) is what a viewer without queue.process gets regardless of the
+  // feed's actual state — this never renders for them either way.
+  const showSystemHealth =
+    canSeeSystemHealth && (failureGroups.length > 0 || feedStatus.state !== "fresh");
 
   // One pass per site, all in flight together. Deliberately the same four
   // reads the previous version made: this page is the landing screen and has
@@ -239,6 +276,72 @@ export default async function DashboardPage() {
           )
         }
       />
+
+      {/* Above "Needs attention" per the spec this implements: a jobs admin
+          page nobody opens does not solve invisibility, this does. Rendered
+          only when there is something to report -- a permanently-present
+          "System: OK" panel trains people to stop seeing it, so this section
+          does not exist at all once there's nothing wrong. */}
+      {showSystemHealth && (
+        <section aria-labelledby="system-health" className="mb-6">
+          <h2
+            id="system-health"
+            className="mb-2 flex items-center gap-2 text-body font-medium text-ink"
+          >
+            <IconAlert size={16} className="text-status-warn" />
+            System health
+          </h2>
+          <div className="space-y-3">
+            {failureGroups.map((group) => {
+              const dismiss = dismissGlobalFailedJobsAction.bind(null, group.type);
+              const label = JOB_TYPE_LABEL[group.type];
+              return (
+                <div key={group.type} className={`${cardClass} p-5`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone="bad">{group.jobs.length} failed</StatusBadge>
+                      <p className="text-body font-medium text-ink">{label} did not complete</p>
+                    </div>
+                    <ManageForm
+                      action={dismiss}
+                      label="Dismiss"
+                      pendingLabel="Dismissing…"
+                      success="Failed jobs dismissed"
+                      size="sm"
+                      confirm={{
+                        title: `Dismiss failed ${label.toLowerCase()} jobs?`,
+                        description:
+                          "This dismisses every failed run of this type, not just the one shown " +
+                          "below — the jobs stay in the record for diagnosis, this only clears the alert.",
+                        confirmLabel: "Dismiss",
+                      }}
+                      showInlineError={false}
+                    />
+                  </div>
+                  <p className="mt-1 break-words text-body text-mid-gray">
+                    {group.latest.finished_at
+                      ? `Failed ${new Date(group.latest.finished_at).toLocaleString()} — `
+                      : ""}
+                    {group.latest.last_error ?? "No error was recorded."}
+                  </p>
+                </div>
+              );
+            })}
+
+            {feedStatus.state !== "fresh" && (
+              <div className={`${cardClass} p-5`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge tone={feedStatus.state === "never" ? "bad" : "warn"}>
+                    {feedStatus.state === "never" ? "Never populated" : "Stale"}
+                  </StatusBadge>
+                  <p className="text-body font-medium text-ink">Vulnerability feed</p>
+                </div>
+                <p className="mt-1 break-words text-body text-mid-gray">{feedStatus.message}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {total === 0 ? (
         <Card>

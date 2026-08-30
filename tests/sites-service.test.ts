@@ -71,6 +71,7 @@ function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
     async markAwaiting() {},
     async getJob() { return null; },
     async listStaleAwaiting() { return []; },
+    async listGlobalFailures() { return []; },
     async dismissFailed() {},
   };
   return { repo, jobs };

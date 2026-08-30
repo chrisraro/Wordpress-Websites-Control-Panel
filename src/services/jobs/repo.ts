@@ -16,8 +16,20 @@ export interface JobsRepo {
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
   listStaleAwaiting(olderThanMs: number): Promise<JobRow[]>;
-  /** Clears the failed-runs alert for a site/type without touching the rows. */
-  dismissFailed(siteId: string, type: JobType): Promise<void>;
+  /**
+   * Site-less failures: `site_id IS NULL`, `status = 'failed'`,
+   * `dismissed_at IS NULL`. These are jobs like `vuln_feed_refresh` that have
+   * no site to attach to and so cannot appear in any per-site alert — this is
+   * how the dashboard's system-health panel finds them.
+   */
+  listGlobalFailures(): Promise<JobRow[]>;
+  /**
+   * Clears the failed-runs alert for a site/type without touching the rows.
+   * `siteId: null` is the global variant — jobs enqueued with no site
+   * (`vuln_feed_refresh` today) — and filters on `site_id IS NULL` rather
+   * than a value, matching `pendingExists`'s null handling above.
+   */
+  dismissFailed(siteId: string | null, type: JobType): Promise<void>;
 }
 
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
@@ -93,6 +105,13 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       if (error) throw new Error(`jobs.listStaleAwaiting failed: ${error.message}`, { cause: error });
       return (data ?? []) as JobRow[];
     },
+    async listGlobalFailures() {
+      const { data, error } = await db.from("jobs").select("*")
+        .is("site_id", null).eq("status", "failed").is("dismissed_at", null)
+        .order("scheduled_for", { ascending: false });
+      if (error) throw new Error(`jobs.listGlobalFailures failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
+    },
     async dismissFailed(siteId, type) {
       // jobs has RLS enabled with no write policy at all (0008_rls_scoped.sql:
       // "every legitimate enqueue goes through enqueueJob() on the
@@ -107,10 +126,15 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       // (or fails loudly with a thrown error) regardless of which `db` this
       // factory happened to be built with.
       const service = createServiceSupabase();
-      const { error } = await service.from("jobs")
+      let q = service.from("jobs")
         .update({ dismissed_at: new Date().toISOString() })
-        .eq("site_id", siteId).eq("type", type).eq("status", "failed")
-        .is("dismissed_at", null);
+        .eq("type", type).eq("status", "failed").is("dismissed_at", null);
+      // Mirrors pendingExists's null handling above: `.eq("site_id", null)`
+      // matches nothing in Postgres (NULL is never equal to NULL), so the
+      // global variant needs `.is()` instead or dismissal would silently
+      // no-op for every site-less job.
+      q = siteId === null ? q.is("site_id", null) : q.eq("site_id", siteId);
+      const { error } = await q;
       if (error) throw new Error(`jobs.dismissFailed failed: ${error.message}`, { cause: error });
     },
   };

@@ -9,6 +9,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
 import { canAccessSite } from "@/lib/authz/decide";
+import type { JobType } from "@/services/jobs/types";
 import type { ManageResult } from "../sites/[id]/action-form";
 
 /**
@@ -74,4 +75,34 @@ export async function refreshAllInventoryAction(
         ? `Queued inventory refresh for ${siteWord(queued)}.`
         : `Queued inventory refresh for ${siteWord(queued)} (${targets.length - queued} already had one pending).`;
   return { ok: true, message };
+}
+
+/**
+ * Clears the "N failed" alert for a site-less job type on the dashboard's
+ * system-health panel — the global counterpart of
+ * dismissFailedGeoGridRunsAction (../sites/[id]/geogrid-actions.ts). Gated on
+ * `queue.process`, not a site permission: these jobs (e.g. `vuln_feed_refresh`)
+ * have no site to check access against, and `queue.process` is already the
+ * permission that means "you are responsible for the queue" — the same one
+ * that gates draining it. This dismisses only; the job rows and their
+ * `last_error` are left exactly as they are, so a resolved failure can stop
+ * nagging without losing the record of what happened.
+ */
+export async function dismissGlobalFailedJobsAction(
+  jobType: JobType,
+  _prevState?: ManageResult,
+  _formData?: FormData,
+): Promise<ManageResult> {
+  await requireUser();
+  const gate = await checkPermission("queue.process");
+  if (isDenied(gate)) return gate;
+
+  const db = createServiceSupabase();
+  try {
+    await supabaseJobsRepo(db).dismissFailed(null, jobType);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not dismiss the failed jobs" };
+  }
+  revalidatePath("/dashboard");
+  return { ok: true };
 }

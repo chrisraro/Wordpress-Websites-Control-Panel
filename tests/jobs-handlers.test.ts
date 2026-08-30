@@ -64,6 +64,7 @@ function jobRow(payload: Record<string, unknown>, overrides: Partial<JobRow> = {
     id: "job-1", type: "plugin_install", site_id: "site-1", batch_id: null,
     payload, status: "running", attempts: 0,
     scheduled_for: new Date(0).toISOString(), last_error: null, dismissed_at: null,
+    finished_at: null,
     ...overrides,
   };
 }

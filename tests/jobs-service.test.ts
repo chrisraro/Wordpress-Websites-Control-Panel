@@ -16,7 +16,7 @@ function memoryJobsRepo() {
         id, type: job.type, site_id: job.site_id ?? null, batch_id: null,
         payload: job.payload ?? {}, status: "pending", attempts: 0,
         scheduled_for: job.scheduled_for ?? new Date(0).toISOString(), last_error: null,
-        dismissed_at: null,
+        dismissed_at: null, finished_at: null,
       });
       return { id };
     },
@@ -47,6 +47,9 @@ function memoryJobsRepo() {
     async markAwaiting(id) { rows.find((r) => r.id === id)!.status = "awaiting_callback"; },
     async getJob(id) { return rows.find((r) => r.id === id) ?? null; },
     async listStaleAwaiting() { return rows.filter((r) => r.status === "awaiting_callback"); },
+    async listGlobalFailures() {
+      return rows.filter((r) => r.site_id === null && r.status === "failed" && !r.dismissed_at);
+    },
     async dismissFailed(siteId, type) {
       rows
         .filter((r) => r.site_id === siteId && r.type === type && r.status === "failed")
