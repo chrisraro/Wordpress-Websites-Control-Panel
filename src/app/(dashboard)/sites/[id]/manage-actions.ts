@@ -10,6 +10,7 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
+import type { SiteEnvironment } from "@/services/sites/types";
 
 function revalidateSite(siteId: string) {
   for (const p of [`/sites/${siteId}`, `/sites/${siteId}/plugins`, `/sites/${siteId}/themes`, "/dashboard"]) {
@@ -73,4 +74,46 @@ export async function refreshInventoryAction(
   }
   revalidateSite(siteId);
   return { ok: true };
+}
+
+/**
+ * Corrects a site's recorded environment.
+ *
+ * The connect form asks, but a site imported in bulk got the regex's answer
+ * (scripts/import-novamira-sites.ts) and the twelve existing rows were
+ * backfilled by 0017 the same way. Both can be wrong, and a wrong answer here
+ * is the one PRODUCT.md calls expensive -- so it has to be correctable
+ * without a database console.
+ *
+ * Gated on sites.manage rather than wp_toolkit.manage: this edits the site
+ * record itself, not the WordPress install, and it is the same permission the
+ * connect form requires to set the value in the first place.
+ */
+export async function setEnvironmentAction(
+  siteId: string,
+  environment: SiteEnvironment,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const gate = await checkPermission("sites.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
+  const db = createServiceSupabase();
+  try {
+    const sites = supabaseSitesRepo(db);
+    await sites.setSiteEnvironment(siteId, environment);
+    // Logged because it changes how every later confirmation reads. If a
+    // destructive action is later run against the wrong environment, this row
+    // is how you find out when the label changed and who changed it.
+    await sites.insertActivity({
+      actor: user.id, site_id: siteId, action: "site.environment",
+      detail: { environment },
+    });
+    revalidateSite(siteId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not change the environment" };
+  }
 }

@@ -15,6 +15,12 @@ const schema = z.object({
   wpUsername: z.string().min(1, "WordPress username is required"),
   appPassword: z.string().min(8, "Application password looks too short"),
   clientLabel: z.string().optional(),
+  // No default: an unanswered environment must fail the form rather than be
+  // assumed. The radio group is `required`, so this only fires if the field
+  // is missing entirely.
+  environment: z.enum(["production", "staging"], {
+    message: "Choose whether this is a production or staging site",
+  }),
 });
 
 export async function createSite(_prev: { error?: string } | undefined, formData: FormData) {
@@ -27,6 +33,7 @@ export async function createSite(_prev: { error?: string } | undefined, formData
     wpUsername: formData.get("wpUsername"),
     appPassword: formData.get("appPassword"),
     clientLabel: formData.get("clientLabel") || undefined,
+    environment: formData.get("environment"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };

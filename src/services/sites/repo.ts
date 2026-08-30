@@ -1,10 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { SiteRow, SiteStatus } from "./types";
+import type { SiteEnvironment, SiteRow, SiteStatus } from "./types";
 
 export interface SitesRepo {
   insertSite(row: {
     name: string; url: string; mcp_endpoint: string; wp_username: string;
     app_password_encrypted: string; client_label: string | null;
+    environment: SiteEnvironment;
     capabilities: { abilities: string[] }; created_by: string;
   }): Promise<{ id: string }>;
   listSites(): Promise<SiteRow[]>;
@@ -14,6 +15,7 @@ export interface SitesRepo {
   } | null>;
   getSiteConnection(id: string): Promise<{ mcp_endpoint: string; wp_username: string } | null>;
   updateSiteStatus(id: string, status: SiteStatus): Promise<void>;
+  setSiteEnvironment(id: string, environment: SiteEnvironment): Promise<void>;
   insertActivity(entry: {
     actor: string; site_id?: string; action: string; detail?: unknown;
   }): Promise<void>;
@@ -25,8 +27,11 @@ export interface SitesRepo {
 // the user-scoped client (readDbFor). See getSiteConnection below for the
 // one staff-only surface that still needs them, and migration
 // 0012_revoke_site_credential_columns.sql for the database-level backstop.
+// `environment` requires 0017_site_environment.sql. PostgREST rejects a
+// select naming an unknown column and fails the WHOLE query, so this line is
+// the hard deploy-order dependency that migration documents.
 const SITE_COLUMNS =
-  "id,name,url,status,client_label,capabilities,created_at,updated_at";
+  "id,name,url,status,environment,client_label,capabilities,created_at,updated_at";
 
 export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
   return {
@@ -62,6 +67,10 @@ export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
         .maybeSingle();
       if (error) throw new Error(`getSiteConnection failed: ${error.message}`);
       return data ?? null;
+    },
+    async setSiteEnvironment(id, environment) {
+      const { error } = await db.from("sites").update({ environment }).eq("id", id);
+      if (error) throw new Error(`setSiteEnvironment failed: ${error.message}`);
     },
     async updateSiteStatus(id, status) {
       const { error } = await db.from("sites").update({ status }).eq("id", id);

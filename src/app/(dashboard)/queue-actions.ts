@@ -59,3 +59,47 @@ export async function drainQueueAction(
   if (!res.ok) return { ok: false, error: res.error ?? "Queue processing failed" };
   return { ok: true };
 }
+
+/**
+ * Calls off the still-queued jobs in a batch.
+ *
+ * The batch page could previously only *accelerate* the queue. If a bulk
+ * action went to the wrong site -- the exact scenario the environment work
+ * exists to prevent -- the operator's only option was to watch it drain.
+ *
+ * Honest about its limits: only `pending` rows are stopped (see
+ * JobsRepo.cancelBatch). A job already running is executing PHP on a live
+ * install, and the count returned is what was actually stopped, so the UI
+ * can say "3 of 8 stopped, the rest had already started" rather than
+ * implying it undid the whole thing.
+ */
+export async function cancelBatchAction(
+  batchId: string,
+): Promise<{ ok: boolean; cancelled?: number; error?: string }> {
+  await requireUser();
+  const gate = await checkPermission("queue.process");
+  if (isDenied(gate)) return gate;
+  try {
+    const cancelled = await supabaseJobsRepo(createServiceSupabase()).cancelBatch(batchId);
+    revalidatePath(`/marketplace/batches/${batchId}`);
+    return { ok: true, cancelled };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not cancel the batch" };
+  }
+}
+
+/** Puts every failed job in a batch back on the queue. */
+export async function retryBatchAction(
+  batchId: string,
+): Promise<{ ok: boolean; retried?: number; error?: string }> {
+  await requireUser();
+  const gate = await checkPermission("queue.process");
+  if (isDenied(gate)) return gate;
+  try {
+    const retried = await supabaseJobsRepo(createServiceSupabase()).retryFailedInBatch(batchId);
+    revalidatePath(`/marketplace/batches/${batchId}`);
+    return { ok: true, retried };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not retry the batch" };
+  }
+}

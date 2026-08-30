@@ -98,10 +98,30 @@ Detector still exit 0 / zero findings. 888 tests pass. Build clean.
 - My own first palette attempt mounted twice (SidebarBody renders in both the
   desktop aside and the mobile sheet), stacking two modal dialogs.
 
-### Still open (needs a decision, not a fix)
-- Ask "Production or Staging?" at connect time, so `isStaging()`'s regex
-  becomes a legacy fallback rather than the source of truth. Needs a
-  migration + form change.
-- No cancel for queued work; no "Retry failed" on a batch. Both need job-queue
-  work beyond a UI change.
-- Nothing in `(dashboard)` is yet designed *for* the client audience.
+### Open items — closed 2026-08-30 (commits e5447bf, fd1bdaf)
+
+All three were decided by the operator and built. Requires migrations 0017
+and 0018, both applied and verified against the live database.
+
+| Item | Resolution | Evidence |
+|---|---|---|
+| Environment guessed by regex | `sites.environment`, set by a required Production/Staging radio at connect time; `isStaging()` demoted to backfill rule + fallback | Flipped Aral Abroad via the UI and back: the STAGING chip followed the column even though the regex says that URL is production. Backfill produced the correct 4 of 12. |
+| No cancel for queued work | `jobs.cancelled_at` + republished `claim_jobs`; cancel scoped to pending, retry for failed | Queue was idle; a control row was claimed and a cancelled row refused. Probes removed, counts restored to {done: 81, failed: 26}. |
+| Nothing designed for clients | `ClientHome` — plain-language health, "never checked" kept distinct from "healthy", the report as the only call to action | Unit tests only. No client account exists yet, so this is unverified in a browser. |
+
+Also fixed en route: migration 0012 replaced the table-level grant on `sites`
+with a column list, so `environment` would have been invisible to the client
+role — PostgREST 400 on every page a client can reach, while staff saw
+nothing because the service-role client bypasses grants. The pin test caught
+it, and now reads the union of grants across all migrations rather than only
+0012.
+
+### Not verified
+- The `authenticated` column grant needs a client JWT; inferred from the
+  migration succeeding, not measured.
+- `ClientHome` in a browser — no client account exists.
+
+### Non-finding
+Server-action buttons appear to hang forever in the in-app browser pane.
+Confirmed by the operator to work normally in a real browser; reproduces on
+`master` too. See `docs/ops/local-verification.md` — do not re-investigate.

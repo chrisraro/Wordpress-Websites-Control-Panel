@@ -46,6 +46,10 @@ export async function addSite(
     wp_username: input.wpUsername,
     app_password_encrypted: await encryptSecret(input.appPassword),
     client_label: input.clientLabel ?? null,
+    // Recorded, never inferred. This is the one moment the operator knows the
+    // answer for certain, which is why the form asks rather than leaving
+    // isStaging()'s regex as the permanent source of truth (see 0017).
+    environment: input.environment,
     capabilities: { abilities },
     created_by: actorId,
   });

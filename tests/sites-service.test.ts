@@ -16,6 +16,7 @@ function memoryRepo() {
   const sites: Array<Record<string, unknown>> = [];
   const activity: Array<Record<string, unknown>> = [];
   const repo: SitesRepo = {
+    async setSiteEnvironment() {},
     async insertSite(row) {
       const id = `site-${sites.length + 1}`;
       sites.push({ id, status: "connected", ...row });
@@ -72,6 +73,8 @@ function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
     async getJob() { return null; },
     async listStaleAwaiting() { return []; },
     async listGlobalFailures() { return []; },
+    async cancelBatch() { return 0; },
+    async retryFailedInBatch() { return 0; },
     async dismissFailed() {},
   };
   return { repo, jobs };
@@ -80,6 +83,7 @@ function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
 const INPUT = {
   name: "El Nido Guide", url: "https://elnidoguide.ph",
   wpUsername: "admin", appPassword: "aaaa bbbb cccc dddd",
+  environment: "production" as const,
 };
 
 describe("mcpEndpointFor", () => {

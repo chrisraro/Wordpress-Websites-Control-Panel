@@ -1,5 +1,5 @@
 import { badgeClass } from "@/components/ui/styles";
-import { isStaging } from "@/services/sites/portfolio";
+import { isStagingSite } from "@/services/sites/portfolio";
 
 /**
  * The site's name and its environment, together, on every surface that can
@@ -17,7 +17,7 @@ import { isStaging } from "@/services/sites/portfolio";
  *
  * The four staging sites happen to have "Staging" in their display name
  * today, which masked the gap. That is a naming coincidence, not a
- * safeguard — `isStaging()`'s own docblock notes that some staging installs
+ * safeguard — `isStagingSite()`'s own docblock notes that some staging installs
  * are subdirectory paths on another client's domain and are undetectable
  * from the URL.
  *
@@ -47,7 +47,7 @@ export function StagingChip({
 }: {
   site: { url: string; client_label: string | null };
 }) {
-  if (!isStaging(site)) return null;
+  if (!isStagingSite(site)) return null;
   return (
     <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>Staging</span>
   );
@@ -56,7 +56,7 @@ export function StagingChip({
 /**
  * The environment as a suffix for confirmation-dialog titles.
  *
- * Returns "" for anything not identified as staging — `isStaging()` is
+ * Returns "" for anything not identified as staging — `isStagingSite()` is
  * deliberately one-directional and `false` means "not identified", never
  * "confirmed production", so this must never render a PRODUCTION label it
  * cannot stand behind.
@@ -66,5 +66,5 @@ export function StagingChip({
  * is to be read before the click, not after.
  */
 export function environmentSuffix(site: { url: string; client_label: string | null }): string {
-  return isStaging(site) ? " (STAGING)" : "";
+  return isStagingSite(site) ? " (STAGING)" : "";
 }

@@ -19,6 +19,16 @@ export interface JobRow {
   scheduled_for: string;
   last_error: string | null;
   /**
+   * Set when an operator calls off queued work before it runs
+   * (0018_job_cancelled_at.sql). claim_jobs refuses to claim these, and
+   * `status`/`last_error` are deliberately left as the worker left them so
+   * a cancelled row stays diagnosable.
+   *
+   * Optional so code compiled against a database predating the column still
+   * type-checks; the batch page treats absent as "not cancelled".
+   */
+  cancelled_at?: string | null;
+  /**
    * Stamped by JobsRepo.markDone and JobsRepo.markFailed; null until the job
    * finishes one way or the other. Was already written to every row (see
    * both call sites) but never read from TypeScript until the dashboard's

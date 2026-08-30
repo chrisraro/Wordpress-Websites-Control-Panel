@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { processQueueNowAction } from "../../../queue-actions";
+import {
+  processQueueNowAction, cancelBatchAction, retryBatchAction,
+} from "../../../queue-actions";
 import { useToast } from "@/components/ui/toast";
 import { Card, Skeleton, StatusBadge, type StatusTone } from "@/components/ui/primitives";
+import { ConfirmDialog } from "@/components/ui/modal";
 import { buttonClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
 import { IconSpinner } from "@/components/ui/icons";
 
 interface BatchJob {
   id: string; site_id: string | null; site_name: string; label: string;
-  status: string; attempts: number; last_error: string | null;
+  status: string; attempts: number; last_error: string | null; cancelled_at?: string | null;
   type: string; kind?: string; target?: string; activate?: boolean;
 }
 
@@ -56,6 +59,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const { toast } = useToast();
   const announced = useRef(false);
 
@@ -111,6 +115,51 @@ export function BatchPoller({ batchId }: { batchId: string }) {
     });
   };
 
+  const cancelQueued = () => {
+    setConfirmCancel(false);
+    startTransition(async () => {
+      const res = await cancelBatchAction(batchId);
+      if (!res.ok) {
+        toast({ tone: "error", title: "Could not cancel", description: res.error });
+        return;
+      }
+      // Says what actually happened, not what was asked for. Anything already
+      // running could not be stopped, and claiming otherwise would be the
+      // more dangerous lie on this particular screen.
+      const n = res.cancelled ?? 0;
+      toast(
+        n === 0
+          ? {
+              tone: "info",
+              title: "Nothing left to cancel",
+              description: "Every job in this batch had already started.",
+            }
+          : {
+              tone: "success",
+              title: `Stopped ${n} queued job${n === 1 ? "" : "s"}`,
+              description:
+                "Jobs already running were not affected — they are executing on the live site.",
+            },
+      );
+    });
+  };
+
+  const retryFailed = () => {
+    startTransition(async () => {
+      const res = await retryBatchAction(batchId);
+      if (!res.ok) {
+        toast({ tone: "error", title: "Could not retry", description: res.error });
+        return;
+      }
+      const n = res.retried ?? 0;
+      toast({
+        tone: "success",
+        title: `Requeued ${n} failed job${n === 1 ? "" : "s"}`,
+        description: "They run on the next queue pass.",
+      });
+    });
+  };
+
   if (!jobs) {
     return (
       <>
@@ -132,6 +181,16 @@ export function BatchPoller({ batchId }: { batchId: string }) {
   const doneCount = jobs.filter((j) => j.status === "done").length;
   const failedCount = jobs.filter((j) => j.status === "failed").length;
   const finished = doneCount + failedCount;
+  // Only `pending` can actually be stopped -- see JobsRepo.cancelBatch. The
+  // button counts what it can deliver, so it never offers to stop work that
+  // is already executing on a live install.
+  const queuedCount = jobs.filter(
+    (j) => j.status === "pending" && !j.cancelled_at,
+  ).length;
+  const cancelledCount = jobs.filter((j) => j.cancelled_at).length;
+  const runningCount = jobs.filter(
+    (j) => j.status === "running" || j.status === "awaiting_callback",
+  ).length;
   const pct = jobs.length > 0 ? Math.round((finished / jobs.length) * 100) : 0;
 
   return (
@@ -147,7 +206,8 @@ export function BatchPoller({ batchId }: { batchId: string }) {
         <div className="min-w-0">
           <p className="text-body text-ink" aria-live="polite">
             {done
-              ? `Finished — ${doneCount} succeeded, ${failedCount} failed.`
+              ? `Finished — ${doneCount} succeeded, ${failedCount} failed` +
+                (cancelledCount > 0 ? `, ${cancelledCount} cancelled.` : ".")
               : `In progress — ${finished} of ${jobs.length} finished.`}
           </p>
           {/* Determinate progress: the count is known, so a bar beats a spinner. */}
@@ -165,13 +225,57 @@ export function BatchPoller({ batchId }: { batchId: string }) {
             />
           </div>
         </div>
-        {!done && (
-          <button onClick={processNow} disabled={pending} className={buttonClass("outline")}>
-            {pending && <IconSpinner size={16} />}
-            {pending ? "Processing…" : "Process queue now"}
-          </button>
-        )}
+        {/* Both directions, not just "go faster". Until now this page could
+            only accelerate the queue: if a bulk action was aimed at the wrong
+            site there was nothing to do but watch it drain. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {!done && queuedCount > 0 && (
+            <button
+              onClick={() => setConfirmCancel(true)}
+              disabled={pending}
+              className={buttonClass("danger")}
+            >
+              Cancel {queuedCount} queued
+            </button>
+          )}
+          {!done && (
+            <button onClick={processNow} disabled={pending} className={buttonClass("outline")}>
+              {pending && <IconSpinner size={16} />}
+              {pending ? "Processing…" : "Process queue now"}
+            </button>
+          )}
+          {failedCount > 0 && (
+            <button onClick={retryFailed} disabled={pending} className={buttonClass("outline")}>
+              {pending && <IconSpinner size={16} />}
+              Retry {failedCount} failed
+            </button>
+          )}
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        tone="danger"
+        title={`Stop ${queuedCount} queued job${queuedCount === 1 ? "" : "s"}?`}
+        confirmLabel="Stop queued jobs"
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={cancelQueued}
+        description={
+          <>
+            <p>
+              These jobs have not started yet and will not run. Nothing that already ran is
+              undone.
+            </p>
+            {runningCount > 0 && (
+              <p className="mt-2 text-ember">
+                {runningCount} job{runningCount === 1 ? " is" : "s are"} already running and
+                cannot be stopped — {runningCount === 1 ? "it is" : "they are"} executing on the
+                live site right now.
+              </p>
+            )}
+          </>
+        }
+      />
 
       {error && (
         <p className="mb-2 text-caption tracking-normal text-mid-gray">
@@ -197,9 +301,19 @@ export function BatchPoller({ batchId }: { batchId: string }) {
                   <td className={`${tableCellClass} font-medium text-ink`}>{j.label}</td>
                   <td className={`${tableCellClass} text-mid-gray`}>{j.site_name}</td>
                   <td className={tableCellClass}>
-                    <StatusBadge tone={STATUS_TONE[j.status] ?? "idle"}>
-                      {j.status.replace("_", " ")}
-                    </StatusBadge>
+                    {/* Cancelled outranks the raw status: a cancelled row
+                        keeps status 'pending' by design (0018 records the
+                        disposition beside the status rather than overwriting
+                        it, so the row stays diagnosable), and showing
+                        "pending" for work that will never run would be the
+                        wrong answer to "what happened to my batch". */}
+                    {j.cancelled_at ? (
+                      <StatusBadge tone="idle">cancelled</StatusBadge>
+                    ) : (
+                      <StatusBadge tone={STATUS_TONE[j.status] ?? "idle"}>
+                        {j.status.replace("_", " ")}
+                      </StatusBadge>
+                    )}
                   </td>
                   <td className={`${tableCellClass} text-mid-gray`}>{j.attempts}</td>
                   {/* Wraps rather than truncating. The reason a job failed

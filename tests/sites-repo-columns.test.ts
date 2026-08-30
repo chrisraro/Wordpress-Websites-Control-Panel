@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -75,25 +75,35 @@ describe("SITE_COLUMNS (shared by listSites and getSite)", () => {
   // of -- here, exactly equal to -- what 0012 grants, or a future
   // SITE_COLUMNS change 500s every client-role page the moment it ships
   // without 0012 being amended in the same deploy.
-  it("matches exactly the column list migration 0012 grants to authenticated", async () => {
+  it("matches exactly the column list the migrations grant to authenticated", async () => {
     const captured: { table?: string; selected: string[] } = { selected: [] };
     await supabaseSitesRepo(fakeDb(captured)).listSites();
     const siteColumns = captured.selected[0].split(",").map((c) => c.trim()).sort();
 
-    const migrationPath = path.resolve(
-      __dirname,
-      "../supabase/migrations/0012_revoke_site_credential_columns.sql",
-    );
-    const migrationSql = readFileSync(migrationPath, "utf8");
-    const grantMatch = migrationSql.match(
-      /grant select \(([\s\S]*?)\) on sites to authenticated;/,
-    );
-    expect(grantMatch).not.toBeNull();
-    const grantedColumns = grantMatch![1]
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean)
-      .sort();
+    // Scans EVERY migration, not just 0012. Column grants accumulate: 0012
+    // established the column-level list, and each later migration that adds
+    // a readable column grants that column too (0017 does, for
+    // `environment`). Reading only 0012 made this test fail the moment a
+    // correctly-granted column was added -- the right invariant is the union
+    // of what the migrations grant, which is what the database ends up with.
+    const migrationsDir = path.resolve(__dirname, "../supabase/migrations");
+    const granted = new Set<string>();
+    for (const file of readdirSync(migrationsDir).sort()) {
+      if (!file.endsWith(".sql")) continue;
+      const sql = readFileSync(path.join(migrationsDir, file), "utf8");
+      // A literal regex, not new RegExp over a string: "\(" inside a string
+      // literal is just "(", which turns the intended literal paren into a
+      // capture group and silently matches nothing.
+      const re = /grant select \(([^)]*?)\) on sites to authenticated;/g;
+      for (const m of sql.matchAll(re)) {
+        for (const col of m[1].split(",")) {
+          const name = col.trim();
+          if (name) granted.add(name);
+        }
+      }
+    }
+    expect(granted.size, "no column grants on sites found in any migration").toBeGreaterThan(0);
+    const grantedColumns = [...granted].sort();
 
     expect(siteColumns).toEqual(grantedColumns);
   });

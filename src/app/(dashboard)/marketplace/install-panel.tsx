@@ -7,13 +7,15 @@ import { Modal, ConfirmDialog } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { buttonClass, badgeClass } from "@/components/ui/styles";
 import { IconAlert, IconSpinner } from "@/components/ui/icons";
-import { isStaging } from "@/services/sites/portfolio";
+import { isStagingSite } from "@/services/sites/portfolio";
+import type { SiteEnvironment } from "@/services/sites/types";
 
 export interface SiteOption {
   id: string;
   name: string;
   url: string;
   client_label: string | null;
+  environment?: SiteEnvironment;
 }
 
 export function InstallPanel({
@@ -42,7 +44,7 @@ export function InstallPanel({
   };
 
   const chosen = sites.filter((s) => selected.has(s.id));
-  const stagingCount = chosen.filter(isStaging).length;
+  const stagingCount = chosen.filter(isStagingSite).length;
 
   const submit = () => {
     setConfirming(false);
@@ -121,7 +123,7 @@ export function InstallPanel({
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="truncate text-body text-ink">{s.name}</span>
-                  {isStaging(s) && (
+                  {isStagingSite(s) && (
                     <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>
                       Staging
                     </span>
@@ -194,7 +196,7 @@ export function InstallPanel({
               {chosen.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="text-body font-medium text-ink">{s.name}</span>
-                  {isStaging(s) && (
+                  {isStagingSite(s) && (
                     <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>
                       Staging
                     </span>

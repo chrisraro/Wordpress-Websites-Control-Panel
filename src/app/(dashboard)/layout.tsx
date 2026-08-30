@@ -7,7 +7,7 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { readDbFor } from "@/lib/authz/db";
-import { isStaging } from "@/services/sites/portfolio";
+import { isStagingSite } from "@/services/sites/portfolio";
 
 export default async function DashboardLayout({
   children,
@@ -44,7 +44,7 @@ export default async function DashboardLayout({
     name: s.name,
     url: s.url,
     client_label: s.client_label,
-    staging: isStaging(s),
+    staging: isStagingSite(s),
   }));
 
   return (

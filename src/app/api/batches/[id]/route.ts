@@ -59,6 +59,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       status: j.status,
       attempts: j.attempts,
       last_error: j.last_error,
+      // Needed so the page can count what is genuinely still stoppable: a
+      // cancelled row keeps status 'pending' by design (0018), so status
+      // alone would over-count what "Cancel queued" can deliver.
+      cancelled_at: j.cancelled_at ?? null,
       // `type` ("plugin_install" vs "bulk_manage") plus this non-secret bulk
       // metadata is what lets the batch page describe what is actually
       // happening instead of hardcoding "install" for every batch shape —
@@ -69,6 +73,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       activate: typeof payload.activate === "boolean" ? payload.activate : undefined,
     };
   });
-  const done = rows.length > 0 && rows.every((r) => r.status === "done" || r.status === "failed");
+  // A cancelled job will never be claimed, so a batch whose remaining work is
+  // all cancelled is finished -- without this the poller would keep polling a
+  // batch that can never progress.
+  const done =
+    rows.length > 0 &&
+    rows.every((r) => r.status === "done" || r.status === "failed" || r.cancelled_at !== null);
   return NextResponse.json({ jobs: rows, done });
 }
