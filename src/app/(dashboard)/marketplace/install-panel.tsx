@@ -98,7 +98,7 @@ export function InstallPanel({
           {sites.map((s) => (
             <label
               key={s.id}
-              className="flex min-h-10 cursor-pointer items-center gap-3 rounded-2xl px-3
+              className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3
                 transition-colors duration-150 hover:bg-canvas"
             >
               <input
@@ -113,7 +113,7 @@ export function InstallPanel({
         </div>
 
         <label
-          className="mt-2 flex min-h-10 cursor-pointer items-center gap-3 rounded-2xl border-t
+          className="mt-2 flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-t
             border-hairline px-3 pt-3"
         >
           <input

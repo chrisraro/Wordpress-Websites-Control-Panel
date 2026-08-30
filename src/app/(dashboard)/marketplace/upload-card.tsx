@@ -110,7 +110,7 @@ export function UploadCard({ sites }: { sites: SiteOption[] }) {
               {sites.map((s) => (
                 <label
                   key={s.id}
-                  className="flex min-h-10 cursor-pointer items-center gap-3 rounded-2xl px-2
+                  className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-2
                     transition-colors duration-150 hover:bg-canvas"
                 >
                   <input
@@ -126,7 +126,7 @@ export function UploadCard({ sites }: { sites: SiteOption[] }) {
           )}
         </fieldset>
 
-        <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-2xl px-2">
+        <label className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-2">
           <input
             type="checkbox"
             checked={activate}

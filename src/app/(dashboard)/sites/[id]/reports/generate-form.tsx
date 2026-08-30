@@ -41,7 +41,7 @@ export function GenerateReportForm({ siteId }: { siteId: string }) {
           {SECTIONS.map((s) => (
             <label
               key={s.value}
-              className="flex min-h-10 cursor-pointer items-start gap-3 rounded-2xl px-3 py-2
+              className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-start gap-3 rounded-2xl px-3 py-2
                 transition-colors duration-150 hover:bg-canvas"
             >
               <input

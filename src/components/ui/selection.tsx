@@ -97,10 +97,12 @@ export function SelectAllCheckbox({
   }, [someChecked]);
 
   return (
-    // The label wrapper — not the 16px input — is what meets the 40px touch
-    // target floor; the same pattern already used for checkboxes elsewhere
-    // in this codebase (upload-card.tsx, install-panel.tsx).
-    <label className="flex min-h-10 w-10 cursor-pointer items-center justify-center">
+    // The label wrapper — not the 16px input — is the tap target. 40px is
+    // not the floor: WCAG 2.5.5, Apple HIG and Material all land at 44-48px,
+    // and these sit in the bulk-action tables, which is maintenance work done
+    // on a phone. pointer-coarse raises them for touch without inflating the
+    // compact table rhythm under a mouse (see BUTTON_SIZE in ui/styles.ts).
+    <label className="flex min-h-10 w-10 cursor-pointer items-center justify-center pointer-coarse:min-h-11 pointer-coarse:w-11">
       <input
         ref={ref}
         type="checkbox"
@@ -123,7 +125,7 @@ export function RowCheckbox({
   label: string;
 }) {
   return (
-    <label className="flex min-h-10 w-10 cursor-pointer items-center justify-center">
+    <label className="flex min-h-10 w-10 cursor-pointer items-center justify-center pointer-coarse:min-h-11 pointer-coarse:w-11">
       <input
         type="checkbox"
         checked={checked}

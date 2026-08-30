@@ -249,7 +249,7 @@ export function InstallPanel({ siteId, siteName }: { siteId: string; siteName: s
           )}
         </div>
 
-        <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-2xl border-t border-hairline pt-4">
+        <label className="flex min-h-10 pointer-coarse:min-h-11 cursor-pointer items-center gap-3 rounded-2xl border-t border-hairline pt-4">
           <input
             type="checkbox"
             checked={activate}

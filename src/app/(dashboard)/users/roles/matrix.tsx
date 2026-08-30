@@ -221,7 +221,7 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
                     return (
                       <td key={role} className={`${tableCellClass} text-center`}>
                         <label
-                          className={`inline-flex min-h-10 w-10 items-center justify-center ${
+                          className={`inline-flex min-h-10 w-10 items-center justify-center pointer-coarse:min-h-11 pointer-coarse:w-11 ${
                             locked ? "cursor-not-allowed" : "cursor-pointer"
                           }`}
                           title={locked ? ADMIN_USERS_MANAGE_REASON : undefined}

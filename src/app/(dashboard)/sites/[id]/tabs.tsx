@@ -31,7 +31,7 @@ export function SiteTabs({ siteId, active }: { siteId: string; active: SiteTabKe
               <Link
                 href={href(siteId)}
                 aria-current={isActive ? "page" : undefined}
-                className={`flex min-h-9 items-center gap-2 whitespace-nowrap rounded-2xl px-3
+                className={`flex min-h-9 items-center gap-2 whitespace-nowrap rounded-2xl px-3 pointer-coarse:min-h-11
                   text-body transition-colors duration-150 ${
                     isActive
                       ? "bg-paper font-medium text-ink shadow-subtle"
