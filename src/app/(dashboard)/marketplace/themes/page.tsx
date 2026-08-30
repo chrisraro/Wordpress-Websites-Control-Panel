@@ -116,7 +116,15 @@ export default async function MarketplaceThemesPage({
               <div className="aspect-video w-full shrink-0 bg-canvas">
                 {t.screenshot_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={t.screenshot_url} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={t.screenshot_url}
+                    alt=""
+                    width={1200}
+                    height={900}
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <div
                     aria-hidden

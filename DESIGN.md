@@ -16,7 +16,7 @@ shadcn/ui is a monochromatic design-system workshop: pure white canvas, soft war
 | Ink Soft | `#171717` | `--color-ink-soft` | Filled button backgrounds, secondary text on light surfaces |
 | Mid Gray | `#737373` | `--color-mid-gray` | Muted body text, placeholder text, helper labels, icon fills at rest |
 | Hairline | `#e5e5e5` | `--color-hairline` | Borders, input outlines, card edges, badge outlines |
-| Ember | `#e7000b` | `--color-ember` | Red decorative accent for icons, marks, and small graphic details. Use as a supporting accent, not as a status color |
+| Ember | `#db000b` | `--color-ember` | Destructive and error states only. Darkened from the originally-specified `#e7000b`, which measured 4.38:1 on the canvas and failed WCAG AA for body text; `#db000b` clears it on all three surfaces (4.80 / 5.01 / 5.23) |
 
 ## Tokens — Typography
 
@@ -155,7 +155,7 @@ Background #f5f5f5, text #737373, radius 18px, padding 8px 10px, with a keyboard
 ### Destructive Action
 **Role:** Delete, remove, revoke — error-adjacent interactions
 
-Text or icon in #e7000b against the monochromatic palette. The red is the only chromatic hue in the system and appears exclusively in destructive or error contexts — it never decorates.
+Text or icon in #db000b against the monochromatic palette. The red is the only chromatic hue in the system and appears exclusively in destructive or error contexts — it never decorates.
 
 ## Do's and Don'ts
 
@@ -163,12 +163,12 @@ Text or icon in #e7000b against the monochromatic palette. The red is the only c
 - Use #0a0a0a on #ffffff for filled buttons — the dark inversion is the only primary action treatment.
 - Maintain 18px radius on all buttons, inputs, and badges for perfect pill geometry; use 24px radius only on cards.
 - Set display headlines at 48px/600 with -0.0500em tracking — Geist's geometric weight at this size with aggressive tightening produces the engineered headline voice.
-- Reserve #e7000b exclusively for destructive states; never use it for decoration, branding, or non-error emphasis.
+- Reserve #db000b exclusively for destructive states; never use it for decoration, branding, or non-error emphasis.
 - Stack card shadows as 1px hairline + 1px + 2px offset — the combined effect is a barely-perceptible elevation that reads as 'card' without drama.
 - Use #f5f5f5 for secondary surfaces and inputs; use #fafafa for sidebar and subtle card variants — the three-tone surface stack (canvas → soft → paper) creates layering without borders.
 
 ### Don't
-- Do not introduce chromatic brand colors beyond #e7000b — the monochromatic palette is the system.
+- Do not introduce chromatic brand colors beyond #db000b — the monochromatic palette is the system.
 - Do not use border-radius values other than 18px (interactive) or 24px (containers); avoid square corners on any element.
 - Do not skip the 1px hairline border on cards — the shadow alone does not define the card edge in this system.
 - Do not set body text below 14px or above #737373 lightness — the type scale is deliberately compact.
@@ -204,7 +204,7 @@ Minimal imagery — the system is almost entirely UI. No hero photography, no il
 - Muted text: #737373
 - Border: #e5e5e5
 - primary action: #171717 (filled action)
-- Destructive: #e7000b
+- Destructive: #db000b
 
 **Example Component Prompts**
 1. Create a dashboard stat card: white (#ffffff) background, 24px radius, 1px solid #e5e5e5 border, shadow 0 0 0 1px rgba(23,23,23,0.05) + 0 1px 3px rgba(0,0,0,0.1) + 0 1px 2px -1px rgba(0,0,0,0.1), 20px padding. Label in 12px uppercase #737373, value in 36px Geist weight 600 #0a0a0a with -0.025em tracking.
@@ -243,7 +243,7 @@ shadcn/ui is built on three principles visible in every token: (1) achromatic by
   --color-ink-soft: #171717;
   --color-mid-gray: #737373;
   --color-hairline: #e5e5e5;
-  --color-ember: #e7000b;
+  --color-ember: #db000b;
 
   /* Typography — Font Families */
   --font-geist: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -331,7 +331,7 @@ shadcn/ui is built on three principles visible in every token: (1) achromatic by
   --color-ink-soft: #171717;
   --color-mid-gray: #737373;
   --color-hairline: #e5e5e5;
-  --color-ember: #e7000b;
+  --color-ember: #db000b;
 
   /* Typography */
   --font-geist: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

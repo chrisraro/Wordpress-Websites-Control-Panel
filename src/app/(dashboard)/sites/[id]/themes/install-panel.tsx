@@ -185,6 +185,8 @@ export function InstallPanel({ siteId, siteName }: { siteId: string; siteName: s
                       alt=""
                       width={56}
                       height={40}
+                      loading="lazy"
+                      decoding="async"
                       className="h-10 w-14 shrink-0 rounded-2xl border border-hairline object-cover"
                     />
                   ) : (

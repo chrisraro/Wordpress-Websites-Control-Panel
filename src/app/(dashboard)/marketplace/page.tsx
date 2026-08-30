@@ -125,6 +125,8 @@ export default async function MarketplacePage({
                     alt=""
                     width={48}
                     height={48}
+                    loading="lazy"
+                    decoding="async"
                     className="size-12 shrink-0 rounded-2xl border border-hairline object-cover"
                   />
                 ) : (

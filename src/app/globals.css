@@ -21,10 +21,16 @@
      brief, whose rule is "no lighter than #737373". */
   --color-mid-gray: #707070;
   --color-hairline: #e5e5e5;
-  /* Ember measures 4.38:1 on the canvas but 4.77:1 on paper, and the hue is
-     fixed by the brief. Keep ember text on paper or sidebar surfaces (cards,
-     toasts, table rows) — never directly on the page background. */
-  --color-ember: #e7000b;
+  /* DESIGN.md pins Ember at #e7000b, which measures 4.38:1 on the canvas —
+     under the 4.5 floor for body text. It previously carried a usage rule
+     instead ("keep ember off the page background"), but a constraint every
+     future author has to remember is one that eventually gets forgotten, and
+     error text is the last thing that should be hard to read.
+     #db000b clears the floor on all three surfaces (4.80 canvas / 5.01
+     sidebar / 5.23 paper) with enough margin to survive a small change to
+     the canvas, and is still unmistakably the same red. Same deviation, same
+     reasoning as --color-mid-gray above. */
+  --color-ember: #db000b;
 
   /* Data-status scale — a documented extension to DESIGN.md.
      The monochrome rule governs interface chrome; these hues appear ONLY in
