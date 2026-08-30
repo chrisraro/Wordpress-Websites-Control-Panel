@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { searchPlugins, popularPlugins, authorName } from "@/lib/adapters/wporg";
+import { searchPlugins, popularPlugins, searchThemes, popularThemes, authorName } from "@/lib/adapters/wporg";
 
 const API_RESPONSE = {
   info: { page: 1, pages: 3, results: 55 },
@@ -51,6 +51,71 @@ describe("popularPlugins", () => {
   it("uses browse=popular", async () => {
     const res = await popularPlugins(2, stub("request%5Bbrowse%5D=popular"));
     expect(res.plugins).toHaveLength(2);
+  });
+});
+
+const THEME_API_RESPONSE = {
+  info: { page: 1, pages: 11, results: 31 },
+  themes: [
+    {
+      slug: "astra", name: "Astra", version: "4.13.10",
+      author: { display_name: "Brainstorm Force" },
+      screenshot_url: "//ts.w.org/wp-content/themes/astra/screenshot.jpg",
+      preview_url: "https://wp-themes.com/astra/",
+      rating: 98, num_ratings: 6514, active_installs: 1000000,
+    },
+  ],
+};
+
+function themeStub(expectUrlPart: string) {
+  return (async (url: unknown) => {
+    expect(String(url)).toContain(expectUrlPart);
+    return new Response(JSON.stringify(THEME_API_RESPONSE), { status: 200 });
+  }) as typeof fetch;
+}
+
+// The themes API silently ignores the JSON-blob form of `request` that this
+// adapter used to send -- a search term and a browse filter both fell
+// through to the same unfiltered listing. Confirmed live: only the bracketed
+// query-param form (`request[search]=astra&request[per_page]=3`, the same
+// shape `searchPlugins` already used) actually filters the results.
+describe("searchThemes", () => {
+  it("sends the bracketed query-param form with the search term and page, not a JSON blob", async () => {
+    const res = await searchThemes(
+      "astra", 2, themeStub("request%5Bsearch%5D=astra"),
+    );
+    expect(res.total).toBe(31);
+    expect(res.pages).toBe(11);
+    expect(res.themes[0]).toMatchObject({
+      slug: "astra", name: "Astra", author: "Brainstorm Force",
+      rating: 98, active_installs: 1000000,
+      screenshot_url: "https://ts.w.org/wp-content/themes/astra/screenshot.jpg",
+      preview_url: "https://wp-themes.com/astra/",
+    });
+  });
+
+  it("includes the page number in the bracketed form", async () => {
+    await searchThemes("astra", 2, themeStub("request%5Bpage%5D=2"));
+  });
+
+  it("never sends the JSON-blob `request=` form the API silently ignores", async () => {
+    const spy = (async (url: unknown) => {
+      expect(String(url)).not.toMatch(/[?&]request=/);
+      return new Response(JSON.stringify(THEME_API_RESPONSE), { status: 200 });
+    }) as typeof fetch;
+    await searchThemes("astra", 1, spy);
+  });
+
+  it("throws a friendly error on non-200", async () => {
+    const bad = (async () => new Response("busy", { status: 503 })) as typeof fetch;
+    await expect(searchThemes("x", 1, bad)).rejects.toThrow(/wordpress\.org.*503/i);
+  });
+});
+
+describe("popularThemes", () => {
+  it("uses browse=popular in the bracketed form", async () => {
+    const res = await popularThemes(1, themeStub("request%5Bbrowse%5D=popular"));
+    expect(res.themes).toHaveLength(1);
   });
 });
 

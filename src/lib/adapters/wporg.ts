@@ -111,15 +111,31 @@ export interface WpOrgTheme {
   num_ratings: number;
   active_installs: number;
 }
-export interface WpOrgThemeResult { themes: WpOrgTheme[]; total: number }
+export interface WpOrgThemeResult { themes: WpOrgTheme[]; total: number; pages: number }
 
 const THEMES_API = "https://api.wordpress.org/themes/info/1.2/";
 
-const THEME_FIELDS = {
-  slug: true, name: true, version: true, author: true, screenshot_url: true,
-  rating: true, num_ratings: true, active_installs: true, preview_url: true,
-  sections: false, description: false, tags: false, homepage: false,
-};
+/**
+ * Like the plugins `FIELDS` above, this is the bracketed query-param form,
+ * not a JSON blob — `request[fields][x]=...` the same way `request[search]`
+ * and `request[page]` are sent. The JSON-blob form (`?request=<json>`) is
+ * silently ignored by this API: a search term and a browse filter sent that
+ * way both fell through to an unfiltered default listing, which is the
+ * critical bug this file fixes.
+ *
+ * `active_installs` is opt-in — the API omits it by default — while
+ * `description`/`sections`/`tags`/`homepage` are opted back OUT: they come
+ * back by default and are never rendered on a theme card, so requesting
+ * `false` for them keeps the response down to what the grid actually shows.
+ * Verified live: the response still carries screenshot_url, preview_url,
+ * rating, num_ratings and active_installs with this exact field set.
+ */
+const THEME_FIELDS =
+  "&request[fields][screenshot_url]=true&request[fields][preview_url]=true" +
+  "&request[fields][rating]=true&request[fields][num_ratings]=true" +
+  "&request[fields][active_installs]=true&request[fields][description]=false" +
+  "&request[fields][sections]=false&request[fields][tags]=false" +
+  "&request[fields][homepage]=false";
 
 interface RawTheme {
   slug: string; name: string; version: string;
@@ -153,18 +169,39 @@ function normaliseTheme(t: RawTheme): WpOrgTheme {
   };
 }
 
-async function queryThemes(params: Record<string, unknown>): Promise<WpOrgThemeResult> {
-  const url = `${THEMES_API}?action=query_themes&request=${encodeURIComponent(
-    JSON.stringify({ per_page: 24, fields: THEME_FIELDS, ...params }),
-  )}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+async function queryThemes(
+  params: URLSearchParams, fetchImpl: typeof fetch,
+): Promise<WpOrgThemeResult> {
+  const url = `${THEMES_API}?action=query_themes&${params.toString()}${THEME_FIELDS}`;
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) } as RequestInit);
   if (!res.ok) throw new Error(`wordpress.org returned HTTP ${res.status}`);
-  const json = (await res.json()) as { themes?: RawTheme[]; info?: { results?: number } };
+  const json = (await res.json()) as {
+    themes?: RawTheme[];
+    info?: { results?: number; pages?: number };
+  };
   return {
     themes: (json.themes ?? []).map(normaliseTheme),
-    total: json.info?.results ?? 0,
+    total: Number(json.info?.results ?? 0),
+    pages: Number(json.info?.pages ?? 1),
   };
 }
 
-export const searchThemes = (q: string) => queryThemes({ search: q });
-export const popularThemes = () => queryThemes({ browse: "popular" });
+export async function searchThemes(
+  q: string, page = 1, fetchImpl: typeof fetch = fetch,
+): Promise<WpOrgThemeResult> {
+  const params = new URLSearchParams();
+  params.set("request[search]", q);
+  params.set("request[page]", String(page));
+  params.set("request[per_page]", "24");
+  return queryThemes(params, fetchImpl);
+}
+
+export async function popularThemes(
+  page = 1, fetchImpl: typeof fetch = fetch,
+): Promise<WpOrgThemeResult> {
+  const params = new URLSearchParams();
+  params.set("request[browse]", "popular");
+  params.set("request[page]", String(page));
+  params.set("request[per_page]", "24");
+  return queryThemes(params, fetchImpl);
+}
