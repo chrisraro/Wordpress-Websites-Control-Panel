@@ -62,3 +62,46 @@ so this is a genuine clean result, not a suppressed one.
 - `login/geogrid-field.tsx:47-50`, `login/page.tsx:28,35,52` — raw brand hex,
   no token indirection.
 - Accepted: `manifest.ts` and `services/reports/document.tsx` have no CSS-var access.
+
+---
+
+## Resolution — 2026-08-30 (commits b88e3e1, ad3bf37)
+
+Every P0/P1/P2 above is closed. Verified in the production build unless noted.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| P0 environment identity | fixed | STAGING chip on all 7 tabs + overview; confirm titles read "Deactivate X on El Nido Guide Staging (STAGING)?" |
+| P0 install confirmation | fixed | dialog lists each site with host + chip, "1 of these is not marked staging"; opened and cancelled live |
+| P0 maintenance write-only | fixed | collector reads ABSPATH/.maintenance (verified live: `maintenance:false`); one state-reflecting control + banner; `undefined` still means "not measured" |
+| P1 triage collapse | fixed | 12/12 → **5/12**; dots now 5 amber + 7 green |
+| P1 no durable failure record | fixed | 26 `showInlineError={false}` removed; error toasts persist, `role="alert"`, never evicted; batch errors wrap |
+| P1 mobile parity | fixed | metrics render at 375px (one visible copy per breakpoint); toasts moved to top below `sm` |
+| P2 reachability | fixed | ⌘K palette (one dialog, focus lands, filters, Enter navigates); skip link added |
+| a11y: `scope="col"` | fixed | 0 → 45 of 45 |
+| a11y: GridMap opaque | fixed | `role="img"` + summary label + sr-only per-point table |
+| a11y: legend incomplete | fixed | 2 of 5 ramp stops → all 5 |
+| a11y: disabled bulk reason | fixed | `aria-disabled` so the describedby reason is reachable |
+| a11y: login h2-before-h1 | fixed | brand line is a `<p>` |
+| tables scroll blind | fixed | `.scroll-x-hint` on all 10 |
+| token drift | fixed | grid-map hex via `token()`; pin test rebuilt and **confirmed to fail on a planted bare hex** |
+
+Detector still exit 0 / zero findings. 888 tests pass. Build clean.
+
+### Bugs found while fixing
+- The portfolio test pinned reason *text* but never severity — which is how the
+  collapse shipped. Both halves now pinned.
+- `grid-map-tokens.test.ts` matched only double-quoted 6-digit hex, so
+  `color:#fff` in the divIcon template literal was invisible to it.
+- The updates badge read "1 updates"; only visible once triage stopped
+  putting every site in the attention list.
+- My own first palette attempt mounted twice (SidebarBody renders in both the
+  desktop aside and the mobile sheet), stacking two modal dialogs.
+
+### Still open (needs a decision, not a fix)
+- Ask "Production or Staging?" at connect time, so `isStaging()`'s regex
+  becomes a legacy fallback rather than the source of truth. Needs a
+  migration + form change.
+- No cancel for queued work; no "Retry failed" on a batch. Both need job-queue
+  work beyond a UI change.
+- Nothing in `(dashboard)` is yet designed *for* the client audience.
