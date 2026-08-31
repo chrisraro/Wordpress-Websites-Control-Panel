@@ -1,0 +1,671 @@
+<title>Azalea Cloudflare Requests</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --ground: #f6f7f9;
+    --surface: #ffffff;
+    --surface-sunk: #eef1f4;
+    --ink: #191e26;
+    --ink-soft: #4a5563;
+    --muted: #6b7684;
+    --rule: #dde2e8;
+    --rule-strong: #c3cbd4;
+    --accent: #0d6e6e;
+    --accent-soft: #e3f0ef;
+    --warn: #97530a;
+    --warn-soft: #fbf0e0;
+    --danger: #a4231a;
+    --danger-soft: #fbe9e7;
+    --ok: #1f6b3f;
+
+    --measure: 68ch;
+    --step-0: 1.0625rem;
+    --step-1: 1.25rem;
+    --step-2: 1.5rem;
+    --step-3: 2rem;
+    --step-4: 2.6rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #12151a;
+      --surface: #1a1f26;
+      --surface-sunk: #22282f;
+      --ink: #e7eaee;
+      --ink-soft: #b3bcc7;
+      --muted: #8e99a6;
+      --rule: #2c333c;
+      --rule-strong: #3d4650;
+      --accent: #5fbfba;
+      --accent-soft: #14302f;
+      --warn: #e0a558;
+      --warn-soft: #33260f;
+      --danger: #ec8279;
+      --danger-soft: #331817;
+      --ok: #6cbf8c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #12151a;
+    --surface: #1a1f26;
+    --surface-sunk: #22282f;
+    --ink: #e7eaee;
+    --ink-soft: #b3bcc7;
+    --muted: #8e99a6;
+    --rule: #2c333c;
+    --rule-strong: #3d4650;
+    --accent: #5fbfba;
+    --accent-soft: #14302f;
+    --warn: #e0a558;
+    --warn-soft: #33260f;
+    --danger: #ec8279;
+    --danger-soft: #331817;
+    --ok: #6cbf8c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-0);
+    line-height: 1.62;
+    margin: 0;
+    padding: clamp(1.25rem, 4vw, 3.5rem) clamp(1rem, 5vw, 2rem) 5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: var(--measure);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.75rem;
+  }
+
+  h1, h2, h3, .label, .eyebrow, th, .btn {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  code, kbd, pre, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* ---------- letterhead ---------- */
+  .head { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .rule-top {
+    height: 3px;
+    background: var(--accent);
+    width: 100%;
+  }
+
+  .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  h1 {
+    font-size: clamp(var(--step-3), 5.5vw, var(--step-4));
+    font-weight: 700;
+    letter-spacing: -0.022em;
+    line-height: 1.1;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .standfirst {
+    font-size: var(--step-1);
+    color: var(--ink-soft);
+    margin: 0;
+    text-wrap: pretty;
+  }
+
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 1rem 1.5rem;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 1.1rem 0;
+  }
+  .meta div { display: flex; flex-direction: column; gap: 0.2rem; }
+  .label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .meta p { margin: 0; font-size: 0.95rem; }
+
+  /* ---------- generic blocks ---------- */
+  section { display: flex; flex-direction: column; gap: 1rem; }
+
+  h2 {
+    font-size: var(--step-2);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    margin: 0;
+  }
+
+  p { margin: 0; text-wrap: pretty; }
+  strong { font-weight: 600; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.55rem; }
+  li::marker { color: var(--muted); }
+
+  /* ---------- the three asks, numbered because they are a worklist ---------- */
+  .ask {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .ask-head { display: flex; gap: 0.85rem; align-items: baseline; }
+  .num {
+    font-family: Archivo, sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 2px;
+    padding: 0.15rem 0.5rem;
+    flex: none;
+  }
+
+  .chip {
+    display: inline-block;
+    font-family: Archivo, sans-serif;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .chip-warn { background: var(--warn-soft); color: var(--warn); }
+  .chip-ok { background: var(--accent-soft); color: var(--accent); }
+
+  /* ---------- copy-paste ---------- */
+  .paste {
+    background: var(--surface-sunk);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .paste-label {
+    font-family: Archivo, sans-serif;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  pre {
+    margin: 0;
+    padding: 0.9rem;
+    overflow-x: auto;
+    font-size: 0.84rem;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  p code, li code, td code {
+    font-size: 0.86em;
+    background: var(--surface-sunk);
+    padding: 0.1em 0.35em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  /* ---------- evidence table ---------- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 33rem; }
+  th, td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted); background: var(--surface-sunk);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.result { font-family: "JetBrains Mono", monospace; font-size: 0.82rem; white-space: nowrap; }
+  .r-ok { color: var(--ok); font-weight: 500; }
+  .r-bad { color: var(--danger); font-weight: 500; }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border-radius: 3px;
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    font-size: 0.98rem;
+  }
+  .note-warn { background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent); }
+  .note-danger { background: var(--danger-soft); border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); }
+  .note h3 { font-size: 0.95rem; }
+  .note-warn h3 { color: var(--warn); }
+  .note-danger h3 { color: var(--danger); }
+
+  .verify {
+    border: 1px dashed var(--rule-strong);
+    border-radius: 3px;
+    padding: 1rem 1.15rem;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .verify .label { color: var(--accent); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 1.5rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  /* ---------- print / PDF ----------
+     This document's job is to be forwarded, so the PDF is a first-class
+     output rather than a screenshot of the screen version. Light palette is
+     forced regardless of the renderer's theme, tinted panels are kept (they
+     carry severity, which is information), and the asks are held together
+     across page breaks so a rule expression never splits from its action. */
+  @media print {
+    :root {
+      --ground: #ffffff;
+      --surface: #ffffff;
+      --surface-sunk: #f2f4f6;
+      --ink: #14181f;
+      --ink-soft: #39424e;
+      --muted: #5a6470;
+      --rule: #d4dae1;
+      --rule-strong: #b6bec8;
+      --accent: #0b5f5f;
+      --accent-soft: #e3f0ef;
+      --warn: #7d450a;
+      --warn-soft: #fbf2e4;
+      --danger: #8e1f17;
+      --danger-soft: #fbeceb;
+      --ok: #1a5c36;
+    }
+
+    @page {
+      size: A4;
+      margin: 16mm 15mm 18mm;
+    }
+
+    body {
+      background: #fff;
+      padding: 0;
+      font-size: 10.5pt;
+      line-height: 1.5;
+    }
+
+    .sheet { max-width: none; gap: 1.6rem; }
+
+    h1 { font-size: 22pt; }
+    h2 { font-size: 14pt; }
+    h3 { font-size: 11pt; }
+    .standfirst { font-size: 11.5pt; }
+    pre { font-size: 8.6pt; }
+    table { font-size: 9pt; min-width: 0; }
+
+    /* Never split a request from the expression it depends on. */
+    .ask, .note, .verify, .table-wrap { break-inside: avoid; }
+    h2 { break-after: avoid; }
+    section { break-inside: auto; }
+
+    /* Panels lose their shadowless borders in some renderers; keep them
+       explicit so severity still reads on paper. */
+    .ask { border: 1px solid var(--rule); border-left: 3px solid var(--accent); }
+    .table-wrap { border: 1px solid var(--rule); }
+
+    a { color: var(--ink); text-decoration: none; }
+
+    footer { break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+
+  <header class="head">
+    <div class="rule-top"></div>
+    <p class="eyebrow">Change request &middot; Cloudflare configuration</p>
+    <h1>Two Cloudflare rules for the Azalea domains</h1>
+    <p class="standfirst">
+      TLS certificate renewal on both origin servers has been failing since July. The cause is
+      Cloudflare bot protection blocking the validation requests. Two scoped rules fix it.
+    </p>
+
+    <div class="meta">
+      <div>
+        <span class="label">Domains</span>
+        <p class="mono">azaleabaguio.com<br>azaleaboracay.com</p>
+      </div>
+      <div>
+        <span class="label">Cloudflare zone</span>
+        <p class="mono">rick.ns.cloudflare.com<br>walk.ns.cloudflare.com</p>
+      </div>
+      <div>
+        <span class="label">Origin</span>
+        <p class="mono">192.249.125.21<br>InMotion Hosting</p>
+      </div>
+      <div>
+        <span class="label">Raised by</span>
+        <p>Online Creative Solutions<br>Web maintenance</p>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <h2>What is happening</h2>
+    <p>
+      Both domains proxy through Cloudflare. The Let&rsquo;s Encrypt certificates on the origin
+      servers renew by answering a challenge file over HTTP &mdash; and that request is being
+      answered with <strong>403 Forbidden</strong> before it reaches the server.
+    </p>
+    <p>
+      The request originates from the hosting server&rsquo;s own IP, which is a datacenter
+      address. Cloudflare&rsquo;s bot protection scores those aggressively. The same URL, same
+      file, same filename pattern returns correctly from an ordinary residential connection:
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Request</th><th>From</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Challenge file that exists</td>
+            <td>Residential connection</td>
+            <td class="result r-ok">200 OK</td>
+          </tr>
+          <tr>
+            <td>Challenge file that does not exist</td>
+            <td>Residential connection</td>
+            <td class="result r-ok">404</td>
+          </tr>
+          <tr>
+            <td>Same path, direct to origin (Cloudflare bypassed)</td>
+            <td>Residential connection</td>
+            <td class="result r-ok">200 OK</td>
+          </tr>
+          <tr>
+            <td>Certificate validation</td>
+            <td>Hosting server (datacenter IP)</td>
+            <td class="result r-bad">403</td>
+          </tr>
+          <tr>
+            <td>Site management API</td>
+            <td>Hosted app (datacenter IP)</td>
+            <td class="result r-bad">Bot challenge</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      The path itself is not blocked and the origin is configured correctly. Only requests from
+      datacenter addresses are refused, which is why this looks like a server fault but is not one.
+    </p>
+
+    <div class="verify">
+      <span class="label">Confirm this yourself in about a minute</span>
+      <p>
+        Cloudflare dashboard &rarr; <strong>Security</strong> &rarr; <strong>Events</strong>, filter
+        <code>Path</code> contains <code>/.well-known/</code>. The blocked validation attempts will
+        be listed with the rule or service that stopped them.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we are asking for</h2>
+    <p>
+      Two WAF custom rules, both narrow. Neither weakens protection for ordinary visitor traffic,
+      and neither grants access to anything &mdash; every endpoint involved still enforces its own
+      authentication.
+    </p>
+
+    <!-- 1 -->
+    <article class="ask">
+      <div class="ask-head">
+        <span class="num">1</span>
+        <div>
+          <h3>Let certificate validation through</h3>
+          <p style="color:var(--muted);font-size:0.92rem;margin-top:0.2rem;">
+            Fixes the expiring certificates. This is standard Cloudflare practice.
+          </p>
+        </div>
+      </div>
+
+      <p>
+        <strong>WAF &rarr; Custom rules &rarr; Create rule</strong>, applied to both zones:
+      </p>
+
+      <div class="paste">
+        <div class="paste-label">Rule expression</div>
+        <pre>(starts_with(http.request.uri.path, "/.well-known/acme-challenge/")
+ or starts_with(http.request.uri.path, "/.well-known/pki-validation/"))</pre>
+      </div>
+
+      <p>
+        Action: <strong>Skip</strong> &rarr; select <em>All remaining custom rules</em>, and under
+        <em>Additional options</em> also skip <strong>Bot Fight Mode / Super Bot Fight Mode</strong>.
+      </p>
+
+      <p style="font-size:0.92rem;color:var(--ink-soft);">
+        These two paths exist only to serve short-lived, randomly-named text files that certificate
+        authorities read to confirm domain control. They expose nothing, and every ACME client on
+        the internet needs them reachable.
+      </p>
+    </article>
+
+    <!-- 2 -->
+    <article class="ask">
+      <div class="ask-head">
+        <span class="num">2</span>
+        <div>
+          <h3>Let the maintenance panel reach the management endpoint</h3>
+          <p style="color:var(--muted);font-size:0.92rem;margin-top:0.2rem;">
+            Restores automated updates, security scans and inventory for these sites.
+          </p>
+        </div>
+      </div>
+
+      <p>
+        OCS maintains these sites through a WordPress plugin endpoint. Since the sites moved behind
+        Cloudflare, every automated call is challenged, so plugin updates, malware scans and
+        uptime checks no longer run for these two domains.
+      </p>
+
+      <div class="paste">
+        <div class="paste-label">Rule expression</div>
+        <pre>(http.request.uri.path contains "/wp-json/mcp/novamira"
+ and http.user_agent eq "wp-control-panel-mcp/1.0")</pre>
+      </div>
+
+      <p>
+        Action: <strong>Skip</strong> &rarr; <em>All remaining custom rules</em> + <strong>Bot Fight
+        Mode</strong>, same as above.
+      </p>
+
+      <p style="font-size:0.92rem;color:var(--ink-soft);">
+        The User-Agent above is published in our source repository, so it is guessable by design.
+        If you would rather the rule matched on something unguessable, option B below is stronger
+        and we would prefer it too.
+      </p>
+    </article>
+
+    <article class="ask">
+      <div class="ask-head">
+        <span class="num">2B</span>
+        <div>
+          <h3>Preferred: match a shared secret instead of the User-Agent</h3>
+          <p style="color:var(--muted);font-size:0.92rem;margin-top:0.2rem;">
+            Same rule, unguessable match. Choose this <em>or</em> rule 2, not both.
+          </p>
+        </div>
+      </div>
+
+      <p>
+        We generate a random 32-byte value, send it on every request in a private header, and you
+        match on that instead. Nothing about it is published, so nobody can reproduce the request
+        by reading our code.
+      </p>
+
+      <div class="paste">
+        <div class="paste-label">Rule expression</div>
+        <pre>(http.request.uri.path contains "/wp-json/mcp/novamira"
+ and http.request.headers["x-ocs-panel-key"][0] eq "&lt;SECRET&gt;")</pre>
+      </div>
+
+      <p>
+        Action: <strong>Skip</strong> &rarr; <em>All remaining custom rules</em> + <strong>Bot Fight
+        Mode</strong>.
+      </p>
+
+      <p style="font-size:0.92rem;color:var(--ink-soft);">
+        Tell us you want this and we will send the secret over a channel of your choosing. It can
+        be rotated at any time &mdash; we change our side, you update the rule.
+      </p>
+    </article>
+
+    <div class="note note-warn">
+      <h3>Why we are not asking for an IP allowlist</h3>
+      <p>
+        An allowlist under <em>Security &rarr; WAF &rarr; Tools &rarr; IP Access Rules</em> would
+        normally be the cleanest answer here, and it is the first thing a security-minded
+        administrator will suggest. It is not available in this case, and the reason is worth
+        stating plainly rather than leaving you to discover it.
+      </p>
+      <p>
+        Our panel runs on Vercel&rsquo;s shared tier, whose functions egress from rotating cloud
+        addresses. Fixed egress IPs are an Enterprise-plan feature we do not have. The only
+        &ldquo;allowlist&rdquo; we could offer would be a broad cloud provider range covering
+        thousands of unrelated tenants &mdash; weaker than either rule above, and you would be
+        right to refuse it.
+      </p>
+      <p>
+        If an IP match is a hard requirement on your side, tell us and we will price moving the
+        panel onto infrastructure with a dedicated address.
+      </p>
+    </div>
+
+    <div class="note note-warn">
+      <h3>What rule 2 does and does not do</h3>
+      <p>
+        Either version skips the <em>bot challenge</em> only. It does <strong>not</strong> grant
+        access: the endpoint still requires a WordPress application password, and an
+        unauthenticated request answers <code>401 rest_forbidden</code> with or without the rule.
+      </p>
+      <p>
+        The exposure it adds is that a request carrying the matching header reaches the login check
+        directly instead of being challenged first &mdash; the same position as any site not behind
+        Cloudflare. With option 2B that request is one nobody else can construct.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>One thing to be aware of</h2>
+
+    <div class="note note-danger">
+      <h3>The origin certificates have already expired</h3>
+      <p>
+        Visitors are unaffected &mdash; Cloudflare is terminating TLS at the edge with its own valid
+        certificate, which is why nothing looks broken.
+      </p>
+      <div class="table-wrap" style="background:transparent;border-color:color-mix(in srgb, var(--danger) 25%, transparent);">
+        <table>
+          <thead>
+            <tr><th>Domain</th><th>Origin certificate expired</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="mono">azaleabaguio.com</td><td class="result r-bad">14 Aug 2026</td></tr>
+            <tr><td class="mono">azaleaboracay.com</td><td class="result r-bad">10 Jul 2026</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        This means the zones cannot currently be on <strong>Full (strict)</strong> SSL &mdash; strict
+        mode validates the origin certificate and both sites would already be down.
+      </p>
+      <p>
+        <strong>Until rule 1 is in place and the certificates renew, please do not switch SSL mode
+        to Full (strict) and do not move these domains off Cloudflare.</strong> Either would take
+        both sites offline immediately.
+      </p>
+      <p>
+        Once renewal works, Full (strict) becomes available and is the more secure setting. If you
+        would rather not depend on Let&rsquo;s Encrypt through the proxy at all, a Cloudflare
+        <strong>Origin CA certificate</strong> (<em>SSL/TLS &rarr; Origin Server</em>) is valid for
+        15 years and solves it permanently &mdash; we can install it on the hosting side.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we need back</h2>
+    <ol>
+      <li>Confirmation that rule 1 is live, so we can trigger certificate renewal.</li>
+      <li>For rule 2 &mdash; tell us whether you want the User-Agent version (2) or the shared
+        secret (2B). If 2B, name a channel and we will send the secret.</li>
+      <li>The current SSL/TLS encryption mode for both zones (<em>SSL/TLS &rarr; Overview</em>), so
+        we know whether the origin certificates are load-bearing today.</li>
+    </ol>
+    <p>
+      Both rules are reversible and scoped to a single path each. Happy to get on a call and make
+      the changes together if that is easier than working from a document.
+    </p>
+  </section>
+
+  <footer>
+    <p>Prepared by Online Creative Solutions &middot; web maintenance for azaleabaguio.com and azaleaboracay.com.</p>
+    <p>
+      All findings above were measured directly against the live sites. Figures current as of
+      31 August 2026.
+    </p>
+  </footer>
+
+</div>

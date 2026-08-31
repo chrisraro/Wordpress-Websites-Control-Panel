@@ -94,6 +94,27 @@ function parseToolResult(result: {
  *  Exported so a test can pin that it is actually sent. */
 export const MCP_USER_AGENT = "wp-control-panel-mcp/1.0";
 
+/**
+ * Header name for an optional shared secret, sent when MCP_EDGE_SECRET is set.
+ *
+ * Exists for sites behind a CDN that challenges this app's traffic. The
+ * obvious thing for such a CDN rule to key on is the User-Agent above, but
+ * that string is published in this repository and in every request -- anyone
+ * who wants to match it can. A random secret in a header nobody else knows is
+ * the same shape of rule without that weakness.
+ *
+ * An IP allowlist would be stronger still and needs no secret, but it
+ * requires a stable egress address, which this deployment does not have:
+ * fixed egress is an Enterprise feature on the host, and shared-tier
+ * functions egress from rotating addresses.
+ *
+ * To be clear about what this is NOT: it is not authentication and grants
+ * nothing. WordPress still requires the application password, and an
+ * unauthenticated request answers 401 whether or not this header is present.
+ * It only lets an edge rule recognise our traffic.
+ */
+export const MCP_EDGE_SECRET_HEADER = "X-OCS-Panel-Key";
+
 export const createSiteMcpClient: McpFactory = async (opts) => {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT;
   const basic = Buffer.from(`${opts.username}:${opts.appPassword}`).toString("base64");
@@ -142,6 +163,10 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
           // by the uptime checker's `wp-control-panel-uptime/1.0`
           // (src/services/security/uptime.ts), which learned this first.
           "User-Agent": MCP_USER_AGENT,
+          // Only when configured; deployments without it send nothing extra.
+          ...(process.env.MCP_EDGE_SECRET
+            ? { [MCP_EDGE_SECRET_HEADER]: process.env.MCP_EDGE_SECRET }
+            : {}),
         },
       },
     });

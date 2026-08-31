@@ -181,3 +181,47 @@ setting the record to DNS-only while it renews.
 
 Once the origin certificates are valid, the **Certificate name** field can
 simply be the site's own domain, and the shared hostname is no longer needed.
+
+---
+
+## The request document sent to the client's IT team
+
+`docs/ops/client-requests/azalea-cloudflare-request.html` (+ `.pdf`) is the
+written request for the two WAF rules, addressed to whoever holds the
+Cloudflare account. Regenerate the PDF with:
+
+```bash
+node scripts/build-client-doc.mjs azalea-cloudflare-request
+```
+
+It asks for two things: a skip rule for `/.well-known/acme-challenge/` and
+`/.well-known/pki-validation/` so certificates can renew, and a skip rule for
+the MCP endpoint so this panel can reach the sites.
+
+### Why the MCP rule is offered in two forms
+
+The User-Agent version is the simpler ask, but `wp-control-panel-mcp/1.0` is
+published in this repository, so anyone can send it. The stronger version
+matches an unguessable shared secret instead:
+
+- Set `MCP_EDGE_SECRET` in the deployment environment (`openssl rand -hex 32`).
+- Every MCP request then carries it in `X-OCS-Panel-Key`
+  (`MCP_EDGE_SECRET_HEADER` in `src/lib/mcp/client.ts`).
+- The Cloudflare rule matches that header instead of the User-Agent.
+
+Neither version is authentication and neither grants anything: WordPress still
+requires the application password, and an unauthenticated request answers
+`401 rest_forbidden` either way. What the rule skips is the bot challenge.
+
+### Why an IP allowlist is not offered
+
+It would be the cleanest answer and it is the first thing a security-minded
+administrator suggests. It needs a stable egress address, and this deployment
+does not have one: the Vercel account is on the **Hobby** plan, where
+functions egress from rotating shared addresses. Fixed egress (Secure Compute)
+is an Enterprise feature. The only allowlist we could offer would be a broad
+cloud provider range covering thousands of unrelated tenants — weaker than
+either header rule, and a competent reviewer would refuse it.
+
+If an IP match ever becomes a hard requirement, that is a hosting decision
+(dedicated egress or a small always-on box), not a code change.
