@@ -82,20 +82,11 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("security_scan requires site_id");
       await securityScan({ sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id);
     },
-    vuln_feed_refresh: async ({ job }) => {
-      // `processJobs` increments `attempts` on claim (see
-      // supabase/migrations/0002_jobs_claim.sql), so attempts === 1 is this
-      // job's first try and attempts > 1 is a retry of a run that just threw.
-      // The freshness guard exists only to suppress duplicate work from a
-      // double-trigger (two schedulers firing the same night); a retry is
-      // recovery from THIS job's own failure, not duplicate work, and must
-      // always refetch. If it didn't, a `replaceFeed` that dies partway
-      // through its chunked upsert (leaving the un-upserted tail on
-      // yesterday's rows, but `updated_at` fresh on everything it did write)
-      // would cause the retry to see a fresh timestamp, skip, and report
-      // success — silently leaving the feed permanently incomplete for the
-      // night. Do not "simplify" this back to an unconditional allowSkip.
-      await refreshVulnFeed(security, undefined, { allowSkip: job.attempts <= 1 });
+    vuln_feed_refresh: async () => {
+      // Always refetches. The freshness guard that used to live behind
+      // `allowSkip` here reported success on a partially-written feed and was
+      // removed; see refreshVulnFeed's own comment for the incident.
+      await refreshVulnFeed(security);
     },
     seo_scan: async ({ job }) => {
       if (!job.site_id) throw new Error("seo_scan requires site_id");

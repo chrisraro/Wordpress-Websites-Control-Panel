@@ -207,21 +207,19 @@ describe("refreshVulnFeed", () => {
     expect(sec.state.feed[0].software_slug).toBe("x");
   });
 
-  it("skips the fetch entirely when the cached feed is still fresh", async () => {
+  it("refetches even when the cached feed was written moments ago", async () => {
+    // There is no freshness guard any more, and this pins its absence.
+    //
+    // The guard skipped when the newest row was under 12h old, which tests
+    // whether some rows are RECENT, not whether the feed is COMPLETE. In
+    // production a run died on chunk 8 of 87 with 4,000 of 43,060 rows
+    // written; the next job saw a 34-minute-old timestamp, skipped, and
+    // reported success in 0.4s, leaving the feed 9% populated while security
+    // scans graded against it.
     process.env.WORDFENCE_API_KEY = "k";
-    const freshAt = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h old
+    const freshAt = new Date(Date.now() - 60 * 1000).toISOString(); // a minute old
     const sec = fakeSecurityRepo(FEED, freshAt);
     let called = false;
-    const fetchImpl = (async () => { called = true; return new Response("{}", { status: 200 }); }) as typeof fetch;
-    const res = await refreshVulnFeed(sec.repo, fetchImpl);
-    expect(res).toEqual({ updated: 0, skipped: true });
-    expect(called).toBe(false);
-  });
-
-  it("fetches again once the cached feed has aged past the freshness window", async () => {
-    process.env.WORDFENCE_API_KEY = "k";
-    const oldAt = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(); // 13h old
-    const sec = fakeSecurityRepo(FEED, oldAt);
     const feedJson = {
       "u1": { id: "u1", title: "T", cve: null, cvss: { score: 5 }, software: [{
         type: "plugin", slug: "x",
@@ -229,31 +227,29 @@ describe("refreshVulnFeed", () => {
         patched_versions: ["1.1"],
       }]},
     };
-    const fetchImpl = (async () => new Response(JSON.stringify(feedJson), { status: 200 })) as typeof fetch;
+    const fetchImpl = (async () => {
+      called = true;
+      return new Response(JSON.stringify(feedJson), { status: 200 });
+    }) as typeof fetch;
+
     const res = await refreshVulnFeed(sec.repo, fetchImpl);
+    expect(called).toBe(true);
     expect(res).toEqual({ updated: 1, skipped: false });
   });
 
-  it("a retry (allowSkip: false) always refetches, even though a partial write left the feed looking fresh", async () => {
-    // Reproduces the exact incident this guards against: replaceFeed upserts
-    // in chunks and stamps updated_at = now() on every row as it commits, so
-    // a chunk that fails partway through (statement timeout, transient 5xx)
-    // leaves newestFeedUpdatedAt() reporting a *fresh* timestamp even though
-    // the un-upserted tail of the feed still holds yesterday's rows. If the
-    // retry honoured the freshness guard here, it would see that fresh
-    // timestamp and return `skipped: true` — reporting success on a feed
-    // that is silently still incomplete.
+  it("a fresh job after a PREVIOUS job's partial write still refetches", async () => {
+    // The exact production incident. The old guard was scoped to retries of
+    // the same job (allowSkip: false on attempts > 1), so it was a brand-new
+    // job -- the case not covered -- that walked into the trap.
     process.env.WORDFENCE_API_KEY = "k";
     const sec = fakeSecurityRepo([]);
     let calls = 0;
     sec.repo.replaceFeed = async (entries) => {
       calls += 1;
       if (calls === 1) {
-        // Simulate chunks 1..N-1 committing (and stamping updated_at) before
-        // chunk N throws — the first attempt fails, but leaves the feed
-        // looking fresh.
+        // Chunks commit and stamp updated_at before a later chunk throws.
         sec.state.feedUpdatedAt = new Date().toISOString();
-        throw new Error("vuln_feed upsert failed: statement timeout on chunk 21/30");
+        throw new Error("vuln_feed upsert failed: ON CONFLICT DO UPDATE command cannot affect row a second time");
       }
       sec.state.feed = entries;
       sec.state.feedUpdatedAt = new Date().toISOString();
@@ -268,14 +264,21 @@ describe("refreshVulnFeed", () => {
     };
     const fetchImpl = (async () => new Response(JSON.stringify(feedJson), { status: 200 })) as typeof fetch;
 
-    // First attempt (job.attempts === 1 → allowSkip: true): fails partway
-    // through, leaving the feed's updated_at fresh but data incomplete.
-    await expect(refreshVulnFeed(sec.repo, fetchImpl, { allowSkip: true })).rejects.toThrow("statement timeout");
+    // Job 1 dies partway, leaving the feed fresh-looking but incomplete.
+    await expect(refreshVulnFeed(sec.repo, fetchImpl)).rejects.toThrow(/cannot affect row a second time/);
 
-    // Retry (job.attempts > 1 → allowSkip: false): must refetch regardless
-    // of the now-fresh timestamp, not report `skipped: true`.
-    const retryResult = await refreshVulnFeed(sec.repo, fetchImpl, { allowSkip: false });
-    expect(retryResult).toEqual({ updated: 1, skipped: false });
+    // Job 2 is a NEW job, not a retry. It must still refetch.
+    const second = await refreshVulnFeed(sec.repo, fetchImpl);
+    expect(second).toEqual({ updated: 1, skipped: false });
     expect(calls).toBe(2);
+  });
+
+  it("still skips, honestly, when no key is configured", async () => {
+    delete process.env.WORDFENCE_API_KEY;
+    const sec = fakeSecurityRepo(FEED, new Date().toISOString());
+    let called = false;
+    const fetchImpl = (async () => { called = true; return new Response("{}", { status: 200 }); }) as typeof fetch;
+    expect(await refreshVulnFeed(sec.repo, fetchImpl)).toEqual({ updated: 0, skipped: true });
+    expect(called).toBe(false);
   });
 });

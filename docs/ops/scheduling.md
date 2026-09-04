@@ -26,12 +26,14 @@ $$);
 
 -- nightly snapshot fan-out at 02:00 UTC
 --
--- NOTE: refreshVulnFeed's freshness guard (src/services/security/scan.ts,
--- VULN_FEED_FRESH_MS) is hard-coded to 12h on the assumption this fires
--- once every 24h. Change this cadence to anything more frequent than every
--- 12h (e.g. '0 */6 * * *') and three of every four runs will silently skip
--- the Wordfence fetch instead of refreshing the feed. If you change this
--- schedule, update VULN_FEED_FRESH_MS to match.
+-- NOTE: refreshVulnFeed no longer has a freshness guard, so this cadence is
+-- free to change without a matching constant to update. The guard used to
+-- skip the fetch when the newest feed row was under 12h old, which tested
+-- whether some rows were recent rather than whether the feed was complete --
+-- a run that died on chunk 8 of 87 left 4,000 of 43,060 rows with a fresh
+-- timestamp, and the next job skipped and reported success in 0.4s. Duplicate
+-- work from a same-night double-trigger is prevented at enqueue instead
+-- (dedupe: true in api/cron/enqueue) plus the one-scheduler rule above.
 select cron.schedule('wp-panel-enqueue', '0 2 * * *', $$
   select net.http_post(
     url := 'APP_URL/api/cron/enqueue',

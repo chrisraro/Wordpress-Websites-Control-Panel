@@ -11,13 +11,6 @@ import { runChecksums } from "./checksums";
 import { computeGrade, type Grade, type SecurityCheck, type Severity } from "./types";
 import type { SecurityRepo } from "./repo";
 
-// The feed refreshes on a nightly cadence (pg_cron's wp-panel-enqueue, once
-// at 02:00 UTC). Half that cadence is long enough that a single scheduler
-// firing once a night never gets skipped here, but short enough to catch any
-// same-night double-trigger (the exact bug this constant defends against —
-// see docs/ops/scheduling.md) without ever suppressing a legitimate refresh.
-const VULN_FEED_FRESH_MS = 12 * 60 * 60 * 1000; // 12 hours
-
 // A scan grading against a feed this old is grading against data that is
 // meaningfully out of date: the nightly job should touch the feed at least
 // once a day, so one full day plus enough slack to not fire on an
@@ -164,34 +157,41 @@ export async function securityScan(
   }
 }
 
+/**
+ * Fetches the whole vulnerability feed and replaces the cached copy.
+ *
+ * There is deliberately no "the feed is recent, skip it" guard here, and the
+ * one that used to live here was removed after it silently broke the feed in
+ * production. It skipped when `newestFeedUpdatedAt()` was under 12h old, which
+ * is a test of whether some rows are RECENT, not of whether the feed is
+ * COMPLETE — and those come apart exactly when it matters. `replaceFeed`
+ * upserts in chunks and stamps `updated_at = now()` on each chunk as it
+ * commits, so a run that dies partway leaves a fresh timestamp on a partial
+ * feed.
+ *
+ * That is not hypothetical. A run died on chunk 8 of 87 with 4,000 of 43,060
+ * rows written; the next job saw a 34-minute-old timestamp, skipped the fetch,
+ * and reported success in 0.4s. The feed sat 9% populated while every security
+ * scan graded against it and reported sites clean that were not — a security
+ * product confidently wrong, which is worse than one visibly broken. The old
+ * guard's own comment anticipated this for a RETRY of the same job and passed
+ * `allowSkip: false` there, but a brand-new job after a previous job's partial
+ * write walked straight into it.
+ *
+ * What is given up is suppression of a same-night double-trigger. That costs
+ * one redundant 155MB fetch, and it is already prevented upstream anyway:
+ * the nightly enqueue passes `dedupe: true` (api/cron/enqueue), and
+ * docs/ops/scheduling.md mandates pg_cron as the only scheduler. Trading a
+ * duplicate download for the chance of a silently incomplete vulnerability
+ * database was never a good trade.
+ */
 export async function refreshVulnFeed(
-  security: SecurityRepo, fetchImpl?: typeof fetch, opts: { allowSkip: boolean } = { allowSkip: true },
+  security: SecurityRepo, fetchImpl?: typeof fetch,
 ): Promise<{ updated: number; skipped: boolean }> {
   const key = getOptionalEnv("WORDFENCE_API_KEY");
+  // The one legitimate skip: no key configured. Distinct from "already fresh"
+  // in that it does no work because it CANNOT, and says so honestly.
   if (!key) return { updated: 0, skipped: true };
-
-  // Defense in depth against any future double-trigger (the primary fix is
-  // removing the second scheduler — see docs/ops/scheduling.md): if the feed
-  // was refreshed within the window, don't spend a Wordfence request at all.
-  //
-  // But this guard must never fire on a retry. `replaceFeed` upserts in
-  // chunks of 500 and stamps `updated_at = now()` on every row it writes as
-  // it goes, so a run that errors partway through (statement timeout,
-  // transient 5xx on chunk 21 of 30) leaves `newestFeedUpdatedAt()` reporting
-  // a *fresh* timestamp even though the tail of the feed still holds
-  // yesterday's rows. If the retry then honoured this guard, it would see
-  // that fresh timestamp, skip re-fetching, and report `skipped: true` —
-  // turning a partial failure into a reported success, silently, with the
-  // stale-feed warn unable to catch it either (the newest row really is
-  // fresh). A retry is recovery from a failure this same job just had, not
-  // duplicate work from a double-trigger, so it must always refetch.
-  // Callers pass `allowSkip` explicitly; see handlers.ts's vuln_feed_refresh.
-  if (opts.allowSkip) {
-    const newest = await security.newestFeedUpdatedAt();
-    if (newest && Date.now() - new Date(newest).getTime() < VULN_FEED_FRESH_MS) {
-      return { updated: 0, skipped: true };
-    }
-  }
 
   const entries = await fetchWordfenceFeed(key, fetchImpl ?? fetch);
   const updated = await security.replaceFeed(entries);

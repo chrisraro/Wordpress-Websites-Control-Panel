@@ -145,32 +145,28 @@ describe("plugin_install handler dispatch", () => {
   });
 });
 
-// The freshness guard in refreshVulnFeed must be bypassed on a retry (see
-// src/services/security/scan.ts's `allowSkip` doc comment and the "partial
-// write" scenario it defends against) — this pins that the handler actually
-// derives `allowSkip` from `job.attempts` and doesn't hard-code it either way.
+// The handler must never pass a "skip if recent" option again. The guard it
+// used to configure reported success on a partially-written feed (4,000 of
+// 43,060 rows, 0.4s, job marked done) and was removed; see refreshVulnFeed's
+// comment. Pinned at this level too, because the handler is where the old
+// bug's second half lived: it derived allowSkip from job.attempts, which
+// covered a retry of the same job but not a fresh job after a failed one.
 describe("vuln_feed_refresh handler dispatch", () => {
   beforeEach(() => {
     refreshVulnFeedMock.mockClear();
   });
 
-  it("allows the freshness guard to skip on a job's first attempt", async () => {
-    const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
-    const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts: 1 });
-    await handlers.vuln_feed_refresh!({ job });
-    expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
-    expect(refreshVulnFeedMock.mock.calls[0][2]).toEqual({ allowSkip: true });
-  });
-
-  it("forbids the freshness guard from skipping on a retry", async () => {
-    const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
-    const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts: 2 });
-    await handlers.vuln_feed_refresh!({ job });
-    expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
-    expect(refreshVulnFeedMock.mock.calls[0][2]).toEqual({ allowSkip: false });
-  });
+  for (const attempts of [1, 2, 3]) {
+    it(`refetches unconditionally on attempt ${attempts}`, async () => {
+      const { db } = fakeDb();
+      const handlers = buildJobHandlers(db);
+      const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts });
+      await handlers.vuln_feed_refresh!({ job });
+      expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
+      // No third argument at all: nothing may re-introduce a skip option.
+      expect(refreshVulnFeedMock.mock.calls[0][2]).toBeUndefined();
+    });
+  }
 });
 
 // bulk_manage turns one queued item from a bulk update/activate/deactivate/
