@@ -6,7 +6,10 @@ import type { SiteRow } from "@/services/sites/types";
 // snapshot_refresh only for sites the viewer can both see AND manage, skip
 // disabled sites (matching the nightly fan-out in
 // src/app/api/cron/enqueue/route.ts), and report the count it actually
-// enqueued -- never a promise of what it "would" do.
+// enqueued -- never a promise of what it "would" do. It is also scoped to one
+// environment: the dashboard splits production from staging, and a bulk
+// control that reached across that line while sitting under one of the tabs
+// would be the wrong-environment mistake PRODUCT.md exists to prevent.
 
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
@@ -44,8 +47,12 @@ import { refreshAllInventoryAction } from "@/app/(dashboard)/dashboard/actions";
 
 const DENIED = { ok: false, error: "You do not have permission to do that." };
 
-function site(id: string, status: SiteRow["status"] = "connected"): SiteRow {
-  return { id, status } as SiteRow;
+/** url matters now: siteEnvironment() reads it to classify the site. */
+function site(
+  id: string, status: SiteRow["status"] = "connected", env: "production" | "staging" = "production",
+): SiteRow {
+  const host = env === "staging" ? `staging.${id}.example.com` : `${id}.example.com`;
+  return { id, status, url: `https://${host}`, client_label: null } as SiteRow;
 }
 
 const ADMIN_VIEWER = {
@@ -63,7 +70,7 @@ beforeEach(() => {
 describe("refreshAllInventoryAction", () => {
   it("is refused without wp_toolkit.manage, and never lists or enqueues anything", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);
-    const result = await refreshAllInventoryAction();
+    const result = await refreshAllInventoryAction("production");
     expect(result).toEqual(DENIED);
     expect(listSitesForViewerMock).not.toHaveBeenCalled();
     expect(enqueueJobMock).not.toHaveBeenCalled();
@@ -86,7 +93,7 @@ describe("refreshAllInventoryAction", () => {
     ]);
     enqueueJobMock.mockResolvedValue({ id: "job-1" });
 
-    const result = await refreshAllInventoryAction();
+    const result = await refreshAllInventoryAction("production");
 
     expect(enqueueJobMock).toHaveBeenCalledTimes(1);
     expect(enqueueJobMock).toHaveBeenCalledWith(
@@ -104,7 +111,7 @@ describe("refreshAllInventoryAction", () => {
     ]);
     enqueueJobMock.mockResolvedValue({ id: "job-1" });
 
-    await refreshAllInventoryAction();
+    await refreshAllInventoryAction("production");
 
     const enqueuedSiteIds = enqueueJobMock.mock.calls.map((c) => c[2]);
     expect(enqueuedSiteIds.sort()).toEqual(["s1", "s3"]);
@@ -122,7 +129,7 @@ describe("refreshAllInventoryAction", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "job-3" });
 
-    const result = await refreshAllInventoryAction();
+    const result = await refreshAllInventoryAction("production");
 
     expect(enqueueJobMock).toHaveBeenCalledTimes(3);
     expect(result).toEqual({
@@ -136,7 +143,7 @@ describe("refreshAllInventoryAction", () => {
     listSitesForViewerMock.mockResolvedValue([site("s1"), site("s2")]);
     enqueueJobMock.mockResolvedValue(null);
 
-    const result = await refreshAllInventoryAction();
+    const result = await refreshAllInventoryAction("production");
 
     expect(result).toEqual({
       ok: true,
@@ -148,9 +155,40 @@ describe("refreshAllInventoryAction", () => {
     checkPermissionMock.mockResolvedValue(ADMIN_VIEWER);
     listSitesForViewerMock.mockResolvedValue([site("s1", "disabled")]);
 
-    const result = await refreshAllInventoryAction();
+    const result = await refreshAllInventoryAction("production");
 
-    expect(result).toEqual({ ok: false, error: "No sites are eligible for a refresh." });
+    expect(result).toEqual({ ok: false, error: "No production sites are eligible for a refresh." });
+    expect(enqueueJobMock).not.toHaveBeenCalled();
+  });
+
+  it("touches only the environment it was given", async () => {
+    // The property that matters: standing on the Staging tab and pressing
+    // "Refresh all" must not reach a single production site, and vice versa.
+    checkPermissionMock.mockResolvedValue(ADMIN_VIEWER);
+    const portfolio = [
+      site("prod1", "connected", "production"),
+      site("prod2", "connected", "production"),
+      site("stg1", "connected", "staging"),
+    ];
+    listSitesForViewerMock.mockResolvedValue(portfolio);
+    enqueueJobMock.mockResolvedValue({ id: "job-1" });
+
+    await refreshAllInventoryAction("staging");
+    expect(enqueueJobMock.mock.calls.map((c) => c[2])).toEqual(["stg1"]);
+
+    enqueueJobMock.mockClear();
+    listSitesForViewerMock.mockResolvedValue(portfolio);
+    await refreshAllInventoryAction("production");
+    expect(enqueueJobMock.mock.calls.map((c) => c[2]).sort()).toEqual(["prod1", "prod2"]);
+  });
+
+  it("refuses without listing when an environment has no eligible sites", async () => {
+    checkPermissionMock.mockResolvedValue(ADMIN_VIEWER);
+    listSitesForViewerMock.mockResolvedValue([site("prod1", "connected", "production")]);
+
+    const result = await refreshAllInventoryAction("staging");
+
+    expect(result).toEqual({ ok: false, error: "No staging sites are eligible for a refresh." });
     expect(enqueueJobMock).not.toHaveBeenCalled();
   });
 });

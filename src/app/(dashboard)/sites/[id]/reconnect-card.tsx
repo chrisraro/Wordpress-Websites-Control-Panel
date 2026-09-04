@@ -47,12 +47,17 @@ export function ReconnectCard({
   needsReconnect: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [reveal, setReveal] = useState(false);
   const [state, formAction] = useActionState(reconnectSiteAction.bind(null, siteId), null);
   const { toast } = useToast();
 
+  // Closing puts the secret away with the dialog. Reveal is a momentary
+  // choice about one paste, not a preference to carry into the next one.
+  const close = () => { setOpen(false); setReveal(false); };
+
   useEffect(() => {
     if (state?.ok) {
-      setOpen(false);
+      close();
       toast({
         tone: "success",
         title: `${siteName} reconnected`,
@@ -79,15 +84,39 @@ export function ReconnectCard({
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="app_password" className={labelClass}>
-          Application password
-        </label>
+        <div className="flex items-baseline justify-between gap-3">
+          <label htmlFor="app_password" className={labelClass}>
+            Application password
+          </label>
+          {/* A 24-character secret arrives here by paste, and a bad paste is
+              indistinguishable from a bad password: both come back as
+              "WordPress rejected it". Being able to look is the difference
+              between fixing it and guessing. Text rather than an eye glyph --
+              the icon set has no eye, and one drawn for a single use would be
+              a new symbol nobody has learned. */}
+          <button
+            type="button"
+            onClick={() => setReveal((v) => !v)}
+            aria-pressed={reveal}
+            aria-controls="app_password"
+            className="min-h-9 text-caption tracking-normal text-mid-gray underline
+              underline-offset-2 transition-colors duration-150 hover:text-ink
+              pointer-coarse:min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2
+              focus-visible:outline-ink"
+          >
+            {reveal ? "Hide" : "Show"}
+          </button>
+        </div>
         <input
           id="app_password"
           name="app_password"
-          type="password"
+          type={reveal ? "text" : "password"}
           required
-          autoComplete="off"
+          // Not "off": browsers ignore that on password fields, and the one
+          // credential a manager is most likely to volunteer here is the
+          // panel login the user just signed in with -- which is not what
+          // this field wants and would be silently wrong.
+          autoComplete="new-password"
           spellCheck={false}
           className={`${inputClass} font-mono`}
           aria-describedby="app_password_hint"
@@ -106,7 +135,7 @@ export function ReconnectCard({
       )}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button type="button" onClick={() => setOpen(false)} className={buttonClass("secondary")}>
+        <button type="button" onClick={close} className={buttonClass("secondary")}>
           Cancel
         </button>
         <SubmitButton />
@@ -156,7 +185,7 @@ export function ReconnectCard({
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={close}
         title={`Reconnect ${siteName}${siteEnv}`}
         description="The new password is checked against the live site before anything is saved, so a wrong one leaves the site exactly as it is."
       >

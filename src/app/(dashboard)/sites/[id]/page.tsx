@@ -321,12 +321,11 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             </div>
           )}
 
-          {/* Direct-to-origin override. Lives beside the other connection
-              facts because that is what it is: how this panel reaches the
-              site. Only offered to someone who can already manage the site
-              record, and only when the credential-adjacent connection block
-              is visible -- these two values describe a route past the CDN
-              and belong with mcp_endpoint, not on a page a client can see. */}
+          {/* Rotating a working credential is planned maintenance, so it sits
+              inside the Connection card as a quiet row rather than shouting
+              from a banner. The banner form of this same component is at the
+              top of the page, and only when the credential has actually
+              failed. */}
           {canTestConnection && connection && site.status !== "reconnect_needed" && (
             <ReconnectCard
               siteId={id}
@@ -337,6 +336,12 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
             />
           )}
 
+          {/* Direct-to-origin override. Lives beside the other connection
+              facts because that is what it is: how this panel reaches the
+              site. Only offered to someone who can already manage the site
+              record, and only when the credential-adjacent connection block
+              is visible -- these two values describe a route past the CDN
+              and belong with mcp_endpoint, not on a page a client can see. */}
           {canTestConnection && connection && (
             <OriginOverrideForm
               siteId={id}

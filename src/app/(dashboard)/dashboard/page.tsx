@@ -231,8 +231,15 @@ export default async function DashboardPage({
   // to mirror both checks and the "skip disabled sites" rule the nightly
   // fan-out uses (src/app/api/cron/enqueue/route.ts), or the button renders
   // (or promises a count) the action would not actually honour.
+  //
+  // Scoped to the visible environment, matching the action itself: the
+  // confirmation names a number of sites, and a number the reader cannot see
+  // on screen is a number they cannot check.
   const refreshTargets = sites.filter(
-    (s) => s.status !== "disabled" && canAccessSite(viewer, s.id, "manage"),
+    (s) =>
+      s.status !== "disabled" &&
+      siteEnvironment(s) === activeEnv &&
+      canAccessSite(viewer, s.id, "manage"),
   );
   const canRefreshAll = can(viewer, "wp_toolkit.manage") && refreshTargets.length > 0;
 
@@ -320,6 +327,12 @@ export default async function DashboardPage({
   // Scoped to the visible tab: a subtitle counting the whole fleet beside a
   // list showing half of it is a subtitle nobody can reconcile.
   const total = visible.length;
+  // ...but "is anything connected at all" is a question about the portfolio,
+  // not about the tab. Keeping the two apart is the whole of the fix for an
+  // empty Staging tab that used to announce "No sites connected yet" over a
+  // dozen healthy production sites, and hide "Connect site" while doing it.
+  const anyConnected = rows.length > 0;
+  const otherEnv: SiteEnvironment = activeEnv === "production" ? "staging" : "production";
   const subtitle =
     total === 0
       ? undefined
@@ -333,18 +346,18 @@ export default async function DashboardPage({
         title="Sites"
         subtitle={subtitle}
         actions={
-          total > 0 && (
+          anyConnected && (
             <>
               {canRefreshAll && (
                 <ManageForm
-                  action={refreshAllInventoryAction}
+                  action={refreshAllInventoryAction.bind(null, activeEnv)}
                   label="Refresh all inventory"
                   pendingLabel="Queuing…"
                   variant="outline"
                   icon={<IconRefresh size={16} />}
 
                   confirm={{
-                    title: `Refresh inventory for ${refreshTargets.length} site${refreshTargets.length === 1 ? "" : "s"}?`,
+                    title: `Refresh inventory for ${refreshTargets.length} ${activeEnv} site${refreshTargets.length === 1 ? "" : "s"}?`,
                     description:
                       `This queues a fresh inventory scan for ${refreshTargets.length} ` +
                       `site${refreshTargets.length === 1 ? "" : "s"} — each one means connecting to the live ` +
@@ -365,11 +378,15 @@ export default async function DashboardPage({
         }
       />
 
-      <EnvTabs
-        active={activeEnv}
-        production={envCounts.production}
-        staging={envCounts.staging}
-      />
+      {/* A pair of tabs reading "Production 0 / Staging 0" above "Connect
+          your first site" is furniture for a room with nothing in it. */}
+      {anyConnected && (
+        <EnvTabs
+          active={activeEnv}
+          production={envCounts.production}
+          staging={envCounts.staging}
+        />
+      )}
 
       {/* Above "Needs attention" per the spec this implements: a jobs admin
           page nobody opens does not solve invisibility, this does. Rendered
@@ -436,7 +453,31 @@ export default async function DashboardPage({
         </section>
       )}
 
-      {total === 0 ? (
+      {total === 0 && anyConnected ? (
+        /* The tab is empty; the account is not. Saying "no sites connected"
+           here would be false, and the recovery it offered -- connect your
+           first site -- is not the one this reader needs. What they need is
+           the way back to where their sites actually are, with the count so
+           they can see it is worth taking. */
+        <Card>
+          <EmptyState
+            icon={<IconSites size={28} />}
+            title={activeEnv === "staging" ? "No staging sites" : "No production sites"}
+            action={
+              <Link
+                href={otherEnv === "production" ? "/dashboard" : "/dashboard?env=staging"}
+                className={`${buttonClass("outline")} mt-1`}
+              >
+                View {otherEnv} sites ({envCounts[otherEnv].total})
+              </Link>
+            }
+          >
+            {activeEnv === "staging"
+              ? "None of the connected sites are marked as staging copies. The marking lives on each site’s own page, under Connection."
+              : "Every connected site is marked as a staging copy."}
+          </EmptyState>
+        </Card>
+      ) : total === 0 ? (
         <Card>
           {canConnectSite ? (
             <EmptyState

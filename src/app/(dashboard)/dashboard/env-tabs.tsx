@@ -58,21 +58,31 @@ export function EnvTabs({
                       : "text-mid-gray hover:text-ink"
                   }`}
               >
-                <span>{label}</span>
-                <span className="text-caption tracking-normal text-mid-gray">
+                {/* One sentence for a screen reader, three glyphs for an eye.
+                    Read straight through, the visible version announces
+                    "Production 12 3" -- two bare numbers whose meanings are
+                    carried entirely by size and colour, which is exactly the
+                    information a screen reader does not receive. The visible
+                    numerals are hidden from the accessibility tree and a
+                    written equivalent is supplied alongside, rather than
+                    hanging an aria-label on a roleless <span>, where support
+                    is not guaranteed. */}
+                <span aria-hidden>{label}</span>
+                <span aria-hidden className="text-caption tracking-normal text-mid-gray">
                   {counts.total}
                 </span>
                 {/* The signal that makes the split safe. Rendered on the
                     inactive tab too, so an exception on the other side of the
                     divide is never silent. */}
                 {counts.needsAttention > 0 && (
-                  <span
-                    className={badgeClass("soft", "text-status-warn")}
-                    aria-label={`${counts.needsAttention} need attention`}
-                  >
+                  <span aria-hidden className={badgeClass("soft", "text-status-warn")}>
                     {counts.needsAttention}
                   </span>
                 )}
+                <span className="sr-only">
+                  {label}, {counts.total} {counts.total === 1 ? "site" : "sites"}
+                  {counts.needsAttention > 0 && `, ${counts.needsAttention} needing attention`}
+                </span>
               </Link>
             </li>
           );

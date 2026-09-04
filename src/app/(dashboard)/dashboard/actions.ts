@@ -9,6 +9,8 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
 import { canAccessSite } from "@/lib/authz/decide";
+import { siteEnvironment } from "@/services/sites/portfolio";
+import type { SiteEnvironment } from "@/services/sites/types";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import type { JobType } from "@/services/jobs/types";
 import type { ManageResult } from "../sites/[id]/action-form";
@@ -20,8 +22,18 @@ import type { ManageResult } from "../sites/[id]/action-form";
  * always drops jobs on the queue for the per-minute cron to drain, exactly
  * like the nightly fan-out (src/app/api/cron/enqueue/route.ts) and the
  * single-site refreshInventoryAction (../sites/[id]/manage-actions.ts).
+ *
+ * Scoped to one environment, because the dashboard is now scoped to one.
+ * A control sitting under a "Staging" tab that quietly also touched the
+ * twelve production sites would be precisely the mistake PRODUCT.md names as
+ * the expensive one this product can cause — and the button's own
+ * confirmation would have been counting sites the reader could not see.
+ * The environment is bound by the page rather than posted in the form: it is
+ * the caller's context, not user input, and nothing in the browser should be
+ * able to widen the blast radius of a bulk action.
  */
 export async function refreshAllInventoryAction(
+  env: SiteEnvironment,
   _prevState?: ManageResult,
   _formData?: FormData,
 ): Promise<ManageResult> {
@@ -46,11 +58,14 @@ export async function refreshAllInventoryAction(
   // (cron/enqueue/route.ts's `active = sites.filter(s => s.status !== "disabled")`)
   // — nobody should contact a connection nobody trusts.
   const targets = sites.filter(
-    (s) => s.status !== "disabled" && canAccessSite(viewer, s.id, "manage"),
+    (s) =>
+      s.status !== "disabled" &&
+      siteEnvironment(s) === env &&
+      canAccessSite(viewer, s.id, "manage"),
   );
 
   if (targets.length === 0) {
-    return { ok: false, error: "No sites are eligible for a refresh." };
+    return { ok: false, error: `No ${env} sites are eligible for a refresh.` };
   }
 
   let queued = 0;
