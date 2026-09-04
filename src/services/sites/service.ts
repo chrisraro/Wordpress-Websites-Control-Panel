@@ -154,3 +154,63 @@ async function connectOrExplain(
     throw explain(e);
   }
 }
+
+export interface ReconnectInput {
+  wpUsername: string;
+  appPassword: string;
+}
+
+/**
+ * Replaces a site's stored WordPress application password.
+ *
+ * Application passwords get revoked and rotated as a matter of routine, and
+ * until this existed there was no way back: `encryptSecret` was called only
+ * from `addSite`, so a site whose credential lapsed could be fixed only by
+ * deleting and re-adding it -- losing its id, its grants, its history and
+ * every snapshot attached to it. The panel's own error message
+ * ("Reconnect it to update the application password") pointed at a flow that
+ * was never built.
+ *
+ * Verifies before it stores. A credential that does not work must never
+ * replace one that might, and a failed attempt must leave the site exactly as
+ * it was: the connection is proven first, and only then is anything written.
+ */
+export async function reconnectSite(
+  deps: SitesDeps, id: string, input: ReconnectInput, actorId: string,
+): Promise<{ ok: true; abilities: number }> {
+  const site = await deps.repo.getSite(id);
+  if (!site) throw new Error("Site not found");
+
+  // Derived from the site's own URL rather than taken from the form: the
+  // endpoint is not something a person should have to retype, and letting it
+  // be edited here would turn a credential fix into a silent re-pointing of
+  // the site at a different host.
+  const endpoint = mcpEndpointFor(site.url);
+
+  let abilities: string[];
+  const client = await connectOrExplain(deps.mcp, endpoint, input.wpUsername, input.appPassword);
+  try {
+    const discovered = await client.discoverAbilities();
+    abilities = discovered.abilities.map((a) => a.name);
+  } catch (e) {
+    throw explain(e);
+  } finally {
+    await client.close();
+  }
+
+  await deps.repo.updateSiteCredentials(id, {
+    wp_username: input.wpUsername,
+    app_password_encrypted: await encryptSecret(input.appPassword),
+    capabilities: { abilities },
+  });
+
+  // The password itself is never logged, here or anywhere. The username is,
+  // because "who is this site connecting as" is a question worth answering
+  // later and is not a secret.
+  await deps.repo.insertActivity({
+    actor: actorId, site_id: id, action: "site.reconnect",
+    detail: { wp_username: input.wpUsername, abilities: abilities.length },
+  });
+
+  return { ok: true, abilities: abilities.length };
+}

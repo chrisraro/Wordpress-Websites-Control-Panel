@@ -18,6 +18,7 @@ function memoryRepo() {
   const repo: SitesRepo = {
     async setSiteEnvironment() {},
     async setSiteOrigin() {},
+    async updateSiteCredentials() {},
     async insertSite(row) {
       const id = `site-${sites.length + 1}`;
       sites.push({ id, status: "connected", ...row });

@@ -10,8 +10,12 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates } from "@/services/inventory/types";
-import { siteAttention, isStagingSite, SEVERITY_RANK, type Severity } from "@/services/sites/portfolio";
+import {
+  siteAttention, isStagingSite, siteEnvironment, SEVERITY_RANK, type Severity,
+} from "@/services/sites/portfolio";
+import type { SiteEnvironment } from "@/services/sites/types";
 import { ClientHome } from "./client-home";
+import { EnvTabs } from "./env-tabs";
 import type { SiteRow } from "@/services/sites/types";
 import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
 import { vulnFeedStatus } from "@/services/security/scan";
@@ -172,7 +176,16 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ env?: string }>;
+}) {
+  // Production is the default because it is what a client's visitors see:
+  // opening on staging would make the consequential half of the portfolio the
+  // one you have to go looking for.
+  const params = await searchParams;
+  const activeEnv: SiteEnvironment = params.env === "staging" ? "staging" : "production";
   const viewer = await requireViewer();
   const db = await readDbFor(viewer);
   const jobsRepo = supabaseJobsRepo(db);
@@ -288,12 +301,25 @@ export default async function DashboardPage() {
   );
 
   const byName = (a: Row, b: Row) => a.site.name.localeCompare(b.site.name);
-  const needsAttention = rows
+
+  // Counts for BOTH tabs are computed before filtering, so the tab you are
+  // not looking at can still report what needs attention. Without this the
+  // split would hide exceptions rather than organise them.
+  const countsFor = (env: SiteEnvironment) => {
+    const inEnv = rows.filter((r) => siteEnvironment(r.site) === env);
+    return { total: inEnv.length, needsAttention: inEnv.filter((r) => r.severity !== "ok").length };
+  };
+  const envCounts = { production: countsFor("production"), staging: countsFor("staging") };
+
+  const visible = rows.filter((r) => siteEnvironment(r.site) === activeEnv);
+  const needsAttention = visible
     .filter((r) => r.severity !== "ok")
     .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || byName(a, b));
-  const healthy = rows.filter((r) => r.severity === "ok").sort(byName);
+  const healthy = visible.filter((r) => r.severity === "ok").sort(byName);
 
-  const total = sites.length;
+  // Scoped to the visible tab: a subtitle counting the whole fleet beside a
+  // list showing half of it is a subtitle nobody can reconcile.
+  const total = visible.length;
   const subtitle =
     total === 0
       ? undefined
@@ -337,6 +363,12 @@ export default async function DashboardPage() {
             </>
           )
         }
+      />
+
+      <EnvTabs
+        active={activeEnv}
+        production={envCounts.production}
+        staging={envCounts.staging}
       />
 
       {/* Above "Needs attention" per the spec this implements: a jobs admin

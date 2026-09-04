@@ -6,6 +6,7 @@ import type { ManageAction } from "@/services/manage/types";
 import { refreshSnapshot } from "@/services/inventory/service";
 import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
+import { reconnectSite } from "@/services/sites/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
@@ -175,5 +176,53 @@ export async function setOriginAction(
     return { ok: true };
   } catch (e) {
     return { ok: false, error: friendlySiteError(e) || "Could not save the override" };
+  }
+}
+
+/**
+ * Replaces a site's WordPress application password.
+ *
+ * Gated on `sites.manage` rather than `wp_toolkit.manage`: this edits the
+ * site record, the same permission the connect form needs to set the
+ * credential in the first place.
+ *
+ * The password is read from the form and handed straight to the service,
+ * which verifies it before storing. It is never logged, never returned, and
+ * never revalidated into a page prop.
+ */
+export async function reconnectSiteAction(
+  siteId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const gate = await checkPermission("sites.manage");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId, "manage");
+  if (isDenied(site)) return site;
+
+  const wpUsername = String(formData?.get("wp_username") ?? "").trim();
+  // Application passwords are shown with spaces ("abcd efgh ..."). WordPress
+  // accepts either form, but trimming only the ends keeps an accidental
+  // leading space from being sent while leaving the internal grouping alone.
+  const appPassword = String(formData?.get("app_password") ?? "").trim();
+
+  if (!wpUsername) return { ok: false, error: "Enter the WordPress username." };
+  if (appPassword.length < 8) {
+    return { ok: false, error: "That application password looks too short. Paste the whole value." };
+  }
+
+  const db = createServiceSupabase();
+  try {
+    await reconnectSite(
+      { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) },
+      siteId, { wpUsername, appPassword }, user.id,
+    );
+    revalidateSite(siteId);
+    return { ok: true };
+  } catch (e) {
+    // friendlySiteError bounds the message: a WordPress auth failure arrives
+    // as a whole JSON envelope, and the useful sentence is the short one.
+    return { ok: false, error: friendlySiteError(e) || "Could not reconnect the site" };
   }
 }

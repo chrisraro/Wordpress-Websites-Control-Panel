@@ -89,13 +89,25 @@ describe("the site overview page never unconditionally renders credentials-adjac
 
   it("does not render wp_username unconditionally", () => {
     const occurrences = source.split("connection.wp_username").length - 1;
-    // One occurrence inside the connection-gated Connection-card row, one
-    // inside the connection-gated "Copy WP username" control. Both are
-    // gated on the same `connection` value, which is only non-null for a
-    // non-client viewer; there must be no third, unguarded occurrence.
-    expect(occurrences).toBe(2);
+    // Four occurrences, every one gated on the same `connection` value, which
+    // is only non-null for a non-client viewer: the Connection-card row, the
+    // "Copy WP username" control, and the two ReconnectCard renders (the
+    // banner shown when the credential is rejected, and the quiet row for
+    // rotating a working one).
+    //
+    // Counting a bare `connection.wp_username` is the point of this test, so
+    // a new usage must never reach for `connection?.wp_username` to slip
+    // under the count -- optional chaining would satisfy the number while
+    // hiding the very thing being audited. Add the guard, not the question
+    // mark.
+    expect(occurrences).toBe(4);
     expect(source).toContain('connection ? [{ term: "WP user", value: connection.wp_username');
     expect(source).toContain("{connection && (");
+    expect(source).toContain('canTestConnection && connection && site.status === "reconnect_needed"');
+    expect(source).toContain('canTestConnection && connection && site.status !== "reconnect_needed"');
+    // And no optional-chained variant anywhere, which is how the audit stays
+    // honest rather than merely passing.
+    expect(source).not.toContain("connection?.wp_username");
   });
 
   it("does not render WordPress administrator logins/emails unconditionally", () => {

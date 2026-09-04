@@ -16,6 +16,19 @@ export interface SitesRepo {
     origin_ip: string | null; origin_sni: string | null;
   } | null>;
   updateSiteStatus(id: string, status: SiteStatus): Promise<void>;
+  /**
+   * Replaces the stored credential after a successful re-verification.
+   *
+   * Capabilities are rewritten at the same time: a site that was offline long
+   * enough for its password to be rotated has usually changed plugins too,
+   * and a stale ability list makes every dependent feature report "not
+   * supported on this site" forever.
+   */
+  updateSiteCredentials(id: string, creds: {
+    wp_username: string;
+    app_password_encrypted: string;
+    capabilities: { abilities: string[] };
+  }): Promise<void>;
   setSiteEnvironment(id: string, environment: SiteEnvironment): Promise<void>;
   /** Both or neither — see 0019_site_origin_override.sql. */
   setSiteOrigin(id: string, origin: { ip: string; sni: string } | null): Promise<void>;
@@ -84,6 +97,18 @@ export function supabaseSitesRepo(db: SupabaseClient): SitesRepo {
         .update({ origin_ip: origin?.ip ?? null, origin_sni: origin?.sni ?? null })
         .eq("id", id);
       if (error) throw new Error(`setSiteOrigin failed: ${error.message}`);
+    },
+    async updateSiteCredentials(id, creds) {
+      const { error } = await db.from("sites").update({
+        wp_username: creds.wp_username,
+        app_password_encrypted: creds.app_password_encrypted,
+        capabilities: creds.capabilities,
+        // The credential is proven good by the caller before this runs, so
+        // the failure counters describe a problem that no longer exists.
+        status: "connected",
+        consecutive_failures: 0,
+      }).eq("id", id);
+      if (error) throw new Error(`updateSiteCredentials failed: ${error.message}`, { cause: error });
     },
     async updateSiteStatus(id, status) {
       const { error } = await db.from("sites").update({ status }).eq("id", id);

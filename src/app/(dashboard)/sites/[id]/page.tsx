@@ -11,6 +11,7 @@ import { testConnectionAction } from "./actions";
 import { SiteTabs } from "./tabs";
 import { StagingChip, environmentSuffix } from "./site-heading";
 import { RootFilesCard } from "./root-files-card";
+import { ReconnectCard } from "./reconnect-card";
 import { OriginOverrideForm } from "./origin-override-form";
 import { siteEnvironment } from "@/services/sites/portfolio";
 import { ManageForm } from "./action-form";
@@ -179,6 +180,20 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
 
       <SiteTabs siteId={id} active="overview" />
 
+      {/* First banner on the page when it applies: nothing else here can be
+          acted on while the credential is rejected, so offering an update or
+          a maintenance toggle above it would be offering something that
+          cannot work. */}
+      {canTestConnection && connection && site.status === "reconnect_needed" && (
+        <ReconnectCard
+          siteId={id}
+          siteName={site.name}
+          siteEnv={environmentSuffix(site)}
+          wpUsername={connection.wp_username}
+          needsReconnect
+        />
+      )}
+
       {/* Above every other banner on the page, including the core update.
           A site behind a maintenance page is not serving its visitors right
           now, which outranks anything else this page has to say about it. */}
@@ -312,6 +327,16 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               record, and only when the credential-adjacent connection block
               is visible -- these two values describe a route past the CDN
               and belong with mcp_endpoint, not on a page a client can see. */}
+          {canTestConnection && connection && site.status !== "reconnect_needed" && (
+            <ReconnectCard
+              siteId={id}
+              siteName={site.name}
+              siteEnv={environmentSuffix(site)}
+              wpUsername={connection.wp_username}
+              needsReconnect={false}
+            />
+          )}
+
           {canTestConnection && connection && (
             <OriginOverrideForm
               siteId={id}
