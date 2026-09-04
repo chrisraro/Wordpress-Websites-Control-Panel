@@ -50,6 +50,26 @@ export function parseWordfenceFeed(raw: unknown): FeedEntry[] {
       }>;
     };
     if (!Array.isArray(rec.software)) continue;
+    // One advisory can list the SAME plugin several times — one entry per
+    // maintained version branch, each with its own affected range and its own
+    // fixed version. miniorange-oauth-oidc-single-sign-on carries seven:
+    // *-18.5.3 fixed in 18.5.4, *-40.5.3 fixed in 40.5.4, and so on.
+    //
+    // Keying rows on uuid:type:slug alone therefore produced duplicate
+    // primary keys, and Postgres refused the whole chunk with "ON CONFLICT DO
+    // UPDATE command cannot affect row a second time" — which is exactly how
+    // the first live run died, 4,000 rows in, at chunk 8.
+    //
+    // Collapsing them into one row was the tempting fix and is the wrong one:
+    // the branches have different fixes, so a site on 12.0.5 would be told to
+    // install 16.0.8, i.e. to jump a major branch. Wrong remediation advice on
+    // a security finding is worse than the crash that exposed it.
+    //
+    // The suffix goes only on the second and later occurrence, so the id of
+    // every one of the 43,040 unaffected entries is unchanged — replaceFeed
+    // upserts and never deletes, so a blanket id change would orphan the
+    // entire table rather than update it.
+    const seenInRecord = new Map<string, number>();
     for (const sw of rec.software) {
       const type = String(sw?.type ?? "");
       const slug = String(sw?.slug ?? "");
@@ -64,10 +84,13 @@ export function parseWordfenceFeed(raw: unknown): FeedEntry[] {
           to_inclusive: r.to_inclusive !== false,
         }));
       if (ranges.length === 0) continue;
+      const dupKey = `${type}:${slug}`;
+      const nth = seenInRecord.get(dupKey) ?? 0;
+      seenInRecord.set(dupKey, nth + 1);
       const patched = (sw.patched_versions ?? []).map(String).filter(Boolean);
       const score = rec.cvss && typeof rec.cvss === "object" ? Number((rec.cvss as { score?: unknown }).score) : NaN;
       entries.push({
-        id: `${uuid}:${type}:${slug}`,
+        id: nth === 0 ? `${uuid}:${type}:${slug}` : `${uuid}:${type}:${slug}#${nth}`,
         title: typeof rec.title === "string" ? rec.title : slug,
         cve: typeof rec.cve === "string" && rec.cve ? rec.cve : null,
         cvss: Number.isFinite(score) ? score : null,
