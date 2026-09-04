@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
-import { enqueueJob } from "@/services/jobs/service";
+import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { pendingPluginUpdates } from "@/services/inventory/types";
+import { enqueueJob, enqueueBatch } from "@/services/jobs/service";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
@@ -121,4 +123,88 @@ export async function dismissGlobalFailedJobsAction(
   }
   revalidatePath("/dashboard");
   return { ok: true };
+}
+
+/**
+ * Queues "update every plugin that has an update" for every site in one
+ * environment — the dashboard's counterpart to the single-site "Update all"
+ * on a site's Plugins tab.
+ *
+ * Scoped to one environment for the same reason refreshAllInventoryAction is,
+ * only more so: this one *writes to live client websites*. A control that
+ * silently reached from the Staging tab into twelve production sites would be
+ * the worst version of the mistake PRODUCT.md names, and unlike a refresh it
+ * could not be undone by running it again.
+ *
+ * Enqueue only, one job per site, all under a single batch_id so the existing
+ * batch page can show which sites finished and which failed. Updating a dozen
+ * WordPress installs is minutes of work; it cannot happen inside a request,
+ * and pretending otherwise is how you get a half-updated fleet and a
+ * timed-out browser tab.
+ */
+export async function updateAllPluginsAction(
+  env: SiteEnvironment,
+  _prevState?: unknown,
+  _formData?: FormData,
+): Promise<ManageResult> {
+  const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
+  const viewer = gate;
+
+  const db = createServiceSupabase();
+  const jobs = supabaseJobsRepo(db);
+  const sites = await listSitesForViewer(
+    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs },
+    viewer,
+  );
+  const candidates = sites.filter(
+    (s) =>
+      s.status !== "disabled" &&
+      siteEnvironment(s) === env &&
+      canAccessSite(viewer, s.id, "manage"),
+  );
+
+  // Eligibility is judged from the stored snapshot — the same numbers the
+  // operator was looking at when they pressed the button. Each job re-checks
+  // live state when it runs, so a site that updated itself in the meantime
+  // reports "Nothing to update" rather than failing.
+  const snapshots = supabaseSnapshotsRepo(db);
+  const withUpdates: string[] = [];
+  let alreadyQueued = 0;
+  for (const site of candidates) {
+    const snap = await snapshots.latestSnapshot(site.id);
+    if (!snap || pendingPluginUpdates(snap.payload) === 0) continue;
+    // A second press while the first batch is still draining must not queue
+    // a second pass over the same site: two concurrent update runs on one
+    // WordPress install is how you corrupt a plugin directory.
+    if (await jobs.pendingExists("update_all_plugins", site.id)) {
+      alreadyQueued++;
+      continue;
+    }
+    withUpdates.push(site.id);
+  }
+
+  if (withUpdates.length === 0) {
+    return {
+      ok: false,
+      error: alreadyQueued > 0
+        ? "Already queued — those sites have plugin updates pending from an earlier run."
+        : `No ${env} site has a plugin update waiting.`,
+    };
+  }
+
+  const { batchId, count } = await enqueueBatch(
+    jobs, "update_all_plugins", withUpdates, { actor: user.id },
+  );
+  revalidatePath("/dashboard");
+  const siteWord = (n: number) => `${n} site${n === 1 ? "" : "s"}`;
+  return {
+    ok: true,
+    // "Queued", never "updated": nothing has run yet.
+    message: alreadyQueued > 0
+      ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
+      : `Queued plugin updates for ${siteWord(count)}.`,
+    href: `/marketplace/batches/${batchId}`,
+  };
 }

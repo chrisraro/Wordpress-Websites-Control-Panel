@@ -47,6 +47,19 @@ export interface InventoryPayload {
   themes: ThemeInfo[];
 }
 
+/**
+ * Plugins with an update available, and nothing else.
+ *
+ * Distinct from `pendingUpdates`, which also counts themes and core — the
+ * right number for "does this site need attention", and the wrong one for
+ * anything that acts on plugins specifically. A control that queued a plugin
+ * update for a site whose only pending update was a theme would promise work
+ * it cannot do and report "Nothing to update" for its trouble.
+ */
+export function pendingPluginUpdates(p: InventoryPayload): number {
+  return p.plugins.filter((x) => x.update === "available").length;
+}
+
 export function pendingUpdates(p: InventoryPayload): number {
   const plugins = p.plugins.filter((x) => x.update === "available").length;
   const themes = p.themes.filter((x) => x.update === "available").length;

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { requireViewer } from "@/lib/authz/server";
 import { can } from "@/lib/authz/decide";
 import { Sidebar } from "@/components/shell/sidebar";
+import { NavProgressBar } from "@/components/shell/nav-progress";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
@@ -49,6 +50,12 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen lg:pl-60">
+      {/* Every route below is force-dynamic and spends real time in the
+          database before it can render. Until it does, the previous page sits
+          there unchanged, which is indistinguishable from a click that never
+          landed -- the reason navigation was reported as needing two clicks.
+          This answers in the same tick as the click. */}
+      <NavProgressBar />
       {/* The <aside> precedes the page in DOM order, so Tab from the address
           bar walked seven sidebar stops -- logo, Connect site, Sites,
           Marketplace, Users, the email, Sign out -- before reaching any page

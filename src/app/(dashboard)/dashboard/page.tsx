@@ -9,21 +9,26 @@ import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
-import { pendingUpdates } from "@/services/inventory/types";
+import { pendingUpdates, pendingPluginUpdates } from "@/services/inventory/types";
 import {
   siteAttention, isStagingSite, siteEnvironment, SEVERITY_RANK, type Severity,
 } from "@/services/sites/portfolio";
 import type { SiteEnvironment } from "@/services/sites/types";
 import { ClientHome } from "./client-home";
+import { LinkPending } from "@/components/shell/nav-progress";
 import { EnvTabs } from "./env-tabs";
 import type { SiteRow } from "@/services/sites/types";
 import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
 import { vulnFeedStatus } from "@/services/security/scan";
 import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
-import { IconAlert, IconCheck, IconChevronRight, IconPlus, IconRefresh, IconSites } from "@/components/ui/icons";
+import {
+  IconAlert, IconCheck, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconSites,
+} from "@/components/ui/icons";
 import { ManageForm } from "../sites/[id]/action-form";
-import { refreshAllInventoryAction, dismissGlobalFailedJobsAction } from "./actions";
+import {
+  refreshAllInventoryAction, dismissGlobalFailedJobsAction, updateAllPluginsAction,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +51,8 @@ interface Row {
   severity: Severity;
   reasons: string[];
   updates?: number;
+  /** Plugins only — what the fleet-wide plugin update will actually touch. */
+  pluginUpdates: number;
   grade?: string;
   seo?: number;
 }
@@ -166,11 +173,17 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
           </div>
         )}
 
-        <IconChevronRight
-          size={16}
-          className="mt-0.5 shrink-0 text-mid-gray transition-transform duration-150
-            group-hover:translate-x-0.5 sm:mt-0"
-        />
+        {/* The row's own answer to the click. Swapped in place of the
+            chevron rather than added beside it, so nothing reflows. */}
+        <span className="mt-0.5 flex shrink-0 items-center sm:mt-0">
+          <LinkPending spinner>
+            <IconChevronRight
+              size={16}
+              className="text-mid-gray transition-transform duration-150
+                group-hover:translate-x-0.5"
+            />
+          </LinkPending>
+        </span>
       </Link>
     </li>
   );
@@ -293,6 +306,7 @@ export default async function DashboardPage({
         seoRepo.latestAuditScore(site.id),
       ]);
       const updates = snap ? pendingUpdates(snap.payload) : undefined;
+      const pluginUpdates = snap ? pendingPluginUpdates(snap.payload) : 0;
       const grade = g?.grade;
       const { severity, reasons } = siteAttention({ status: site.status, updates, grade });
       return {
@@ -301,6 +315,7 @@ export default async function DashboardPage({
         severity,
         reasons,
         updates,
+        pluginUpdates,
         grade,
         seo: score ?? undefined,
       };
@@ -332,6 +347,26 @@ export default async function DashboardPage({
   // empty Staging tab that used to announce "No sites connected yet" over a
   // dozen healthy production sites, and hide "Connect site" while doing it.
   const anyConnected = rows.length > 0;
+
+  // Sites in THIS tab with a plugin update waiting. Derived from the same
+  // snapshot numbers the rows display, so the button can never claim work the
+  // page does not show — and gated on the same pair the action enforces.
+  const updateTargets = visible.filter(
+    (r) =>
+      r.site.status !== "disabled" &&
+      r.pluginUpdates > 0 &&
+      canAccessSite(viewer, r.site.id, "manage"),
+  );
+  const pendingUpdateCount = updateTargets.reduce((n, r) => n + r.pluginUpdates, 0);
+  // Named, not just counted — but bounded, so a large fleet does not turn the
+  // confirmation into a wall of text nobody reads, which would defeat the
+  // point of naming them at all. At today's scale every site fits.
+  const UPDATE_NAMES_SHOWN = 10;
+  const updateNames = updateTargets.length <= UPDATE_NAMES_SHOWN
+    ? updateTargets.map((r) => r.site.name).join(", ")
+    : `${updateTargets.slice(0, UPDATE_NAMES_SHOWN).map((r) => r.site.name).join(", ")} ` +
+      `and ${updateTargets.length - UPDATE_NAMES_SHOWN} more`;
+  const canUpdateAll = can(viewer, "wp_toolkit.manage") && updateTargets.length > 0;
   const otherEnv: SiteEnvironment = activeEnv === "production" ? "staging" : "production";
   const subtitle =
     total === 0
@@ -364,6 +399,38 @@ export default async function DashboardPage({
                       "WordPress install and running code there. Jobs run in the background over the next " +
                       "minute or so; this doesn't refresh anything immediately.",
                     confirmLabel: "Queue refresh",
+                  }}
+                />
+              )}
+              {canUpdateAll && (
+                <ManageForm
+                  action={updateAllPluginsAction.bind(null, activeEnv)}
+                  label={`Update plugins on ${updateTargets.length} site${updateTargets.length === 1 ? "" : "s"}`}
+                  pendingLabel="Queuing…"
+                  variant="outline"
+                  icon={<IconPlugins size={16} />}
+                  confirm={{
+                    title:
+                      `Update ${pendingUpdateCount} plugin${pendingUpdateCount === 1 ? "" : "s"} across ` +
+                      `${updateTargets.length} ${activeEnv} site${updateTargets.length === 1 ? "" : "s"}?`,
+                    // Names the sites rather than only counting them. This
+                    // writes to live WordPress installs and cannot be undone
+                    // by running it again, so the reader is owed the list, not
+                    // a number they have to go and reconcile.
+                    description:
+                      `${updateNames} — every plugin with an ` +
+                      "available update will be updated on each. Plugin updates can change how a " +
+                      "site behaves, and " +
+                      (activeEnv === "production"
+                        ? "these are live sites your clients' visitors are using right now. "
+                        : "these are staging copies. ") +
+                      "The work is queued and runs in the background over the next few minutes; " +
+                      "you'll be taken to a page showing each site's progress.",
+                    confirmLabel: "Queue updates",
+                    // Production writes get the destructive treatment; the
+                    // same action on staging does not, because a confirmation
+                    // that is always red stops meaning anything.
+                    tone: activeEnv === "production" ? "danger" : "default",
                   }}
                 />
               )}

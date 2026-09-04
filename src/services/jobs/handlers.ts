@@ -188,5 +188,32 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         if (!deletedAlready) throw new Error(result.error ?? "Bulk action failed");
       }
     },
+    /**
+     * Every plugin with an available update, on one site.
+     *
+     * A sibling of bulk_manage rather than a variant of it: bulk_manage
+     * carries the id of a specific item, and there is no such id here. Which
+     * plugins get updated is decided by the site when the job runs, from its
+     * own update transient — deliberately, because the alternative is to
+     * freeze a list at enqueue time and then update plugins against
+     * fortnight-old inventory.
+     *
+     * One job per site, all sharing a batch_id, so a failure on one site
+     * leaves the others to finish and the batch page can show which.
+     */
+    update_all_plugins: async ({ job }) => {
+      if (!job.site_id) throw new Error("update_all_plugins requires a site_id");
+      const p = job.payload as { actor?: unknown };
+      if (typeof p?.actor !== "string") {
+        throw new Error("update_all_plugins payload malformed");
+      }
+      const result = await manageSite(
+        { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor,
+        { kind: "update_all_plugins" },
+      );
+      // "Nothing to update" is a success in the PHP (see manage/service.ts):
+      // a site that raced ahead of the inventory is not a failed job.
+      if (!result.ok) throw new Error(result.error ?? "Plugin updates failed");
+    },
   };
 }

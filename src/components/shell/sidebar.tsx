@@ -8,6 +8,7 @@ import { logout } from "@/app/login/actions";
 import { buttonClass, iconButtonClass } from "@/components/ui/styles";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { SitePalette, SitePaletteTrigger, type PaletteSite } from "./site-palette";
+import { LinkPending } from "./nav-progress";
 import {
   IconClose, IconLogout, IconMarketplace, IconMenu, IconPlus, IconSites, IconUsers,
 } from "@/components/ui/icons";
@@ -68,6 +69,12 @@ function NavLinks({
           >
             <Icon size={18} className="shrink-0" />
             {label}
+            {/* The item you clicked stops looking identical to the ones you
+                didn't. The global bar says "something is loading"; this says
+                "yes, that one". */}
+            <span className="ml-auto flex items-center">
+              <LinkPending spinner />
+            </span>
           </Link>
         );
       })}

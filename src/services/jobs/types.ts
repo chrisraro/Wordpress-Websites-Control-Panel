@@ -5,7 +5,12 @@ export type JobType =
   // must unpack that field to tell plugins and themes apart.
   | "snapshot_refresh" | "security_scan" | "vuln_feed_refresh"
   | "plugin_install" | "seo_scan" | "geogrid_run" | "report_generate"
-  | "bulk_manage";
+  | "bulk_manage"
+  // One site's worth of "update every plugin that has an update". Distinct
+  // from bulk_manage, which names a specific item to act on across sites:
+  // here the set of plugins is decided by the site itself at run time, and
+  // is not knowable when the job is queued.
+  | "update_all_plugins";
 export type JobStatus = "pending" | "running" | "awaiting_callback" | "done" | "failed";
 
 export interface JobRow {
@@ -62,4 +67,5 @@ export const JOB_TYPE_LABEL: Record<JobType, string> = {
   geogrid_run: "GeoGrid run",
   report_generate: "Report generation",
   bulk_manage: "Bulk action",
+  update_all_plugins: "Plugin updates",
 };

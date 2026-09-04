@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LinkPending } from "@/components/shell/nav-progress";
 import {
   IconMap, IconOverview, IconPlugins, IconReport, IconSearch, IconShield, IconThemes,
 } from "@/components/ui/icons";
@@ -38,7 +39,9 @@ export function SiteTabs({ siteId, active }: { siteId: string; active: SiteTabKe
                       : "text-mid-gray hover:text-ink"
                   }`}
               >
-                <Icon size={16} className="shrink-0" />
+                <LinkPending spinner>
+                  <Icon size={16} className="shrink-0" />
+                </LinkPending>
                 {label}
               </Link>
             </li>

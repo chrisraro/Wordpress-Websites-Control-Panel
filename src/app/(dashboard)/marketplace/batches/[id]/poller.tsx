@@ -32,17 +32,23 @@ const BULK_VERB: Record<string, string> = {
 };
 
 /**
- * This page renders two different batch shapes: `plugin_install` jobs fan one
- * install out across many sites, `bulk_manage` jobs fan many bulk actions
- * (update/activate/deactivate/delete) out across one site's items. Neither
- * the heading nor the completion toast may assert "install" for a batch that
- * deleted things — that inaccuracy is exactly what this function exists to
- * prevent. Every job in one batch shares the same kind/target, so the first
- * row is representative of the whole batch.
+ * This page renders three different batch shapes: `plugin_install` jobs fan
+ * one install out across many sites, `bulk_manage` jobs fan many bulk actions
+ * (update/activate/deactivate/delete) out across one site's items, and
+ * `update_all_plugins` jobs fan a whole-site plugin update across many sites.
+ * Neither the heading nor the completion toast may assert "install" for a
+ * batch that deleted things — that inaccuracy is exactly what this function
+ * exists to prevent. Every job in one batch shares the same kind/target, so
+ * the first row is representative of the whole batch.
  */
 function describeBatch(jobs: BatchJob[]): string {
   const first = jobs[0];
   if (!first) return "Batch";
+  // The only shape whose unit is sites rather than items: each job is one
+  // site, and how many plugins it updates is not known until it runs.
+  if (first.type === "update_all_plugins") {
+    return `Updating plugins on ${jobs.length} site${jobs.length === 1 ? "" : "s"}`;
+  }
   // "plugin(s)" is a schema string, not a sentence. The count is known here.
   const kind = first.target === "theme" ? "theme" : "plugin";
   const noun = `${jobs.length} ${kind}${jobs.length === 1 ? "" : "s"}`;

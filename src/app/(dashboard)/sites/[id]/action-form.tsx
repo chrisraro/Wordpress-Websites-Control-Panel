@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useActionState } from "react";
+import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "@/components/ui/styles";
@@ -17,6 +18,14 @@ export type ManageResult = {
    * actions don't set this and keep using `success`/`label`.
    */
   message?: string;
+  /**
+   * Where the real result of this action lives. Set by actions whose output
+   * is a page rather than a sentence — queueing a batch produces a progress
+   * view, and a toast saying "queued 8 sites" while leaving you on the
+   * dashboard makes you go and find it. Navigation happens after the toast,
+   * so the outcome is still announced.
+   */
+  href?: string;
 } | null;
 export type ManageFormAction = (prevState: ManageResult, formData: FormData) => Promise<ManageResult>;
 
@@ -57,6 +66,7 @@ export function ManageForm({
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const { toast } = useToast();
+  const router = useRouter();
   // useActionState hands back a fresh object per run, so this fires once per
   // completed submission rather than once per render.
   const lastReported = useRef<ManageResult>(null);
@@ -66,6 +76,7 @@ export function ManageForm({
     lastReported.current = state;
     if (state.ok) {
       toast({ tone: "success", title: state.message ?? success ?? label });
+      if (state.href) router.push(state.href);
     } else {
       toast({
         tone: "error",
@@ -73,7 +84,7 @@ export function ManageForm({
         description: state.error ?? "The site did not report a reason.",
       });
     }
-  }, [state, label, success, toast]);
+  }, [state, label, success, toast, router]);
 
   const busyLabel = pendingLabel ?? "Working…";
 

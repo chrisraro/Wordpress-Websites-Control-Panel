@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { badgeClass } from "@/components/ui/styles";
+import { LinkPending } from "@/components/shell/nav-progress";
 import type { SiteEnvironment } from "@/services/sites/types";
 
 export interface EnvTabCounts {
@@ -79,6 +80,7 @@ export function EnvTabs({
                     {counts.needsAttention}
                   </span>
                 )}
+                <LinkPending />
                 <span className="sr-only">
                   {label}, {counts.total} {counts.total === 1 ? "site" : "sites"}
                   {counts.needsAttention > 0 && `, ${counts.needsAttention} needing attention`}

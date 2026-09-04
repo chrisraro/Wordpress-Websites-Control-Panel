@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LinkPending } from "./nav-progress";
 import { IconChevronRight } from "@/components/ui/icons";
 
 export interface Crumb {
@@ -25,6 +26,7 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
                   className="truncate text-mid-gray transition-colors duration-150 hover:text-ink"
                 >
                   {item.label}
+                  <LinkPending />
                 </Link>
               ) : (
                 <span
