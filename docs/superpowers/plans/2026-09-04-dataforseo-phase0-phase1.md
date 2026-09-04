@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: ROADMAP — approved, parked, not started.** Nothing here has been
+built. Pick it up by starting at Task 1; the plan assumes no memory of the
+conversation that produced it. Spec: `docs/superpowers/specs/2026-09-04-dataforseo-seo-expansion-design.md`.
+
 **Goal:** Add backlink data to the panel from DataForSEO, behind a provider port with a spend ledger and budget caps that make every metered call visible and refusable before it runs.
 
 **Architecture:** A provider port (`ExternalSeoProvider`) with two implementations — a deterministic stub used in dev and every test, and a DataForSEO adapter. A new `seo_external_scan` job type runs the provider and writes results into the existing `seo_snapshots` table, whose `source` column is unconstrained free text. Two new tables: `dataforseo_spend` (a ledger of every metered call) and `seo_keyword_cache` (unused in these phases; created now because it belongs in the same migration). Phase 0 is entirely stub-driven and cannot spend money; Phase 1 adds the live adapter and the UI.
