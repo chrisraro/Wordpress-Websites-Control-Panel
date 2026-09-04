@@ -57,7 +57,7 @@ function fromFeedRow(r: Record<string, unknown>): FeedEntry {
 export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
   return {
     async replaceFeed(entries) {
-      // Chunked upsert: the scanner feed is thousands of rows.
+      // Chunked upsert: the feed is tens of thousands of rows.
       for (let i = 0; i < entries.length; i += 500) {
         const chunk = entries.slice(i, i + 500).map(toFeedRow);
         const { error } = await db.from("vuln_feed").upsert(chunk, { onConflict: "id" });

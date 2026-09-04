@@ -60,7 +60,12 @@ describe("parseWordfenceFeed", () => {
 describe("fetchWordfenceFeed", () => {
   it("sends Bearer auth and parses the body", async () => {
     const fetchImpl = (async (url: unknown, init?: RequestInit) => {
-      expect(String(url)).toContain("/v3/vulnerabilities/scanner");
+      // The production feed specifically: the scanner feed parses fine but
+      // carries no CVSS at all, which silently flattens every security grade
+      // to a single severity. Pinned so a "cheaper, smaller feed" change has
+      // to argue with this comment first.
+      expect(String(url)).toContain("/v3/vulnerabilities/production");
+      expect(String(url)).not.toContain("/scanner");
       expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
       return new Response(JSON.stringify(SAMPLE), { status: 200 });
     }) as typeof fetch;

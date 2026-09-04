@@ -12,8 +12,27 @@ export interface FeedEntry {
   fixed_in: string | null;
 }
 
-export const WORDFENCE_SCANNER_URL =
-  "https://www.wordfence.com/api/intelligence/v3/vulnerabilities/scanner";
+/**
+ * The production feed, deliberately, not the scanner feed.
+ *
+ * Both are free, both need the same v3 API key, and both were fetched and
+ * parsed with this same parser to compare them. The scanner feed is a
+ * detection-only format: measured against the live response, 0 of its 42,279
+ * entries carried a CVSS score and 0 carried a CVE. That is fatal here rather
+ * than merely thin, because `severityFromCvss(null)` returns null and
+ * `computeGrade` weights a null severity as "low" (-5). On the scanner feed
+ * every vulnerability on every site would score identically, so a critical
+ * unauthenticated RCE and a trivial admin-only XSS would move a security
+ * grade by exactly the same amount — the grade would still be a number, and
+ * it would be meaningless in precisely the cases it exists for.
+ *
+ * The production feed measured 43,060 entries (more, not fewer), 100% with a
+ * CVSS score, 92% with a CVE, split 2,880 critical / 8,638 high / 31,372
+ * medium / 170 low. It costs ~155MB per fetch against the scanner feed's
+ * ~79MB, which is the only thing traded away.
+ */
+export const WORDFENCE_FEED_URL =
+  "https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production";
 
 const TYPES = new Set(["plugin", "theme", "core"]);
 
@@ -65,7 +84,7 @@ export function parseWordfenceFeed(raw: unknown): FeedEntry[] {
 export async function fetchWordfenceFeed(
   apiKey: string, fetchImpl: typeof fetch = fetch,
 ): Promise<FeedEntry[]> {
-  const res = await fetchImpl(WORDFENCE_SCANNER_URL, {
+  const res = await fetchImpl(WORDFENCE_FEED_URL, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (res.status === 429) {
@@ -84,7 +103,7 @@ export async function fetchWordfenceFeed(
   if (!res.ok) throw new Error(`Wordfence feed request failed: HTTP ${res.status}`);
   const entries = parseWordfenceFeed(await res.json());
   if (entries.length === 0) {
-    // The scanner feed is never legitimately empty — a zero-entry parse means
+    // The feed is never legitimately empty — a zero-entry parse means
     // the response shape changed. Fail loudly so it lands in jobs.last_error.
     throw new Error("Wordfence feed parsed to 0 entries — response shape changed?");
   }
