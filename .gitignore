@@ -4,3 +4,6 @@ node_modules/
 .env
 *.tsbuildinfo
 next-env.d.ts
+
+# Scratch scripts used to probe live systems; never part of the app.
+*-tmp.mjs
