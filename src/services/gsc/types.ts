@@ -22,6 +22,19 @@ export interface GscVerification {
   files: GscFile[];
   /** A token stored by an SEO plugin, which renders it as a meta tag. */
   plugin: { name: string; token: string } | null;
+  /**
+   * google-site-verification TXT records on the site's hostname.
+   *
+   * Looked up from the panel rather than from the site, because DNS is not
+   * something a WordPress install can answer for reliably. Without this,
+   * three production sites here verified purely by DNS would each show "No
+   * verification" -- a badge crying wolf on healthy sites, which is worse
+   * than no badge, because it teaches people to stop reading it.
+   *
+   * Optional: absent means the lookup never ran (an older snapshot), which
+   * is not the same as an empty array meaning "looked, found none".
+   */
+  dns?: string[];
 }
 
 export type GscState =
@@ -92,6 +105,10 @@ export function gscStatus(v: GscVerification | undefined): GscStatus | null {
     }
   }
   if (v.plugin) methods.push(`${v.plugin.name} meta tag`);
+  // Named as domain-wide on purpose. A DNS record verifies the whole domain,
+  // so for the four sites here that live in a subdirectory it is the parent
+  // domain's record doing the work, not anything on this site.
+  if (v.dns && v.dns.length > 0) methods.push("DNS record (whole domain)");
 
   if (methods.length > 0) return { state: "installed", methods, problems };
   if (problems.length > 0) return { state: "malformed", methods, problems };

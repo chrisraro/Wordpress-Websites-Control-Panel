@@ -155,12 +155,42 @@ export interface InventoryDeps {
   mcp: McpFactory;
 }
 
+/**
+ * google-site-verification TXT records for a hostname.
+ *
+ * Never throws. A DNS failure means "we could not find out", and the caller
+ * stores an empty list rather than losing an entire inventory refresh over a
+ * resolver timeout -- the plugins and themes in that same payload are the
+ * reason the job exists.
+ */
+export async function lookupGscDns(host: string): Promise<string[]> {
+  try {
+    const { resolveTxt } = await import("node:dns/promises");
+    const records = await resolveTxt(host);
+    return records
+      .map((chunks) => chunks.join(""))
+      .filter((v) => /google-site-verification/i.test(v));
+  } catch {
+    return [];
+  }
+}
+
 export async function refreshSnapshot(deps: InventoryDeps, siteId: string): Promise<InventoryPayload> {
   const creds = await deps.sites.getSiteCredentials(siteId);
   if (!creds) throw new Error(`Site not found: ${siteId}`);
   const client = await connectToSite(deps.mcp, creds);
   try {
     const { payload, adminUsers } = await collectInventory(client);
+    // Folded in here rather than into the PHP: a WordPress host cannot be
+    // relied on to resolve DNS (dns_get_record is disabled on plenty of
+    // shared hosting), and the answer is about the domain, not the install.
+    if (payload.gsc) {
+      let host: string | null = null;
+      // mcp_endpoint carries the same hostname as the site URL, so the host
+      // comes free from credentials already loaded rather than a second read.
+      try { host = new URL(creds.mcp_endpoint).hostname; } catch { host = null; }
+      payload.gsc.dns = host ? await lookupGscDns(host) : [];
+    }
     await deps.snapshots.insertSnapshot(siteId, payload);
     await deps.adminUsers.upsertAdminUsers(siteId, adminUsers);
     return payload;

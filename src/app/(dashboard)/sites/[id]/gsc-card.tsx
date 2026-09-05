@@ -93,9 +93,10 @@ export function GscCard({
 
         {status?.state === "none" && (
           <p className="text-body text-mid-gray">
-            No verification file and no token stored by an SEO plugin. If {siteName} is already
-            verified, it is through DNS or a linked Google account — neither of which this panel
-            can see.
+            Nothing found: no verification file, no token stored by an SEO plugin, and no
+            google-site-verification DNS record on this hostname. If {siteName} is verified
+            anyway, it is through a linked Google Analytics or Tag Manager account, which this
+            panel cannot see.
           </p>
         )}
 

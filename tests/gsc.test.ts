@@ -41,6 +41,21 @@ describe("gscStatus", () => {
     expect(s.problems[0]).toContain("empty or unreadable");
   });
 
+  it("counts a DNS record as installed, and names it domain-wide", () => {
+    // Three production sites here are verified purely by DNS. Without this
+    // they each showed "No verification" -- a badge crying wolf on healthy
+    // sites, which is worse than no badge because it teaches people to stop
+    // reading it. Named "whole domain" because that is what a DNS record
+    // covers: for the subdirectory installs it is the parent domain's record.
+    const s = gscStatus({ files: [], plugin: null, dns: ["google-site-verification=abc"] })!;
+    expect(s.state).toBe("installed");
+    expect(s.methods).toEqual(["DNS record (whole domain)"]);
+  });
+
+  it("treats an empty dns array as looked-and-found-none", () => {
+    expect(gscStatus({ files: [], plugin: null, dns: [] })!.state).toBe("none");
+  });
+
   it("counts an SEO plugin's stored token as installed", () => {
     const s = gscStatus({ files: [], plugin: { name: "Rank Math", token: "abc" } })!;
     expect(s.state).toBe("installed");
