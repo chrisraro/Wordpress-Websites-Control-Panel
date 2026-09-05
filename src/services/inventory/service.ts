@@ -48,6 +48,57 @@ $core = null;
 if (is_object($cu) && !empty($cu->updates)) {
   foreach ($cu->updates as $u) { if (isset($u->response) && $u->response === 'upgrade') { $core = $u->version; break; } }
 }
+// Google Search Console verification, in the two places this panel can
+// reach it: a file in the document root, and whatever an SEO plugin stores
+// to render as a meta tag. Read in the same round trip as everything else.
+//
+// The file's CONTENT is captured, not just its name. A file whose body names
+// a different file is the classic failure -- one site's verification copied
+// to another and renamed -- and it looks perfectly present until Google
+// rejects it. Only the declared name is kept, never the whole body.
+$gsc_files = array();
+$dh = @opendir(ABSPATH);
+if ($dh !== false) {
+  while (($f = readdir($dh)) !== false) {
+    if (stripos($f, 'google') !== 0) { continue; }
+    if (substr(strtolower($f), -5) !== '.html') { continue; }
+    $p = ABSPATH . $f;
+    if (!is_file($p) || filesize($p) > 4096) { continue; }
+    $body = trim((string) @file_get_contents($p));
+    $declared = null;
+    // No backslashes in this pattern, deliberately. It lives in a JS
+    // template literal, where \s collapses to a bare 's' and the pattern
+    // would then demand a literal letter s after the colon and match
+    // nothing -- which is exactly what the first live test showed. POSIX
+    // classes say the same thing and cannot be degraded by a layer of
+    // string escaping.
+    if (preg_match('/google-site-verification:[[:space:]]*(google[0-9a-zA-Z]+[.]html)/i', $body, $m)) {
+      $declared = $m[1];
+    }
+    $gsc_files[] = array('name' => $f, 'declared' => $declared);
+  }
+  closedir($dh);
+}
+$gsc_plugin = null;
+$rm = get_option('rank-math-options-general');
+if (is_array($rm) && !empty($rm['google_verify'])) {
+  $gsc_plugin = array('name' => 'Rank Math', 'token' => (string) $rm['google_verify']);
+}
+if ($gsc_plugin === null) {
+  $yo = get_option('wpseo');
+  if (is_array($yo) && !empty($yo['googleverify'])) {
+    $gsc_plugin = array('name' => 'Yoast', 'token' => (string) $yo['googleverify']);
+  }
+}
+if ($gsc_plugin === null) {
+  $ai = get_option('aioseo_options');
+  if (is_string($ai)) {
+    $d = json_decode($ai, true);
+    $g = isset($d['webmasterTools']['google']) ? $d['webmasterTools']['google'] : '';
+    if ($g) { $gsc_plugin = array('name' => 'All in One SEO', 'token' => (string) $g); }
+  }
+}
+
 $admins = array();
 foreach (get_users(array('role' => 'administrator', 'fields' => array('ID', 'user_login', 'user_email'))) as $u) {
   $admins[] = array('ID' => (int) $u->ID, 'user_login' => $u->user_login, 'user_email' => $u->user_email);
@@ -63,6 +114,7 @@ return json_encode(array(
   // otherwise, and its visitors see the maintenance page indefinitely.
   'maintenance' => file_exists(ABSPATH . '.maintenance'),
   'core_update' => $core,
+  'gsc' => array('files' => $gsc_files, 'plugin' => $gsc_plugin),
   'plugins' => $plugins,
   'themes' => $themes,
   'admin_users' => $admins,

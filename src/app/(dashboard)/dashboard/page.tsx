@@ -10,6 +10,7 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
 import { pendingUpdates, pendingPluginUpdates } from "@/services/inventory/types";
+import { gscStatus } from "@/services/gsc/types";
 import {
   siteAttention, isStagingSite, siteEnvironment, SEVERITY_RANK, type Severity,
 } from "@/services/sites/portfolio";
@@ -53,6 +54,8 @@ interface Row {
   updates?: number;
   /** Plugins only — what the fleet-wide plugin update will actually touch. */
   pluginUpdates: number;
+  /** Search Console verification, from the same snapshot. null = unmeasured. */
+  gsc: ReturnType<typeof gscStatus>;
   grade?: string;
   seo?: number;
 }
@@ -70,10 +73,21 @@ interface Row {
  * would drift the moment a metric is added.
  */
 function MetricBadges({
-  updates, grade, seo,
-}: { updates?: number; grade?: string; seo?: number }) {
+  updates, grade, seo, gsc,
+}: {
+  updates?: number; grade?: string; seo?: number;
+  gsc?: ReturnType<typeof gscStatus>;
+}) {
   return (
     <>
+      {/* Only when something is wrong. A row carrying "Verification
+          installed" on all twelve sites spends the reader's attention to say
+          nothing, and this page exists to surface exceptions -- the per-site
+          SEO tab is where the full state lives either way. Deliberately says
+          nothing when gsc is null, which means "not measured since this
+          check existed", not "missing". */}
+      {gsc?.state === "none" && <StatusBadge tone="warn">No GSC</StatusBadge>}
+      {gsc?.state === "malformed" && <StatusBadge tone="bad">GSC broken</StatusBadge>}
       {updates !== undefined && updates > 0 && (
         <StatusBadge tone="warn">
           {updates}&nbsp;update{updates === 1 ? "" : "s"}
@@ -86,7 +100,7 @@ function MetricBadges({
 }
 
 function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
-  const { site, staging, severity, reasons, updates, grade, seo } = row;
+  const { site, staging, severity, reasons, updates, grade, seo, gsc } = row;
   return (
     <li className="border-b border-hairline last:border-0">
       <Link
@@ -157,7 +171,7 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
               keys on input device rather than width for exactly this reason. */}
           {!showReasons && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:hidden">
-              <MetricBadges updates={updates} grade={grade} seo={seo} />
+              <MetricBadges updates={updates} grade={grade} seo={seo} gsc={gsc} />
             </div>
           )}
         </div>
@@ -169,7 +183,7 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
             problems to state, so the metrics are what there is to show. */}
         {!showReasons && (
           <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-            <MetricBadges updates={updates} grade={grade} seo={seo} />
+            <MetricBadges updates={updates} grade={grade} seo={seo} gsc={gsc} />
           </div>
         )}
 
@@ -307,6 +321,7 @@ export default async function DashboardPage({
       ]);
       const updates = snap ? pendingUpdates(snap.payload) : undefined;
       const pluginUpdates = snap ? pendingPluginUpdates(snap.payload) : 0;
+      const gsc = gscStatus(snap?.payload.gsc);
       const grade = g?.grade;
       const { severity, reasons } = siteAttention({ status: site.status, updates, grade });
       return {
@@ -316,6 +331,7 @@ export default async function DashboardPage({
         reasons,
         updates,
         pluginUpdates,
+        gsc,
         grade,
         seo: score ?? undefined,
       };

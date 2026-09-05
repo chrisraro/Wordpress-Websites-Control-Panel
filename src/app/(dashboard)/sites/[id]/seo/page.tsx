@@ -5,8 +5,11 @@ import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { requireSiteAccess } from "@/lib/authz/server";
 import { readDbFor } from "@/lib/authz/db";
-import { can } from "@/lib/authz/decide";
+import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSeoRepo } from "@/services/seo/repo";
+import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { gscStatus } from "@/services/gsc/types";
+import { GscCard } from "../gsc-card";
 import { trendPoints } from "@/services/seo/types";
 import type {
   AiVisibilityPayload, AuditPayload, KeywordsPayload, LinkStats, PageScore, PsiPayload,
@@ -55,6 +58,16 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
   if (!site) notFound();
 
   const seo = supabaseSeoRepo(db);
+  // Verification state rides the inventory snapshot (see InventoryPayload.gsc),
+  // so this is one bounded read rather than a live call to the site.
+  const gscSnapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
+  const gscVerification = gscSnapshot?.payload.gsc;
+  const gsc = gscStatus(gscVerification);
+  // Must mirror gsc-actions.ts's gate exactly. Installing a verification
+  // writes a file into the document root, so it takes wp_toolkit.manage plus
+  // a per-site `manage` grant -- not seo.run, which only permits reading.
+  // A button gated more loosely than its action is a button that fails.
+  const canManageGsc = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
   const [latest, auditHistory, lastRun] = await Promise.all([
     seo.latestBySource(id), seo.history(id, "rankmath_audit", 20), seo.lastRunAt(id),
   ]);
@@ -88,6 +101,17 @@ export default async function SeoPage({ params }: { params: Promise<{ id: string
       />
       <SiteHeading site={site} />
       <SiteTabs siteId={id} active="seo" />
+
+      <div className="mb-4">
+        <GscCard
+          siteId={id}
+          siteName={site.name}
+          siteUrl={site.url}
+          verification={gscVerification}
+          status={gsc}
+          canManage={canManageGsc}
+        />
+      </div>
 
       <div className={`${cardClass} mb-4 flex flex-wrap items-center justify-between gap-6 p-5`}>
         <div className="flex flex-wrap items-center gap-6">

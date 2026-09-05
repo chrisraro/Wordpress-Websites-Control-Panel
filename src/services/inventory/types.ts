@@ -1,3 +1,4 @@
+import type { GscVerification } from "@/services/gsc/types";
 export interface PluginInfo {
   /** Plugin basename, e.g. "akismet/akismet.php" — the identifier WP APIs use */
   file: string;
@@ -43,6 +44,22 @@ export interface InventoryPayload {
    */
   maintenance?: boolean;
   core_update: string | null;
+  /**
+   * Google Search Console verification found on the site.
+   *
+   * Collected here rather than by a separate probe because it rides the
+   * inventory's existing round trip for free, and because the dashboard
+   * already loads the latest snapshot for every site — a badge on twelve
+   * rows costs nothing extra this way, where twelve live MCP calls would
+   * make the page unusable.
+   *
+   * Optional for the same reason `maintenance` is: snapshots taken before
+   * this existed have no value, and `undefined` must keep meaning "not
+   * measured" rather than collapsing into "nothing installed". Telling
+   * someone their verification is missing when it was simply never looked
+   * for sends them to fix something that may not be broken.
+   */
+  gsc?: GscVerification;
   plugins: PluginInfo[];
   themes: ThemeInfo[];
 }
