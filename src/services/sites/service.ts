@@ -1,3 +1,4 @@
+import { discoverMcpEndpoint } from "@/lib/mcp/discover";
 import { connectToSite } from "@/lib/mcp/connect";
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secrets";
 import { McpAuthError, McpConnectionError } from "@/lib/mcp/errors";
@@ -21,6 +22,14 @@ export interface SitesDeps {
   jobs: JobsRepo;
 }
 
+/**
+ * The endpoint a site is assumed to use before anything is known about it.
+ *
+ * Kept as the fallback and the stored-value default, but `addSite` now asks
+ * the site what it actually exposes (see discoverMcpEndpoint): the route name
+ * varies by install, and assuming it produced a bare `rest_no_route` 404 with
+ * no explanation.
+ */
 export function mcpEndpointFor(url: string): string {
   return `${url.replace(/\/+$/, "")}/wp-json/mcp/novamira`;
 }
@@ -28,7 +37,10 @@ export function mcpEndpointFor(url: string): string {
 export async function addSite(
   deps: SitesDeps, input: NewSiteInput, actorId: string,
 ): Promise<{ id: string }> {
-  const endpoint = mcpEndpointFor(input.url);
+  // Ask the site rather than assume. A site whose MCP server carries the
+  // plugin's default name -- or any other name -- used to fail here with an
+  // unexplained 404.
+  const { endpoint } = await discoverMcpEndpoint(input.url);
   let abilities: string[];
   const client = await connectOrExplain(deps.mcp, endpoint, input.wpUsername, input.appPassword);
   try {
@@ -181,11 +193,13 @@ export async function reconnectSite(
   const site = await deps.repo.getSite(id);
   if (!site) throw new Error("Site not found");
 
-  // Derived from the site's own URL rather than taken from the form: the
-  // endpoint is not something a person should have to retype, and letting it
-  // be edited here would turn a credential fix into a silent re-pointing of
-  // the site at a different host.
-  const endpoint = mcpEndpointFor(site.url);
+  // The endpoint stored when the site was connected, never one recomputed
+  // from the URL and never one taken from the form. Recomputing would break
+  // every site whose MCP server is not named "novamira" -- discovery exists
+  // precisely because that name varies -- and accepting it from the form
+  // would turn a credential fix into a silent re-pointing at another host.
+  const creds = await deps.repo.getSiteCredentials(id);
+  const endpoint = creds?.mcp_endpoint ?? mcpEndpointFor(site.url);
 
   let abilities: string[];
   const client = await connectOrExplain(deps.mcp, endpoint, input.wpUsername, input.appPassword);

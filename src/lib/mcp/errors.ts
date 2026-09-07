@@ -54,6 +54,17 @@ export function mapConnectError(e: unknown): McpError {
 export function friendlySiteError(raw: unknown): string {
   const msg = raw instanceof Error ? raw.message : String(raw ?? "");
 
+  // WordPress's own REST error for "that namespace is not registered".
+  // Reaching this proves the site is up and its REST API works, so the
+  // useful thing to say is which part is missing -- not to echo the JSON.
+  if (/rest_no_route/i.test(msg)) {
+    return (
+      "WordPress is responding, but it has no MCP endpoint at that address. " +
+      "That usually means the Novamira plugin is not active on this site, or its " +
+      "MCP server is registered under a different name."
+    );
+  }
+
   // Cloudflare's managed challenge / "Just a moment..." interstitial.
   if (/just a moment|cf_chl_opt|cf-browser-verification|__cf_chl/i.test(msg)) {
     return (

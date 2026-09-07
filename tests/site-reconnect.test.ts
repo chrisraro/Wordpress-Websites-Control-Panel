@@ -27,6 +27,16 @@ function repo(over: Partial<SitesRepo> = {}) {
         created_at: "", updated_at: "",
       };
     },
+    // reconnectSite reads the endpoint that was stored when the site was
+    // connected, rather than recomputing it from the URL: the MCP server's
+    // route name varies per install, so a recomputed default would break
+    // every site that is not called "novamira".
+    async getSiteCredentials() {
+      return {
+        mcp_endpoint: "https://staging.elnidoguide.ph/wp-json/mcp/mcp-adapter-default-server",
+        wp_username: "admin", app_password_encrypted: "x",
+      };
+    },
     async updateSiteCredentials(_id: string, creds: unknown) { calls.updated.push(creds); },
     async insertActivity(e: unknown) { calls.activity.push(e); },
   } as unknown as SitesRepo;
@@ -109,5 +119,26 @@ describe("reconnectSite", () => {
     expect(logged).toContain("site.reconnect");
     expect(logged).toContain("admin");
     expect(logged).not.toContain(INPUT.appPassword);
+  });
+});
+
+describe("reconnectSite endpoint", () => {
+  it("connects to the stored endpoint, not one recomputed from the URL", async () => {
+    // The bug this prevents: a site added with a discovered MCP server name
+    // ("mcp-adapter-default-server", say) would be reconnected against the
+    // assumed "/mcp/novamira" and fail with rest_no_route -- the same 404
+    // that discovery exists to eliminate.
+    const { repo: r } = repo();
+    let asked = "";
+    const mcp = (async (opts: { endpoint: string }) => {
+      asked = opts.endpoint;
+      return {
+        async discoverAbilities() { return { abilities: [{ name: "a/one" }] }; },
+        async close() {},
+      };
+    }) as never;
+    await reconnectSite(deps(r, mcp), "site-1", INPUT, "user-1");
+    expect(asked).toBe("https://staging.elnidoguide.ph/wp-json/mcp/mcp-adapter-default-server");
+    expect(asked).not.toContain("/mcp/novamira");
   });
 });
