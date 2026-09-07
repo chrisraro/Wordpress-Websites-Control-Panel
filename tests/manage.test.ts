@@ -200,3 +200,70 @@ describe("manageSite", () => {
     expect(res.error).toMatch(/not found/i);
   });
 });
+
+/**
+ * The self-update fatal.
+ *
+ *   PHP Fatal error ... novamira/vendor/jetpack-autoloader/class-php-autoloader.php:102
+ *   #5 WP\MCP\Transport\HttpTransport->handle_request(Object(WP_REST_Request))
+ *
+ * update_all_plugins called bulk_upgrade() on every plugin with a pending
+ * update -- including `novamira`, the plugin serving that very request. The
+ * upgrade replaced its directory, execution returned up the stack into files
+ * that no longer existed, and the next autoload fataled. All eight sites with
+ * pending updates had novamira in that list, so it failed on every one.
+ *
+ * Probing the live fleet also found `seo-by-rank-math` on the call stack of
+ * one site, which a hardcoded "skip novamira" would have missed.
+ */
+describe("buildPhp — self-update guard", () => {
+  const ALL = () => buildPhp({ kind: "update_all_plugins" });
+  const ONE = (file: string) => buildPhp({ kind: "update_plugin", file });
+
+  it("discovers what is executing from the call stack, not a hardcoded name", () => {
+    const php = ALL();
+    expect(php).toContain("debug_backtrace");
+    // A slug list would have been wrong the moment Rank Math joined the stack.
+    expect(php).not.toMatch(/'novamira'|"novamira"/);
+  });
+
+  it("filters the upgrade list before the upgrader sees it", () => {
+    const php = ALL();
+    expect(php).toContain("$__self[ocs_plugin_dir_of($__file)]");
+    expect(php.indexOf("$files = $kept;")).toBeGreaterThan(-1);
+    expect(php.indexOf("bulk_upgrade($files)")).toBeGreaterThan(php.indexOf("$files = $kept;"));
+  });
+
+  it("reports a skip rather than silently dropping it", () => {
+    // "Updated 11 plugins" while one was held back leaves an operator
+    // believing the site is current when it is not.
+    const php = ALL();
+    expect(php).toContain("Skipped ");
+    expect(php.slice(php.lastIndexOf("'ok' => true"))).toContain("$skipnote");
+  });
+
+  it("refuses a single update of the plugin serving the request", () => {
+    const php = ONE("novamira/novamira.php");
+    expect(php).toContain("cannot update itself");
+    // Decided before any upgrade machinery runs.
+    expect(php.indexOf("isset($__self[")).toBeLessThan(php.indexOf("bulk_upgrade"));
+  });
+
+  it("ships the runtime check for every plugin, not just the known one", () => {
+    // The panel cannot tell from a slug whether that plugin hooks the REST
+    // path on a given site -- El Nido Guide's Rank Math does, others' do not.
+    for (const f of ["akismet/akismet.php", "seo-by-rank-math/rank-math.php"]) {
+      expect(ONE(f)).toContain("isset($__self[ocs_plugin_dir_of($f)])");
+    }
+  });
+
+  it("emits PHP containing no backslashes at all", () => {
+    // Four bugs this session came from an escape sequence eaten by a layer of
+    // string handling -- most recently a PHP regex whose \s reached the site
+    // as a bare "s" and matched nothing. These snippets are written to need
+    // no escaping; this pins that they stay that way.
+    for (const php of [ALL(), ONE("akismet/akismet.php")]) {
+      expect(php).not.toContain(String.fromCharCode(92));
+    }
+  });
+});

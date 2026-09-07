@@ -35,6 +35,51 @@ require_once ABSPATH . 'wp-admin/includes/template.php';
 require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 `;
 
+
+/**
+ * Identifies the plugins whose code is on the current call stack.
+ *
+ * These must never be replaced by an upgrade running inside this same
+ * request, and one of them always is: the MCP plugin serving the call. When
+ * Plugin_Upgrader swaps that directory, execution returns up the stack into
+ * code whose files no longer exist, and the very next autoload fatals:
+ *
+ *   PHP Fatal error ... novamira/vendor/jetpack-autoloader/class-php-autoloader.php:102
+ *   #5 WP\MCP\Transport\HttpTransport->handle_request(...)
+ *
+ * That trace is the plugin deleting itself and then trying to keep running.
+ * Every site in this fleet had `novamira` sitting in its pending-updates
+ * list, so "Update all plugins" fataled on all of them.
+ *
+ * Read from debug_backtrace rather than a hardcoded slug on purpose. The
+ * dangerous set is "whatever is executing right now", which is a fact about
+ * the request, not a name -- and it correctly also covers a security or
+ * caching plugin that wraps the REST stack. A hardcoded "novamira" would be
+ * a guess that silently stops being true.
+ *
+ * wp_normalize_path gives forward slashes on every platform, so nothing here
+ * needs a backslash -- which also keeps this snippet safe from the escaping
+ * that a JS template literal would otherwise eat.
+ */
+const SELF_PLUGIN_GUARD = `
+$__self = array();
+$__base = wp_normalize_path(WP_PLUGIN_DIR) . '/';
+foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $__fr) {
+  if (empty($__fr['file'])) { continue; }
+  $__f = wp_normalize_path($__fr['file']);
+  if (strpos($__f, $__base) !== 0) { continue; }
+  $__d = strtok(substr($__f, strlen($__base)), '/');
+  if ($__d) { $__self[$__d] = true; }
+}
+`.trim();
+
+/** The plugin directory a "dir/file.php" plugin identifier belongs to. */
+const PLUGIN_DIR_OF = `
+if (!function_exists('ocs_plugin_dir_of')) {
+  function ocs_plugin_dir_of($file) { return strtok(wp_normalize_path($file), '/'); }
+}
+`.trim();
+
 // Literal ASCII messages only — anything dynamic must go through phpString().
 const OK = (msg: string) => `return json_encode(array('ok' => true, 'message' => '${msg}'));`;
 
@@ -58,7 +103,14 @@ ${OK("Plugin deactivated")}`.trim();
 
     case "update_plugin":
       return `${UPGRADER_PRELUDE}
+${SELF_PLUGIN_GUARD}
+${PLUGIN_DIR_OF}
 $f = ${phpString(pluginFile(action.file))};
+// Refusing beats fataling. Updating the plugin that is serving this request
+// destroys the code mid-call; the operator gets a 500 and no idea why.
+if (isset($__self[ocs_plugin_dir_of($f)])) {
+  return json_encode(array('ok' => false, 'error' => 'This plugin is the one serving the panel connection, so it cannot update itself from here. Update it from WP Admin > Plugins instead.'));
+}
 wp_update_plugins();
 $up = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
 $res = $up->bulk_upgrade(array($f));
@@ -69,17 +121,30 @@ ${OK("Plugin updated")}`.trim();
 
     case "update_all_plugins":
       return `${UPGRADER_PRELUDE}
+${SELF_PLUGIN_GUARD}
+${PLUGIN_DIR_OF}
 wp_update_plugins();
 $pu = get_site_transient('update_plugins');
 $files = (is_object($pu) && !empty($pu->response)) ? array_keys((array) $pu->response) : array();
-if (!$files) { return json_encode(array('ok' => true, 'message' => 'Nothing to update')); }
+// Hold back anything executing right now. Reported, never silently dropped:
+// an operator who is told "12 updated" while one was skipped will believe the
+// site is current when it is not.
+$kept = array();
+$skipped = array();
+foreach ($files as $__file) {
+  if (isset($__self[ocs_plugin_dir_of($__file)])) { $skipped[] = ocs_plugin_dir_of($__file); }
+  else { $kept[] = $__file; }
+}
+$files = $kept;
+$skipnote = $skipped ? ' Skipped ' . implode(', ', $skipped) . ': it serves this connection and cannot update itself here -- use WP Admin > Plugins.' : '';
+if (!$files) { return json_encode(array('ok' => true, 'message' => 'Nothing to update.' . $skipnote)); }
 $up = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
 $res = $up->bulk_upgrade($files);
 if (!is_array($res)) { return json_encode(array('ok' => false, 'error' => 'Bulk upgrade could not start (filesystem access?)')); }
 $failed = array();
 foreach ((array) $res as $file => $r) { if ($r === false || $r === null || is_wp_error($r)) { $failed[] = $file; } }
-if ($failed) { return json_encode(array('ok' => false, 'error' => 'Failed: ' . implode(', ', $failed))); }
-return json_encode(array('ok' => true, 'message' => 'Updated ' . count((array) $res) . ' plugin(s)'));`.trim();
+if ($failed) { return json_encode(array('ok' => false, 'error' => 'Failed: ' . implode(', ', $failed) . '.' . $skipnote)); }
+return json_encode(array('ok' => true, 'message' => 'Updated ' . count((array) $res) . ' plugin(s).' . $skipnote));`.trim();
 
     case "update_theme":
       return `${UPGRADER_PRELUDE}
