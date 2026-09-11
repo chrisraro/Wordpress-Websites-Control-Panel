@@ -10,7 +10,12 @@ export type JobType =
   // from bulk_manage, which names a specific item to act on across sites:
   // here the set of plugins is decided by the site itself at run time, and
   // is not knowable when the job is queued.
-  | "update_all_plugins";
+  | "update_all_plugins"
+  // Apply every hardening fix a site's latest security scan calls for, then
+  // rescan. The plan is computed when the job RUNS, from the checks current
+  // at that moment, so a fleet run queued against yesterday's scan still
+  // applies exactly what the site needs today.
+  | "harden";
 export type JobStatus = "pending" | "running" | "awaiting_callback" | "done" | "failed";
 
 export interface JobRow {
@@ -68,4 +73,5 @@ export const JOB_TYPE_LABEL: Record<JobType, string> = {
   report_generate: "Report generation",
   bulk_manage: "Bulk action",
   update_all_plugins: "Plugin updates",
+  harden: "Security hardening",
 };

@@ -49,6 +49,9 @@ function describeBatch(jobs: BatchJob[]): string {
   if (first.type === "update_all_plugins") {
     return `Updating plugins on ${jobs.length} site${jobs.length === 1 ? "" : "s"}`;
   }
+  if (first.type === "harden") {
+    return `Hardening ${jobs.length} site${jobs.length === 1 ? "" : "s"}`;
+  }
   // "plugin(s)" is a schema string, not a sentence. The count is known here.
   const kind = first.target === "theme" ? "theme" : "plugin";
   const noun = `${jobs.length} ${kind}${jobs.length === 1 ? "" : "s"}`;

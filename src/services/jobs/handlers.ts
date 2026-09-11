@@ -22,6 +22,7 @@ import { parseSections, REPORT_SECTIONS } from "@/services/reports/types";
 import { manageSite } from "@/services/manage/service";
 import { toManageAction } from "@/services/bulk/service";
 import type { BulkJobPayload } from "@/services/bulk/types";
+import { hardenSite, hardeningPlan } from "@/services/security/harden";
 
 interface PluginInstallPayload {
   source: InstallSource | { kind: "upload"; path: string };
@@ -205,6 +206,24 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       // "Nothing to update" is a success in the PHP (see manage/service.ts):
       // a site that raced ahead of the inventory is not a failed job.
       if (!result.ok) throw new Error(result.error ?? "Plugin updates failed");
+    },
+    harden: async ({ job }) => {
+      if (!job.site_id) throw new Error("harden requires a site_id");
+      const p = job.payload as { actor?: unknown };
+      if (typeof p?.actor !== "string") throw new Error("harden payload malformed");
+      const latest = await security.latestChecks(job.site_id);
+      const plan = latest ? hardeningPlan(latest.checks) : [];
+      // A site with nothing to fix is a success, not a failure: the fleet
+      // action filters these out, but a scan between queueing and running
+      // can legitimately clear the list.
+      if (plan.length === 0) return;
+      const out = await hardenSite({ sites, mcp: createSiteMcpClient }, job.site_id, p.actor, plan);
+      // Rescan so the grade reflects the new state without waiting for 02:00.
+      await securityScan({ sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id);
+      const failed = out.results.filter((r) => r.outcome === "failed");
+      if (out.error || failed.length) {
+        throw new Error(out.error ?? failed.map((f) => `${f.fix}: ${f.reason ?? "failed"}`).join("; "));
+      }
     },
   };
 }

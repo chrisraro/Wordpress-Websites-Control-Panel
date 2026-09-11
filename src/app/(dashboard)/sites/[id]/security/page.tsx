@@ -10,7 +10,10 @@ import { supabaseSecurityRepo } from "@/services/security/repo";
 import { SiteTabs } from "../tabs";
 import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
-import { runSecurityScanAction } from "../security-actions";
+import { runSecurityScanAction, hardenSiteAction } from "../security-actions";
+import { hardeningPlan, FIX_LABEL } from "@/services/security/harden";
+import { canAccessSite } from "@/lib/authz/decide";
+import { environmentSuffix } from "../site-heading";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import {
   Card, CardTitle, EmptyState, Stat, StatusBadge, statusInk, type StatusTone,
@@ -64,6 +67,34 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   const failing = checks.filter((c) => c.result === "fail").length;
   const scan = runSecurityScanAction.bind(null, id);
   const canRunScan = can(viewer, "security.run");
+
+  // Writes files into wp-content, so it takes the same pair as a plugin update
+  // -- not security.run, which only entitles someone to look. The list shown
+  // is recomputed inside the action from the same checks, so what the dialog
+  // names and what runs cannot drift apart.
+  const plan = hardeningPlan(checks);
+  const canHarden = plan.length > 0 && can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
+  const hardenButton = canHarden ? (
+    <ManageForm
+      action={hardenSiteAction.bind(null, id)}
+      label={`Harden (${plan.length})`}
+      pendingLabel="Hardening…"
+      variant="outline"
+      icon={<IconShield size={16} />}
+      confirm={{
+        title: `Apply ${plan.length} hardening fix${plan.length === 1 ? "" : "es"} to ${site.name}${environmentSuffix(site)}?`,
+        description: [
+          ...plan.map((f) => `• ${FIX_LABEL[f]}`),
+          "",
+          "Each one is a small file the panel writes into wp-content and can remove again. " +
+            "Nothing in wp-config.php or .htaccess is touched. Not included: renaming the admin user, " +
+            "and deleting inactive plugins — do those from Users and the Plugins tab. " +
+            "The site is rescanned afterwards.",
+        ].join(String.fromCharCode(10)),
+        confirmLabel: "Harden",
+      }}
+    />
+  ) : null;
 
   const scanButton = canRunScan ? (
     <ManageForm
@@ -127,7 +158,10 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
             </p>
           </div>
         )}
-        {scanButton}
+        <div className="flex flex-wrap gap-2">
+          {hardenButton}
+          {scanButton}
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">

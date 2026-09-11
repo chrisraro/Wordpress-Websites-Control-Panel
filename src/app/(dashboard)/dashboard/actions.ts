@@ -6,6 +6,8 @@ import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { pendingPluginUpdates } from "@/services/inventory/types";
+import { supabaseSecurityRepo } from "@/services/security/repo";
+import { hardeningPlan } from "@/services/security/harden";
 import { enqueueJob, enqueueBatch } from "@/services/jobs/service";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
@@ -205,6 +207,70 @@ export async function updateAllPluginsAction(
     message: alreadyQueued > 0
       ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
       : `Queued plugin updates for ${siteWord(count)}.`,
+    href: `/marketplace/batches/${batchId}`,
+  };
+}
+
+/**
+ * Queues security hardening for every site in one environment whose latest
+ * scan has something to fix — the fleet counterpart of the Harden button on a
+ * site's Security tab, in the same shape as updateAllPluginsAction.
+ *
+ * Scoped to the environment for the same reason: this writes into
+ * wp-content on live client sites, and a button under the Staging tab must
+ * not reach production. Enqueue only, one job per site under a batch id, so
+ * the batch page shows which sites finished and which did not.
+ */
+export async function hardenFleetAction(
+  env: SiteEnvironment,
+  _prevState?: unknown,
+  _formData?: FormData,
+): Promise<ManageResult> {
+  const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
+  const viewer = gate;
+
+  const db = createServiceSupabase();
+  const jobs = supabaseJobsRepo(db);
+  const security = supabaseSecurityRepo(db);
+  const sites = await listSitesForViewer(
+    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs },
+    viewer,
+  );
+  const candidates = sites.filter(
+    (s) =>
+      s.status !== "disabled" &&
+      siteEnvironment(s) === env &&
+      canAccessSite(viewer, s.id, "manage"),
+  );
+
+  const targets: string[] = [];
+  let alreadyQueued = 0;
+  for (const site of candidates) {
+    const latest = await security.latestChecks(site.id);
+    if (!latest || hardeningPlan(latest.checks).length === 0) continue;
+    if (await jobs.pendingExists("harden", site.id)) { alreadyQueued++; continue; }
+    targets.push(site.id);
+  }
+
+  if (targets.length === 0) {
+    return {
+      ok: false,
+      error: alreadyQueued > 0
+        ? "Already queued — those sites have hardening pending from an earlier run."
+        : `No ${env} site has a hardening fix waiting.`,
+    };
+  }
+
+  const { batchId, count } = await enqueueBatch(jobs, "harden", targets, { actor: user.id });
+  revalidatePath("/dashboard");
+  const siteWord = (n: number) => `${n} site${n === 1 ? "" : "s"}`;
+  return {
+    ok: true,
+    message: alreadyQueued > 0
+      ? `Queued hardening for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
+      : `Queued hardening for ${siteWord(count)}.`,
     href: `/marketplace/batches/${batchId}`,
   };
 }

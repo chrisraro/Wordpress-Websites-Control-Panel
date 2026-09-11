@@ -24,12 +24,13 @@ import { vulnFeedStatus } from "@/services/security/scan";
 import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
 import {
-  IconAlert, IconCheck, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconSites,
+  IconAlert, IconCheck, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconShield, IconSites,
 } from "@/components/ui/icons";
 import { ManageForm } from "../sites/[id]/action-form";
 import {
-  refreshAllInventoryAction, dismissGlobalFailedJobsAction, updateAllPluginsAction,
+  refreshAllInventoryAction, dismissGlobalFailedJobsAction, updateAllPluginsAction, hardenFleetAction,
 } from "./actions";
+import { hardeningPlan, FIX_LABEL } from "@/services/security/harden";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,8 @@ interface Row {
   pluginUpdates: number;
   /** Search Console verification, from the same snapshot. null = unmeasured. */
   gsc: ReturnType<typeof gscStatus>;
+  /** Hardening fixes the latest scan calls for. */
+  hardenFixes: ReturnType<typeof hardeningPlan>;
   grade?: string;
   seo?: number;
 }
@@ -314,10 +317,11 @@ export default async function DashboardPage({
   // arranged into, not how much more of it is fetched.
   const rows: Row[] = await Promise.all(
     sites.map(async (site) => {
-      const [snap, g, score] = await Promise.all([
+      const [snap, g, score, latestChecks] = await Promise.all([
         snapshots.latestSnapshot(site.id),
         securityRepo.latestGrade(site.id),
         seoRepo.latestAuditScore(site.id),
+        securityRepo.latestChecks(site.id),
       ]);
       const updates = snap ? pendingUpdates(snap.payload) : undefined;
       const pluginUpdates = snap ? pendingPluginUpdates(snap.payload) : 0;
@@ -332,6 +336,7 @@ export default async function DashboardPage({
         updates,
         pluginUpdates,
         gsc,
+        hardenFixes: latestChecks ? hardeningPlan(latestChecks.checks) : [],
         grade,
         seo: score ?? undefined,
       };
@@ -383,6 +388,18 @@ export default async function DashboardPage({
     : `${updateTargets.slice(0, UPDATE_NAMES_SHOWN).map((r) => r.site.name).join(", ")} ` +
       `and ${updateTargets.length - UPDATE_NAMES_SHOWN} more`;
   const canUpdateAll = can(viewer, "wp_toolkit.manage") && updateTargets.length > 0;
+
+  // Same gate and the same environment scope as the plugin update: writes
+  // into wp-content on live sites.
+  const hardenTargets = visible.filter(
+    (r) =>
+      r.site.status !== "disabled" &&
+      r.hardenFixes.length > 0 &&
+      canAccessSite(viewer, r.site.id, "manage"),
+  );
+  const hardenFixCount = hardenTargets.reduce((n, r) => n + r.hardenFixes.length, 0);
+  const canHardenFleet = can(viewer, "wp_toolkit.manage") && hardenTargets.length > 0;
+  const hardenKinds = [...new Set(hardenTargets.flatMap((r) => r.hardenFixes))];
   const otherEnv: SiteEnvironment = activeEnv === "production" ? "staging" : "production";
   const subtitle =
     total === 0
@@ -446,6 +463,31 @@ export default async function DashboardPage({
                     // Production writes get the destructive treatment; the
                     // same action on staging does not, because a confirmation
                     // that is always red stops meaning anything.
+                    tone: activeEnv === "production" ? "danger" : "default",
+                  }}
+                />
+              )}
+              {canHardenFleet && (
+                <ManageForm
+                  action={hardenFleetAction.bind(null, activeEnv)}
+                  label={`Harden ${hardenTargets.length} site${hardenTargets.length === 1 ? "" : "s"}`}
+                  pendingLabel="Queuing…"
+                  variant="outline"
+                  icon={<IconShield size={16} />}
+                  confirm={{
+                    title:
+                      `Apply ${hardenFixCount} hardening fix${hardenFixCount === 1 ? "" : "es"} across ` +
+                      `${hardenTargets.length} ${activeEnv} site${hardenTargets.length === 1 ? "" : "s"}?`,
+                    description: [
+                      hardenTargets.map((r) => r.site.name).join(", ") + ".",
+                      "",
+                      ...hardenKinds.map((f) => `• ${FIX_LABEL[f]}`),
+                      "",
+                      "Each fix is a small file the panel writes into wp-content and can remove again; " +
+                        "nothing in wp-config.php or .htaccess is touched. Each site is rescanned afterwards. " +
+                        "Queued and run in the background; you'll be taken to the progress page.",
+                    ].join(String.fromCharCode(10)),
+                    confirmLabel: "Queue hardening",
                     tone: activeEnv === "production" ? "danger" : "default",
                   }}
                 />
