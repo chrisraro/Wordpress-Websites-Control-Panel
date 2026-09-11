@@ -19,11 +19,26 @@ foreach ($sums as $file => $md5) {
   if (!file_exists($path)) { if (count($missing) < 50) { $missing[] = $file; } continue; }
   if (md5_file($path) !== $md5) { if (count($mismatched) < 50) { $mismatched[] = $file; } }
 }
-return json_encode(array('ok' => true, 'checked' => $checked, 'mismatched' => $mismatched, 'missing' => $missing));
+// Files that exist inside wp-admin or wp-includes but are not in the manifest.
+// The manifest lists what WordPress ships; anything else in those two
+// directories was put there by something that is not WordPress. Only PHP is
+// reported -- a stray .DS_Store is noise, a stray .php is a shell.
+$unknown = array();
+$abs = rtrim(ABSPATH, '/') . '/';
+foreach (array('wp-admin', 'wp-includes') as $dir) {
+  if (!is_dir($abs . $dir)) { continue; }
+  $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($abs . $dir, FilesystemIterator::SKIP_DOTS));
+  foreach ($it as $f) {
+    if (!$f->isFile() || !preg_match('/[.](php|phtml|phar|inc)$/i', $f->getFilename())) { continue; }
+    $rel = str_replace(chr(92), '/', substr($f->getPathname(), strlen($abs)));
+    if (!isset($sums[$rel])) { if (count($unknown) < 50) { $unknown[] = $rel; } }
+  }
+}
+return json_encode(array('ok' => true, 'checked' => $checked, 'mismatched' => $mismatched, 'missing' => $missing, 'unknown' => $unknown));
 `.trim();
 
 interface ChecksumsResult {
-  ok: boolean; checked?: number; mismatched?: string[]; missing?: string[]; error?: string;
+  ok: boolean; checked?: number; mismatched?: string[]; missing?: string[]; unknown?: string[]; error?: string;
 }
 
 export async function runChecksums(client: SiteMcpClient): Promise<SecurityCheck> {
@@ -39,9 +54,17 @@ export async function runChecksums(client: SiteMcpClient): Promise<SecurityCheck
   if (!r.ok) return { check_id: "core_checksums", result: "warn", details: { error: r.error } };
   const mismatched = r.mismatched ?? [];
   const missing = r.missing ?? [];
+  // A PHP file in wp-admin or wp-includes that WordPress did not ship is a
+  // fail, the same as a modified one. This is the gap an incident on this
+  // fleet went through: two shells named to look like core --
+  // class-wp-tax-query-Misc.php, blocks/post-excerpt-Int32.php -- sat beside
+  // the real files, and a scan that only compared known files could not see
+  // them. The modified core file it DID catch was the loader that
+  // reinstalled them.
+  const unknown = r.unknown ?? [];
   return {
     check_id: "core_checksums",
-    result: mismatched.length > 0 ? "fail" : missing.length > 0 ? "warn" : "pass",
-    details: { checked: r.checked, mismatched, missing },
+    result: mismatched.length > 0 || unknown.length > 0 ? "fail" : missing.length > 0 ? "warn" : "pass",
+    details: { checked: r.checked, mismatched, missing, unknown },
   };
 }
