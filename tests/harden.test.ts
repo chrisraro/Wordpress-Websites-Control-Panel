@@ -99,12 +99,24 @@ describe("the files each fix writes", () => {
     expect(bodies("uploads_index")).toContainEqual(expect.stringContaining("Silence is golden"));
   });
 
-  it("every mu-plugin carries the marker unharden checks for, and a valid header", () => {
+  it("decides ownership by the plugin header, which survives a product rename", () => {
+    // The first marker was a sentence with the product name in it; the
+    // product was renamed the same afternoon and two sites' files would have
+    // been orphaned. The header is what WordPress reads and it never moved.
+    const token = { xmlrpc: "XMLRPC_REQUEST", file_edit: "DISALLOW_FILE_EDIT", headers: "send_headers" } as const;
     for (const fix of ["xmlrpc", "file_edit", "headers"] as const) {
-      const body = bodies(fix).find((b) => b.startsWith("<?php"))!;
-      expect(body).toContain("Plugin Name: OCS Hardening");
-      expect(body).toContain("Written by WP Control Panel");
+      expect(bodies(fix).find((b) => b.includes(token[fix]))).toContain("Plugin Name: OCS Hardening");
     }
+    const php = buildHardenPhp(["xmlrpc"], "unharden");
+    expect(php).toContain("$isOurs");
+    expect(php).not.toContain("$marker");
+  });
+
+  it("can remove the uploads index it wrote, and never a real one", () => {
+    // uploads/index.php has no plugin header; it is ours only if it is
+    // byte-for-byte the silence file.
+    const php = buildHardenPhp(["uploads_index"], "unharden");
+    expect(php).toContain("trim($existing) === trim($silence)");
   });
 
   it("has a plain-language label for every fix", () => {

@@ -69,10 +69,19 @@ export function hardeningPlan(checks: SecurityCheck[]): HardeningFix[] {
 
 /*
  * The files. Each is a complete mu-plugin, written verbatim via base64 so the
- * PHP that writes it never has to escape anything. Every body carries the
- * marker line so `unharden` refuses to delete a file it did not write.
+ * PHP that writes it never has to escape anything.
+ *
+ * Ownership -- "did the panel write this?" -- is decided by the `Plugin Name:
+ * OCS Hardening` header, not by the comment below it. The header is what
+ * WordPress itself reads, it is present in every version of these files ever
+ * written, and it does not move when the product's display name does. The
+ * first marker was a sentence containing the product name; the product was
+ * renamed the same afternoon, and files already on two sites would have been
+ * orphaned. uploads/index.php has no header, so it is owned only if its body
+ * is byte-for-byte the silence file -- never a real index.php someone placed.
  */
-const MARKER = "// Written by WP Control Panel. Safe to delete; the panel can re-apply it.";
+const OWNED_HEADER = "Plugin Name: OCS Hardening";
+const MARKER = "// Written by the control panel. Safe to delete; the panel can re-apply it.";
 
 const MU_XMLRPC = `<?php
 /**
@@ -153,8 +162,13 @@ export function buildHardenPhp(fixes: HardeningFix[], mode: "harden" | "unharden
 
   return `
 $out = array();
-$marker = ${phpString(MARKER)};
+$owned = ${phpString(OWNED_HEADER)};
+$silence = ${phpString(UPLOADS_INDEX)};
 $mode = ${phpString(mode)};
+$isOurs = function ($rel, $existing) use ($owned, $silence) {
+  if ($rel === 'uploads/index.php') { return trim($existing) === trim($silence) || trim($existing) === ''; }
+  return strpos($existing, $owned) !== false;
+};
 $ops = array(
   ${fileOps}
 );
@@ -167,7 +181,7 @@ foreach ($ops as $op) {
     if (file_exists($path)) {
       $existing = (string) @file_get_contents($path);
       if ($existing === $body) { $out[] = array('fix' => $fix, 'outcome' => 'already'); continue; }
-      if (strpos($existing, $marker) === false && $rel !== 'uploads/index.php') {
+      if (!$isOurs($rel, $existing)) {
         $out[] = array('fix' => $fix, 'outcome' => 'failed', 'reason' => basename($path) . ' exists and was not written by the panel');
         continue;
       }
@@ -179,7 +193,7 @@ foreach ($ops as $op) {
   } else {
     if (!file_exists($path)) { $out[] = array('fix' => $fix, 'outcome' => 'absent'); continue; }
     $existing = (string) @file_get_contents($path);
-    if (strpos($existing, $marker) === false) { $out[] = array('fix' => $fix, 'outcome' => 'failed', 'reason' => basename($path) . ' was not written by the panel; left alone'); continue; }
+    if (!$isOurs($rel, $existing)) { $out[] = array('fix' => $fix, 'outcome' => 'failed', 'reason' => basename($path) . ' was not written by the panel; left alone'); continue; }
     if (!@unlink($path)) { $out[] = array('fix' => $fix, 'outcome' => 'failed', 'reason' => 'could not delete'); continue; }
     $out[] = array('fix' => $fix, 'outcome' => 'removed');
   }
