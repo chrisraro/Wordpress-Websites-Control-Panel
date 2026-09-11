@@ -86,6 +86,10 @@ function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
   return { repo, jobs };
 }
 
+// addSite discovers the MCP endpoint over the network; a unit test supplies
+// the answer instead of reaching the internet.
+const discover = async (url: string) => ({ endpoint: `${url.replace(/\/+$/, "")}/wp-json/mcp/novamira` });
+
 const INPUT = {
   name: "El Nido Guide", url: "https://elnidoguide.ph",
   wpUsername: "admin", appPassword: "aaaa bbbb cccc dddd",
@@ -157,7 +161,7 @@ describe("testSiteConnection", () => {
   it("marks reconnect_needed on auth failure", async () => {
     const { repo, sites } = memoryRepo();
     const { repo: jobs } = memoryJobsRepo();
-    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs }, INPUT, "user-1");
+    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs, discover }, INPUT, "user-1");
     const failing = async () => new MockMcpClient({ failWith: new McpAuthError("401") });
     const res = await testSiteConnection({ repo, mcp: failing, jobs }, "site-1", "user-1");
     expect(res).toMatchObject({ ok: false, status: "reconnect_needed" });
@@ -167,7 +171,7 @@ describe("testSiteConnection", () => {
   it("marks degraded on connection failure and connected on success", async () => {
     const { repo, sites } = memoryRepo();
     const { repo: jobs } = memoryJobsRepo();
-    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs }, INPUT, "user-1");
+    await addSite({ repo, mcp: async () => new MockMcpClient(), jobs, discover }, INPUT, "user-1");
     const down = async () => new MockMcpClient({ failWith: new McpConnectionError("ENOTFOUND") });
     expect((await testSiteConnection({ repo, mcp: down, jobs }, "site-1", "u")).status).toBe("degraded");
     expect((await testSiteConnection({ repo, mcp: async () => new MockMcpClient(), jobs }, "site-1", "u")).status)

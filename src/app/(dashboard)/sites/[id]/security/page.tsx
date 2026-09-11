@@ -54,6 +54,12 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
     security.latestGrade(id), security.openVulns(id), security.latestChecks(id),
     security.uptimeSummary(id),
   ]);
+  // Universal, unfixable advisories ("WordPress Core - All known versions")
+  // are shown, but apart: they are not something this site can act on, and
+  // sitting in the same table as a fixable RCE they make the real findings
+  // harder to see. The grade already ignores them; the page says so.
+  const actionable = vulns.filter((v) => !v.informational);
+  const informational = vulns.filter((v) => v.informational);
   const checks = (latest?.checks ?? []).filter((c) => c.check_id !== "grade");
   const failing = checks.filter((c) => c.result === "fail").length;
   const scan = runSecurityScanAction.bind(null, id);
@@ -151,8 +157,8 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
       <Card className="mb-4 overflow-hidden">
         <CardTitle
           aside={
-            vulns.length > 0 ? (
-              <StatusBadge tone="bad">{vulns.length} open</StatusBadge>
+            actionable.length > 0 ? (
+              <StatusBadge tone="bad">{actionable.length} open</StatusBadge>
             ) : latest ? (
               <StatusBadge tone="good">None found</StatusBadge>
             ) : undefined
@@ -160,7 +166,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
         >
           Vulnerabilities
         </CardTitle>
-        {vulns.length === 0 ? (
+        {actionable.length === 0 ? (
           <p className="px-5 py-6 text-body text-mid-gray">
             {latest
               ? "No installed plugin, theme, or core version matched a known vulnerability."
@@ -180,7 +186,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
                   </tr>
                 </thead>
                 <tbody>
-                  {vulns.map((v) => (
+                  {actionable.map((v) => (
                     <tr key={`${v.feed_id}:${v.component}`} className={tableRowClass}>
                       <td className={`${tableCellClass} font-medium text-ink`}>{v.component}</td>
                       <td className={tableCellClass}>
@@ -215,6 +221,35 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
               component until one ships.
             </p>
           </>
+        )}
+      {informational.length > 0 && (
+          <div className="border-t border-hairline px-5 py-4">
+            <p className="text-body font-medium text-ink">
+              Also present on every WordPress site
+            </p>
+            <p className="mt-1 text-caption tracking-normal text-mid-gray">
+              These advisories cover all WordPress versions and have no fix. They are listed for
+              completeness and do not affect the grade, because a finding every site shares says
+              nothing about this one.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {informational.map((v) => (
+                <li key={`${v.feed_id}:${v.component}`} className="text-caption tracking-normal text-mid-gray">
+                  {v.title}
+                  {v.cve && (
+                    <a
+                      href={`https://www.cve.org/CVERecord?id=${v.cve}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 underline transition-colors duration-150 hover:text-ink"
+                    >
+                      {v.cve}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </Card>
 

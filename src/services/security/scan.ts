@@ -105,8 +105,12 @@ export async function securityScan(
       const matches = matchInventory(entries, snapshot);
       await deps.security.syncSiteVulns(siteId, matches);
       const open = await deps.security.openVulns(siteId);
-      vulnSeverities = open.map((v) => v.severity);
-      vulnCount = open.length;
+      // Universal, unfixable advisories stay listed but neither move the
+      // grade nor count toward "N vulnerabilities" -- a number every site
+      // shares says nothing about any of them. See isInformationalAdvisory.
+      const actionable = open.filter((v) => !v.informational);
+      vulnSeverities = actionable.map((v) => v.severity);
+      vulnCount = actionable.length;
 
       // The feed existing isn't enough: a scan against a feed that stopped
       // refreshing days ago produces a confidently-wrong grade, checked

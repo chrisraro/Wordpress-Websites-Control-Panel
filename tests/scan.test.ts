@@ -282,3 +282,34 @@ describe("refreshVulnFeed", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("isInformationalAdvisory", () => {
+  const ALL = [{ from_version: "*", to_version: "*" }];
+
+  it("flags an unfixable advisory that spans every version", async () => {
+    // The two "WordPress Core - All known versions" entries. Every site on
+    // earth matches them; a penalty every site pays identically carries no
+    // information and would cap every grade at B forever.
+    const { isInformationalAdvisory } = await import("@/services/security/types");
+    expect(isInformationalAdvisory({ fixed_in: null, affected_versions: ALL })).toBe(true);
+  });
+
+  it("keeps scoring a bounded vulnerability with no fix yet", async () => {
+    // Real risk, real action (deactivate or replace) -- not informational.
+    const { isInformationalAdvisory } = await import("@/services/security/types");
+    expect(isInformationalAdvisory({
+      fixed_in: null, affected_versions: [{ from_version: "*", to_version: "2.4.1" }],
+    })).toBe(false);
+  });
+
+  it("keeps scoring anything that has a fix, however broad its range", async () => {
+    const { isInformationalAdvisory } = await import("@/services/security/types");
+    expect(isInformationalAdvisory({ fixed_in: "6.0", affected_versions: ALL })).toBe(false);
+  });
+
+  it("never treats an advisory with no ranges at all as informational", async () => {
+    // Missing data is not the same as "applies to everything".
+    const { isInformationalAdvisory } = await import("@/services/security/types");
+    expect(isInformationalAdvisory({ fixed_in: null, affected_versions: [] })).toBe(false);
+  });
+});

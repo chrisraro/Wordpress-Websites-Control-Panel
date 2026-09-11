@@ -12,6 +12,13 @@ import type { NewSiteInput, SiteRow, SiteStatus } from "./types";
 export interface SitesDeps {
   repo: SitesRepo;
   mcp: McpFactory;
+  /**
+   * Resolves a site URL to its MCP endpoint. Optional so the many callers
+   * that never add a site need not supply one; addSite falls back to the
+   * real discovery, which performs a network fetch -- and which is exactly
+   * why a test must be able to replace it.
+   */
+  discover?: (url: string) => Promise<{ endpoint: string }>;
   // Required, not optional: a newly connected site needs its first
   // snapshot_refresh enqueued (see addSite below), and an optional field is
   // exactly the kind of thing a caller silently omits. There are two paths
@@ -40,7 +47,7 @@ export async function addSite(
   // Ask the site rather than assume. A site whose MCP server carries the
   // plugin's default name -- or any other name -- used to fail here with an
   // unexplained 404.
-  const { endpoint } = await discoverMcpEndpoint(input.url);
+  const { endpoint } = await (deps.discover ?? discoverMcpEndpoint)(input.url);
   let abilities: string[];
   const client = await connectOrExplain(deps.mcp, endpoint, input.wpUsername, input.appPassword);
   try {

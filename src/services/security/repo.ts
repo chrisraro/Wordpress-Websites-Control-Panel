@@ -2,12 +2,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FeedEntry } from "@/lib/adapters/vulnfeed/wordfence";
 import type { VulnMatch } from "./vulns";
 import type { Grade, SecurityCheck, UptimeRow } from "./types";
+import { isInformationalAdvisory } from "./types";
 
 export interface OpenVuln extends VulnMatch {
   title: string;
   cve: string | null;
   fixed_in: string | null;
   first_seen: string;
+  /** Universal and unfixable: listed, never scored. See isInformationalAdvisory. */
+  informational: boolean;
 }
 
 export interface SecurityRepo {
@@ -107,16 +110,21 @@ export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
     },
     async openVulns(siteId) {
       const { data, error } = await db.from("site_vulnerabilities")
-        .select("feed_id,component,installed_version,severity,first_seen,vuln_feed(title,cve,fixed_in)")
+        .select("feed_id,component,installed_version,severity,first_seen,vuln_feed(title,cve,fixed_in,affected_versions)")
         .eq("site_id", siteId).eq("status", "open").order("severity");
       if (error) throw new Error(`openVulns failed: ${error.message}`, { cause: error });
       return (data ?? []).map((r) => {
         const feed = (Array.isArray(r.vuln_feed) ? r.vuln_feed[0] : r.vuln_feed) as
-          { title: string; cve: string | null; fixed_in: string | null } | null;
+          { title: string; cve: string | null; fixed_in: string | null;
+            affected_versions?: Array<{ from_version: string; to_version: string }> } | null;
+        const fixed_in = feed?.fixed_in ?? null;
         return {
           feed_id: r.feed_id, component: r.component, installed_version: r.installed_version,
           severity: r.severity, first_seen: r.first_seen,
-          title: feed?.title ?? r.feed_id, cve: feed?.cve ?? null, fixed_in: feed?.fixed_in ?? null,
+          title: feed?.title ?? r.feed_id, cve: feed?.cve ?? null, fixed_in,
+          informational: isInformationalAdvisory({
+            fixed_in, affected_versions: feed?.affected_versions ?? [],
+          }),
         };
       });
     },
