@@ -1,13 +1,20 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseTokensRepo } from "@/services/tokens/repo";
-import { authenticateToken } from "@/lib/authz/token";
+import { authenticateToken, type TokenAuth } from "@/lib/authz/token";
 import { buildToolCtx } from "@/mcp/context";
 import { buildServer } from "@/mcp/server";
 import { MCP_SERVER_NAME } from "@/mcp/schema";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Manage tools registered on this route carry their own timeouts --
+// ACTION_TIMEOUT_MS (180_000) and HEAVY_TIMEOUT_MS (270_000) in
+// src/services/manage/service.ts, and INSTALL_TIMEOUT_MS (300_000) in
+// src/services/marketplace/install.ts -- so the function's own ceiling must
+// exceed the largest of them or the platform kills the request with a 504
+// before a tool's own abort ever fires. 300 matches src/app/api/cron/process
+// /route.ts, which needs the same headroom, and is honoured on Vercel Pro.
+export const maxDuration = 300;
 
 const CHALLENGE = { "WWW-Authenticate": `Bearer realm="${MCP_SERVER_NAME}"` };
 
@@ -54,7 +61,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!secret) return unauthorized();
 
   const repo = supabaseTokensRepo(createServiceSupabase());
-  let auth;
+  let auth: TokenAuth | null;
   try {
     auth = await authenticateToken(secret, repo);
   } catch (e) {
@@ -72,6 +79,17 @@ export async function POST(req: Request): Promise<Response> {
   // sessionIdGenerator: undefined is what selects that mode.
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
+    // Without this, a POST takes the SDK's SSE-streaming branch: handleRequest
+    // dispatches the message to the server without awaiting it and returns a
+    // Response whose body is a ReadableStream that the SDK fills in later via
+    // send(). The `finally` below runs the instant handleRequest resolves --
+    // before any tool has produced a result -- and close() shuts every stream
+    // controller, so every response body comes back empty. enableJsonResponse
+    // makes handleRequest's promise resolve only once the JSON-RPC response is
+    // fully ready, so closing the transport in `finally` is safe. Do not
+    // remove this to "enable streaming" -- see Fix 1 in
+    // .superpowers/sdd/task-7-report.md for the runtime probe that proved it.
+    enableJsonResponse: true,
   });
   await server.connect(transport);
   try {
