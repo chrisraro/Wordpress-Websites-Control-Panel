@@ -1,7 +1,7 @@
 # Panel MCP Server — Design
 
 **Date:** 2026-09-12
-**Status:** Approved design, awaiting implementation plan
+**Status:** Implemented 2026-09-12
 
 ## Goal
 
@@ -115,12 +115,13 @@ test pins it.
 
 `src/app/api/mcp/route.ts`:
 
-- `export const dynamic = "force-dynamic"; export const maxDuration = 60;`
+- `export const dynamic = "force-dynamic"; export const maxDuration = 300;`
 - `POST`: read `Authorization: Bearer <secret>`; missing or invalid →
   `401` with `WWW-Authenticate: Bearer realm="wp-control-panel"`. Valid → build
   an `McpServer` with the tools registered against this request's `TokenAuth`,
-  attach a `StreamableHTTPServerTransport` with `sessionIdGenerator: undefined`
-  (stateless), and hand it the request.
+  attach a `WebStandardStreamableHTTPServerTransport` with
+  `sessionIdGenerator: undefined` (stateless) and `enableJsonResponse: true`,
+  and hand it the request.
 - `GET` and `DELETE`: `405`. Stateless mode has no server-initiated stream and
   no session to end.
 - Server info: name `wp-control-panel`, version from `package.json`.
@@ -128,6 +129,20 @@ test pins it.
 Stateless is required, not chosen: consecutive requests may land on different
 Vercel instances, and there is no shared session store. Every request carries
 its own auth and is complete in itself.
+
+The web-standard transport, not the Node one, is what this route needs: its
+`handleRequest` takes a web-standard `Request` and returns a `Response`, which
+is what a Next.js route handler signs up to hand back, where the Node variant
+expects `IncomingMessage`/`ServerResponse`. `enableJsonResponse: true` is
+required rather than cosmetic — the default SSE mode returns a streaming
+response body that the route fills in later via `send()`, and closing the
+transport in the route's `finally` block (needed regardless, to release it)
+would shut that stream before any tool result reached it, truncating every
+response to empty. 300 seconds, not 60: the `manage` tools' own seams already
+run up to 180–270 seconds (`ACTION_TIMEOUT_MS`, `HEAVY_TIMEOUT_MS` in
+`src/services/manage/service.ts`), and a route ceiling below that would have
+the platform kill the request before a tool's own timeout ever had the chance
+to fire cleanly.
 
 ### Tools
 
@@ -150,8 +165,8 @@ and production must not be confused.
 | Group | Tool | Kind | Service |
 |---|---|---|---|
 | sites | `list_sites` | read | `listSitesForViewer` |
-| sites | `get_site` | read | `getSite` + latest snapshot summary + latest grade + `gscStatus` |
-| sites | `test_site_connection` | read | `testSiteConnection` |
+| sites | `get_site` | read | `getSite` |
+| sites | `test_site_connection` | read, but needs a writable token | `testSiteConnection` |
 | inventory | `get_inventory` | read | `latestSnapshot` (plugins, themes, core, maintenance, gsc) |
 | inventory | `refresh_inventory` | enqueue | `enqueueJob("snapshot_refresh")` |
 | security | `get_security` | read | `latestGrade`, `openVulns`, `latestChecks` |
@@ -172,15 +187,27 @@ and production must not be confused.
 | manage | `activate_plugin` | **destructive** | `manageSite` |
 | manage | `deactivate_plugin` | **destructive** | `manageSite` |
 | manage | `delete_plugin` | **destructive** | `manageSite` |
+| manage | `activate_theme` | **destructive** | `manageSite` |
+| manage | `delete_theme` | **destructive** | `manageSite` |
 | manage | `set_maintenance` | **destructive** | `manageSite` `maintenance` |
 | manage | `flush_cache` | **destructive** | `manageSite` `flush_cache` |
+| manage | `flush_permalinks` | **destructive** | `manageSite` |
 | fleet | `update_all_plugins` | **destructive** | same logic as `updateAllPluginsAction(env)` |
 | gsc | `install_gsc_verification` | **destructive** | `installVerificationFile` |
 | gsc | `remove_gsc_verification` | **destructive** | `removeVerificationFile` |
 
-Twenty-eight tools. **Excluded:** user, role and permission management. Granting a
-permission is the one write that widens every other write; there is no
-conversational use for it that a person should not do by hand.
+Thirty-one tools (fifteen destructive). `get_site` is deliberately narrowed to the
+site record itself; it does not also fold in the latest snapshot summary, grade,
+or `gscStatus` as originally sketched — an LLM composes those by calling
+`get_inventory`, `get_security` and `get_seo` alongside it, which keeps each tool's
+result single-purpose and avoids paying for data the caller didn't ask for. The
+three additional `manage` rows above (`activate_theme`, `delete_theme`,
+`flush_permalinks`) were added during implementation: `ManageAction` already
+supported these kinds and the UI already exposed them, so leaving them out of the
+MCP surface would have been an arbitrary gap. **Excluded:** user, role and
+permission management. Granting a permission is the one write that widens every
+other write; there is no conversational use for it that a person should not do by
+hand.
 
 `manage` tools that run synchronously in the UI (single-site plugin update, etc.)
 stay synchronous here too, with the same timeouts — they finish in seconds. The
@@ -204,6 +231,10 @@ reason?:  string    // required when confirm is true; 10–500 chars
 - On a `read_only` token, `confirm: true` returns `isError: true` with text
   saying the **token** is read-only (distinct from a permission denial, which
   names the missing permission — the fixes differ).
+- An enqueue tool whose job is already pending (`enqueueJob` returns `null`)
+  reports `queued: false` and writes **no** audit row — `activity_log` records
+  changes, and "already queued" is not one. `cancel_batch` with nothing pending
+  behaves the same.
 
 Preview text is generated by a small pure function per tool so it is testable
 without a site.
@@ -221,11 +252,23 @@ detail:  { token_id, reason, args }   -- args with every key matching /password|
 ```
 
 Reads are not logged. `activity_log` records changes; logging reads would bury
-them.
+them. A performed or attempted live action is audited whether its seam reports
+failure by return value (e.g. `manageSite`'s `{ ok: false, error }`) or by
+throwing — both write a row with the failure recorded in `detail`; read-side
+failures before the act (a missing permission, a site not visible, a bad
+confirm/reason) are not audited, since nothing was attempted. `cancel_batch`
+cancels exactly the pending jobs on sites the caller can see — the previewed
+set — never the whole batch, so a job on a site outside the caller's grants is
+never touched even though it shares the batch id.
 
 ### Token management UI
 
-On `/users/[id]` (existing page), a new **API tokens** card:
+`/users/[id]` is gated `users.manage`, which only `admin` holds by default — a
+card there would have been unreachable for developers, content writers and
+clients who need to mint their own token. The self-service surface is instead a
+new `/account` page, guarded by `requireViewer()` (any signed-in user holding a
+role, not a specific permission), showing only the viewer's own tokens with a
+full **API tokens** card:
 
 - **Create**: name (required), expiry (none / 30d / 90d / 1y), read-only toggle.
   On success, the secret is shown once in a copy box with "This will not be shown
@@ -236,9 +279,16 @@ On `/users/[id]` (existing page), a new **API tokens** card:
   wp-control-panel <APP_URL>/api/mcp --header "Authorization: Bearer <token>"`
   command and equivalent JSON for Cursor and n8n, with the token as a placeholder.
 
-Authorization: a user may create and revoke their own tokens. `users.manage` may
-revoke anyone's and see anyone's list (never the secret — it does not exist). No
-one can create a token for another user.
+`/users/[id]` keeps an API tokens card of its own, but read-only: the same list
+(name, prefix, created, last used, read-only badge, expired/revoked state) with
+a Revoke button for `users.manage` holders, and **no** create form — nobody
+mints a token for another user, themselves included, from that page. The
+signed-in user's email in the sidebar links to `/account`, so every role has a
+one-click way back to their own tokens.
+
+Authorization: a user may create and revoke their own tokens, from `/account`
+only. `users.manage` may revoke anyone's and see anyone's list from
+`/users/[id]` (never the secret — it does not exist), but cannot create one.
 
 Server actions in `src/app/(dashboard)/users/[id]/token-actions.ts`, gated as
 above, using a `src/services/tokens/` service and repo.
@@ -294,15 +344,30 @@ supabase/migrations/0021_api_tokens.sql
 src/lib/authz/server.ts              (extract loadViewer)
 src/lib/authz/token.ts               (authenticateToken, applyReadOnly)
 src/services/tokens/{types,repo,service}.ts
+src/services/geogrid/enqueue.ts
+src/services/manage/fleet.ts
 src/mcp/server.ts                    (buildServer(auth, deps))
 src/mcp/tools/{sites,inventory,security,seo,geogrid,reports,jobs,manage,fleet,gsc}.ts
 src/mcp/confirm.ts                   (shared confirm/preview/audit helpers)
 src/app/api/mcp/route.ts
+src/app/(dashboard)/account/page.tsx
 src/app/(dashboard)/users/[id]/token-actions.ts
 src/app/(dashboard)/users/[id]/api-tokens-card.tsx
+tests/helpers/mcp-ctx.ts
 tests/mcp-identity.test.ts
-tests/mcp-tools-authz.test.ts        (pins 2, 3, 4, 8)
+tests/mcp-tools-sites.test.ts
+tests/mcp-tools-reads.test.ts
+tests/mcp-tools-destructive.test.ts
+tests/mcp-confirm.test.ts
+tests/mcp-context.test.ts
 tests/mcp-tokens.test.ts             (pin 5)
+tests/mcp-tokens-repo.test.ts
+tests/mcp-token-actions.test.ts
 tests/mcp-audit.test.ts              (pin 6)
 tests/mcp-route.test.ts              (pin 7)
+tests/jobs-repo-cancel-jobs.test.ts
+tests/jobs-repo-list-jobs.test.ts
+tests/reports-repo-get-by-id.test.ts
+tests/geogrid-enqueue.test.ts
+tests/manage-fleet.test.ts
 ```

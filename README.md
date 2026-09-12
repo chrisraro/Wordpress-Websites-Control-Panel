@@ -107,3 +107,18 @@ leave the app unadministrable — see `docs/ops/authorization.md` for the
 migration ledger and what's still pending, the role matrix, the invite flow
 and lockout guards, and how to re-run the live database check
 (`npm run verify:rls`).
+
+## MCP server
+
+The panel exposes itself over MCP at `POST /api/mcp` (Streamable HTTP, stateless).
+Mint a per-user token on your own account page, reachable from your email in the
+sidebar, under **API tokens**, then:
+
+    claude mcp add --transport http wp-control-panel https://<app>/api/mcp \
+      --header "Authorization: Bearer <token>"
+
+A token inherits exactly its owner's role, permissions and site grants — it can
+never do more than the person who created it. Read-only tokens can inspect
+everything they can see and change nothing. Destructive tools are dry-run by
+default and need `confirm: true` plus a `reason`, which is recorded in the
+activity log.
