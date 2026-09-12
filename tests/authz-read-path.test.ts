@@ -28,8 +28,23 @@ const USERS_DIR = join(DASHBOARD_DIR, "users");
 // would also exclude a sibling directory that merely begins with "users"
 // (e.g. "users-export/", "userscript/") without ever checking it — exactly
 // the regression this test exists to catch.
+const usersExcluded = (f: string) =>
+  f !== join(USERS_DIR, "page.tsx") && !f.startsWith(USERS_DIR + sep);
+
+// /account (task 12) is the second documented exception, for a different
+// reason than /users: api_tokens (0021_api_tokens.sql) enables RLS with no
+// policies at all -- "Service-role only, like the other credential-adjacent
+// tables" is the migration's own words -- so `readDbFor`'s user-scoped
+// client would read back zero rows for everyone, not a correctly-narrowed
+// set. createServiceSupabase() here is not a bypass of an RLS rule this page
+// should otherwise honour; there is no such rule to bypass. The page's own
+// gate (requireViewer() + `.eq("user_id", viewer.id)` inside listTokens) is
+// what keeps a user to their own tokens, exactly as /users/[id] does the
+// same job for auth.admin data.
+const ACCOUNT_PAGE = join(DASHBOARD_DIR, "account", "page.tsx");
+
 const rlsGovernedPageFiles = pageFiles.filter(
-  (f) => f !== join(USERS_DIR, "page.tsx") && !f.startsWith(USERS_DIR + sep),
+  (f) => usersExcluded(f) && f !== ACCOUNT_PAGE,
 );
 
 describe("dashboard page reads stay on the RLS-governed path", () => {

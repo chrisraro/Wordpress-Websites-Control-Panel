@@ -8,12 +8,15 @@ import { canChangeRole, canDeleteUser } from "@/services/users/guards";
 import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
+import { supabaseTokensRepo } from "@/services/tokens/repo";
+import { listTokens } from "@/services/tokens/service";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, PageHeader, StatusBadge } from "@/components/ui/primitives";
 import { IconAlert } from "@/components/ui/icons";
 import { RoleForm } from "./role-form";
 import { SiteGrants } from "./site-grants";
+import { ApiTokensCard } from "./api-tokens-card";
 import { deleteUserAction } from "../actions";
 import { ManageForm } from "../../sites/[id]/action-form";
 import type { AppRole } from "@/lib/authz/types";
@@ -48,12 +51,13 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   const usersRepo = supabaseUsersRepo(db);
   const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
 
-  const [person, users, grants, allSites, rolePermissions] = await Promise.all([
+  const [person, users, grants, allSites, rolePermissions, tokens] = await Promise.all([
     usersRepo.getUser(id),
     usersRepo.listUsers(),
     listSiteGrants(usersRepo, id),
     listSites(sitesDeps),
     listRolePermissions(usersRepo),
+    listTokens(supabaseTokensRepo(db), id),
   ]);
   if (!person) notFound();
 
@@ -149,6 +153,17 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               grants={grantRows}
               availableSites={availableSites}
             />
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          {/* Read-only list + revoke -- never a create form. A token is an
+              impersonation of its owner, so nobody mints one on someone
+              else's behalf, not even users.manage: see api-tokens-card.tsx
+              and /account, the only place "mode=self" ever renders. */}
+          <CardTitle>API tokens</CardTitle>
+          <div className="p-5">
+            <ApiTokensCard mode="admin" userId={id} tokens={tokens} />
           </div>
         </Card>
 

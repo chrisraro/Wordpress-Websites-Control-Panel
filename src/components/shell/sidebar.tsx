@@ -127,9 +127,16 @@ function SidebarBody({
       />
 
       <div className="mt-auto border-t border-hairline pt-4">
-        <p className="truncate px-3 text-caption tracking-normal text-mid-gray" title={email}>
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          title={email}
+          className="flex min-h-10 items-center truncate rounded-2xl px-3 text-caption
+            tracking-normal text-mid-gray transition-colors duration-150 hover:bg-canvas
+            hover:text-ink pointer-coarse:min-h-11"
+        >
           {email}
-        </p>
+        </Link>
         <form action={logout} className="mt-1">
           <SubmitButton
             label="Sign out"
