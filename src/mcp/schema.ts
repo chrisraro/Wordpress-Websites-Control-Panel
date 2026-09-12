@@ -3,28 +3,25 @@
  *
  * Why `z` is re-exported here rather than imported from "zod" in each tool
  * file: the SDK converts these schemas to JSON Schema for tools/list, and
- * that conversion is version-sensitive, plus zod 3 vs 4 disagree on what
- * counts as a valid value for some built-in string formats. Pinning the
- * import to one module means switching entry points is a one-line change
- * here rather than an edit to every tool file.
+ * that conversion is version-sensitive. Pinning the import to one module
+ * means switching entry points is a one-line change here rather than an
+ * edit to every one of the ~31 tool files that will import from it.
  *
- * What actually happened here: `export { z } from "zod"` (zod 4.4.3, the
- * version installed) converts to JSON Schema fine -- properties survive
- * intact, tools/list is not the problem. It fails on validation instead:
- * zod 4 tightened `.uuid()` to enforce real RFC 4122 version/variant
- * nibbles, so an all-`1`s test UUID like
- * "11111111-1111-1111-1111-111111111111" (version nibble `1`, but variant
- * nibble also `1` instead of the required 8/9/a/b) gets rejected as
- * "Invalid UUID". zod 3's `.uuid()` used a permissive regex that only
- * checked the hex-and-dashes shape, so the same value passes. Switching to
- * `export { z } from "zod/v3"` -- zod 4's built-in v3-compatibility
- * namespace -- keeps the JSON Schema conversion intact (verified: same
- * populated `properties` object) and restores the permissive UUID check,
- * so tests/mcp-schema.test.ts passes end to end. Confirmed with an
- * in-process probe comparing both entry points side by side before making
- * this the pinned choice.
+ * Verified on zod 4.4.3 + @modelcontextprotocol/sdk 1.30.0: plain
+ * `export { z } from "zod"` converts to JSON Schema correctly --
+ * `properties` lists every field (e.g. ["site_id", "n"]) and `required`
+ * lists only the non-default ones -- and validation round-trips end to
+ * end, rejecting a bad value like "not-a-uuid". tests/mcp-schema.test.ts
+ * pins this because the failure mode for a zod/SDK version mismatch is
+ * silent: an empty or missing `properties` object, not a thrown error.
+ *
+ * Note for tool authors: zod 4's `.uuid()` enforces real RFC 4122
+ * version/variant nibbles, so it correctly accepts everything this system
+ * actually generates (`crypto.randomUUID()`, Postgres `gen_random_uuid()`)
+ * but rejects placeholder fixtures like all-`1`s UUIDs. Use a real v4 UUID
+ * in test fixtures, not a hand-typed placeholder.
  */
-export { z } from "zod/v3";
+export { z } from "zod";
 
 export const MCP_SERVER_NAME = "wp-control-panel";
 

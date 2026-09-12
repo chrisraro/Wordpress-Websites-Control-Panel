@@ -39,11 +39,11 @@ describe("the SDK accepts this project's zod and round-trips a tool", () => {
 
     const result = await client.callTool({
       name: "echo_site",
-      arguments: { site_id: "11111111-1111-1111-1111-111111111111", times: 2 },
+      arguments: { site_id: "0a5f2c3e-4b6d-4f81-9c2a-7e5d1b3f8a64", times: 2 },
     });
     const text = (result.content as { type: string; text: string }[])[0].text;
     expect(JSON.parse(text)).toEqual({
-      site_id: "11111111-1111-1111-1111-111111111111",
+      site_id: "0a5f2c3e-4b6d-4f81-9c2a-7e5d1b3f8a64",
       times: 2,
     });
 
