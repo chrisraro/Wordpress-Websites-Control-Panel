@@ -24,14 +24,30 @@ describe("tool files stay above the service layer", () => {
 
   it.each(files)("%s gives every tool an environment warning", (file) => {
     const src = readFileSync(path.join(TOOL_DIR, file), "utf8");
-    const registrations = src.match(/registerTool\(/g)?.length ?? 0;
-    // Count only actual uses (the `${ENVIRONMENT_NOTE}` interpolation every
-    // description carries), not the bare identifier in the import line --
-    // that import-line occurrence would otherwise pad the count by one and
-    // hide a description that's missing the note.
-    const notes = src.match(/\$\{ENVIRONMENT_NOTE\}/g)?.length ?? 0;
-    expect(notes, `${file}: ${registrations} tools but ${notes} environment notes`)
-      .toBeGreaterThanOrEqual(registrations);
+    // An aggregate per-file count (total notes >= total registrations) can't
+    // catch a tool missing its note as long as some other tool in the same
+    // file interpolates the note an extra time -- the totals still balance.
+    // Anchor on each `registerTool(` call instead (same approach as the
+    // CONFIRM_SHAPE test below) and check every block individually.
+    const REGISTER_TAG = "registerTool(";
+    const starts: number[] = [];
+    let searchFrom = 0;
+    for (;;) {
+      const idx = src.indexOf(REGISTER_TAG, searchFrom);
+      if (idx === -1) break;
+      starts.push(idx);
+      searchFrom = idx + REGISTER_TAG.length;
+    }
+    for (let i = 0; i < starts.length; i++) {
+      const start = starts[i];
+      const end = i + 1 < starts.length ? starts[i + 1] : src.length;
+      const block = src.slice(start, end);
+      const nameMatch = block.match(/"([^"]*)"/);
+      const name = nameMatch ? nameMatch[1] : `registration #${i + 1}`;
+      expect(block, `${file}: tool "${name}" is missing \${ENVIRONMENT_NOTE}`).toMatch(
+        /\$\{ENVIRONMENT_NOTE\}/,
+      );
+    }
   });
 });
 
