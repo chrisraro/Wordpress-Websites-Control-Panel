@@ -5,16 +5,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { ToolCtx } from "@/mcp/context";
-import type { TokenAuth } from "@/lib/authz/token";
-import type { Viewer } from "@/lib/authz/decide";
-import type { AppPermission } from "@/lib/authz/types";
 import type { JobRow } from "@/services/jobs/types";
-
-const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
-const SITE = {
-  id: SITE_ID, name: "Alpha", url: "https://alpha.test",
-  environment: "production", status: "connected", client_label: null,
-};
+import { ctxFor, SITE, SITE_ID } from "./helpers/mcp-ctx";
 
 const SITE_B_ID = "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c63";
 const SITE_B = {
@@ -28,84 +20,6 @@ const SITE_TOOLS = ["get_inventory", "get_security", "get_seo", "get_geogrid"] a
 const ALL_READ_TOOLS = [
   ...SITE_TOOLS, "list_reports", "get_report_link", "list_jobs", "get_batch",
 ] as const;
-
-/**
- * Builds a ctx with fakes for every repo the six read groups touch,
- * recording audit calls so the "reads are not logged" assertion is real.
- *
- * Also exported for tests/mcp-audit.test.ts, which drives the five enqueue
- * tools against the same fixture: it needs the same read accessors (the
- * enqueue tools call getSite/canAccessSite before queueing), plus a `jobs`
- * fake recording every insert and an `enqueued` list to assert against, and
- * a `readOnly` switch to exercise the writable-token guard.
- */
-export function ctxFor(opts: {
-  permissions?: AppPermission[]; grants?: [string, "read" | "manage"][];
-  readOnly?: boolean;
-} = {}) {
-  const audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[] = [];
-  const enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[] = [];
-  const viewer: Viewer = {
-    id: "u1", email: null, role: "admin",
-    permissions: new Set(opts.permissions ?? []),
-    grants: new Map(opts.grants ?? []),
-  };
-  const auth: TokenAuth = { viewer, tokenId: "tok-1", readOnly: Boolean(opts.readOnly) };
-  return {
-    auth,
-    audited,
-    enqueued,
-    sites: {
-      repo: {
-        listSites: async () => [SITE],
-        getSite: async (id: string) => (id === SITE_ID ? SITE : null),
-      },
-    },
-    inventory: {
-      latestSnapshot: async () => ({
-        payload: { core: { version: "6.8" }, plugins: [], themes: [] },
-        taken_at: "2026-09-01T00:00:00Z",
-      }),
-    },
-    security: {
-      latestGrade: async () => ({ grade: "A" as const, score: 96 }),
-      openVulns: async () => [],
-      latestChecks: async () => ({ runAt: "2026-09-01T00:00:00Z", checks: [] }),
-    },
-    seo: { latestBySource: async () => ({}) },
-    geogrid: {
-      getConfigBySite: async () => null,
-      latestPerKeyword: async () => ({}),
-    },
-    reports: {
-      listForSite: async () => [],
-      getById: async () => null,
-    },
-    jobsRead: {
-      listJobs: async () => [],
-      batchJobs: async () => [],
-    },
-    jobs: {
-      insert: async (r: {
-        type: string; site_id?: string | null; batch_id?: string | null;
-        payload?: Record<string, unknown>;
-      }) => {
-        enqueued.push({
-          type: r.type, siteId: r.site_id ?? null,
-          batchId: r.batch_id ?? null, payload: r.payload ?? {},
-        });
-        return { id: "job-1" };
-      },
-      pendingExists: async () => false,
-    },
-    async audit(action: string, siteId: string | null, detail: Record<string, unknown>) {
-      audited.push({ action, siteId, detail });
-    },
-  } as unknown as ToolCtx & {
-    audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[];
-    enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[];
-  };
-}
 
 async function connectAll(ctx: ToolCtx) {
   const server = new McpServer({ name: "test", version: "0.0.1" });

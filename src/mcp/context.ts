@@ -8,7 +8,7 @@ import { supabaseSeoRepo, type SeoSnapshotRow } from "@/services/seo/repo";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { supabaseReportsRepo, type ReportRow } from "@/services/reports/repo";
 import type { SitesDeps } from "@/services/sites/service";
-import type { ManageDeps } from "@/services/manage/service";
+import { manageSite, type ManageDeps } from "@/services/manage/service";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { InventoryPayload } from "@/services/inventory/types";
 import type { Grade, SecurityCheck } from "@/services/security/types";
@@ -67,6 +67,13 @@ export interface ToolCtx {
    * because activity_log records changes and logging reads would bury them.
    */
   audit(action: string, siteId: string | null, detail: Record<string, unknown>): Promise<void>;
+  /**
+   * The seam a destructive single-site tool calls instead of importing
+   * `manageSite` from "@/services/manage/service" directly. Injectable so a
+   * dry-run test can assert that *no* service call happened -- there would
+   * be nothing to intercept if the tool imported the real function itself.
+   */
+  manageSite: typeof manageSite;
 }
 
 /**
@@ -96,6 +103,7 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     // superset of JobsReadDeps. A distinct field exists so the read tools
     // only ever declare the two methods they actually use.
     jobsRead: jobs,
+    manageSite,
     async audit(action, siteId, detail) {
       await sitesRepo.insertActivity({
         actor: auth.viewer.id,

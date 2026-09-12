@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { ToolCtx } from "@/mcp/context";
 import type { GeoGridConfig } from "@/services/geogrid/types";
-import { ctxFor } from "./mcp-tools-reads.test";
+import { ctxFor } from "./helpers/mcp-ctx";
 
 const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
 const CONFIG_ID = "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62";
