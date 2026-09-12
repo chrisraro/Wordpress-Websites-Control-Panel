@@ -60,6 +60,7 @@ function memoryJobsRepo() {
         .slice(0, filter.limit);
     },
     async cancelBatch() { return 0; },
+    async cancelJobs() { return 0; },
     async retryFailedInBatch() { return 0; },
     async dismissFailed(siteId, type) {
       rows

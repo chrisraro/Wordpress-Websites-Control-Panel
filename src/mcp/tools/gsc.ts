@@ -5,8 +5,23 @@ import { siteSummary } from "./sites";
 import { loadSite } from "./manage";
 import type { ToolCtx } from "../context";
 import { siteEnvironment } from "@/services/sites/portfolio";
+import { friendlySiteError } from "@/lib/mcp/errors";
+import { GSC_FILE_RE } from "@/services/gsc/types";
 
 const PERMISSION = "sites.manage" as const;
+
+/**
+ * Validates the file name at the schema layer, before the confirm gate --
+ * the same shape check `installVerificationFile`/`removeVerificationFile`
+ * run internally (src/services/gsc/types.ts#validateVerificationFileName),
+ * duplicated here for the same reason manage.ts's PLUGIN_FILE_RE is: a name
+ * Google never issued should fail before a dry run ever previews installing
+ * or removing it, not after a confirm reaches the seam and writes an
+ * `ok: false` audit row for an action that was never attempted.
+ */
+const FILE_NAME_SCHEMA = z
+  .string()
+  .regex(GSC_FILE_RE, "Expected a name like google1234abcd5678.html -- copy it exactly from Search Console.");
 
 export function register(server: McpServer, ctx: ToolCtx): void {
   server.registerTool(
@@ -22,13 +37,10 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         `whether Google has VERIFIED the property. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
-        file_name: z
-          .string()
-          .min(1)
-          .describe(
-            "The verification file name Google gave you, e.g. google1234abcd5678.html. " +
-            "Copy it exactly -- a mismatched name is the most common way this fails.",
-          ),
+        file_name: FILE_NAME_SCHEMA.describe(
+          "The verification file name Google gave you, e.g. google1234abcd5678.html. " +
+          "Copy it exactly -- a mismatched name is the most common way this fails.",
+        ),
         ...CONFIRM_SHAPE,
       },
     },
@@ -51,9 +63,18 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         await ctx.audit("mcp.install_gsc_verification", site_id, {
           reason: gate.reason, args: redactArgs(args), ok: true,
         });
-        return ok({ site: siteSummary(site), ...result });
+        return ok({
+          site: siteSummary(site),
+          ...result,
+          ...(result.reachable ? {} : {
+            note:
+              "The file was written but is not publicly fetchable, so Google's verification will " +
+              "fail until that is resolved -- a CDN, a security plugin, or a cache in front of the " +
+              "site are the usual causes.",
+          }),
+        });
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = friendlySiteError(e);
         await ctx.audit("mcp.install_gsc_verification", site_id, {
           reason: gate.reason, args: redactArgs(args), ok: false, error: message,
         });
@@ -70,10 +91,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         `site's document root. This cannot be undone from the panel. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
-        file_name: z
-          .string()
-          .min(1)
-          .describe("The verification file name to remove, e.g. google1234abcd5678.html."),
+        file_name: FILE_NAME_SCHEMA.describe("The verification file name to remove, e.g. google1234abcd5678.html."),
         ...CONFIRM_SHAPE,
       },
     },
@@ -98,7 +116,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         });
         return ok({ site: siteSummary(site), file_name });
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = friendlySiteError(e);
         await ctx.audit("mcp.remove_gsc_verification", site_id, {
           reason: gate.reason, args: redactArgs(args), ok: false, error: message,
         });

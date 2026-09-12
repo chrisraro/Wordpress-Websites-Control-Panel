@@ -6,10 +6,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DESTRUCTIVE_TOOLS } from "@/mcp/tools/manage";
 import { NOT_FOUND } from "@/mcp/tools/sites";
-import { installVerificationFile } from "@/services/gsc/service";
 import type { ToolCtx } from "@/mcp/context";
 import { APP_PERMISSIONS } from "@/lib/authz/types";
-import { ctxFor, SITE_ID, BATCH_ID } from "./helpers/mcp-ctx";
+import { ctxFor, SITE, SITE_ID, BATCH_ID } from "./helpers/mcp-ctx";
+
+/** A second site, not in the fixture viewer's grants, for cancel_batch's
+ * authorization test below. */
+const SITE_B_ID = "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62";
 
 /** Every permission except sites.view_all, which would bypass the grants
  * check entirely and make ctxFor({ grants: [] }) a no-op for canAccessSite. */
@@ -54,8 +57,8 @@ const FAIL_SEAM: Partial<Record<string, (ctx: ReturnType<typeof ctxFor>) => void
     };
   },
   cancel_batch: (ctx) => {
-    (ctx as unknown as { jobs: { cancelBatch: () => Promise<never> } }).jobs.cancelBatch = async () => {
-      ctx.serviceCalls.push("cancelBatch");
+    (ctx as unknown as { jobs: { cancelJobs: () => Promise<never> } }).jobs.cancelJobs = async () => {
+      ctx.serviceCalls.push("cancelJobs");
       throw new Error("the site refused");
     };
   },
@@ -235,6 +238,27 @@ describe.each(DESTRUCTIVE_TOOLS)("%s", (name) => {
     });
     expect(isError(res)).toBe(true);
     expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+});
+
+describe("manage.ts perform()", () => {
+  it("audits a thrown manageSite failure the same way as a returned ok: false one", async () => {
+    const ctx = ctxFor();
+    (ctx as unknown as { manageSite: () => Promise<never> }).manageSite = async () => {
+      ctx.serviceCalls.push("manageSite");
+      throw new Error("the site refused");
+    };
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "flush_cache",
+      arguments: { site_id: SITE_ID, confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toContain("the site refused");
+    expect(ctx.audited).toHaveLength(1);
+    expect(ctx.audited[0].detail.ok).toBe(false);
+    expect(ctx.audited[0].detail.error).toContain("the site refused");
     await close();
   });
 });
@@ -429,20 +453,90 @@ describe("cancel_batch", () => {
     expect(ctx.audited).toEqual([]);
     await close();
   });
+
+  it("cancels only the visible pending jobs -- a grant on site A must never reach site B's jobs", async () => {
+    // Viewer holds queue.process and a grant on A only, no sites.view_all.
+    const ctx = ctxFor({ permissions: ["queue.process"], grants: [[SITE_ID, "manage"]] });
+    (ctx as unknown as { sites: { repo: { listSites: () => Promise<{ id: string }[]> } } })
+      .sites.repo.listSites = async () => [SITE, { ...SITE, id: SITE_B_ID, name: "Beta" }];
+    (ctx as unknown as {
+      jobsRead: { batchJobs: () => Promise<{ id: string; site_id: string; status: string }[]> };
+    }).jobsRead.batchJobs = async () => [
+      { id: "job-a1", site_id: SITE_ID, status: "pending" },
+      { id: "job-a2", site_id: SITE_ID, status: "pending" },
+      { id: "job-b1", site_id: SITE_B_ID, status: "pending" },
+    ];
+    // Simulates the real (unscoped) cancelBatch: cancels everything sharing
+    // the batch_id regardless of site, the behaviour Fix 1 replaces. Kept
+    // here, distinct from the default cancelJobs fake, so this test proves
+    // the tool no longer calls it.
+    (ctx as unknown as { jobs: { cancelBatch: () => Promise<number> } }).jobs.cancelBatch = async () => {
+      ctx.serviceCalls.push("cancelBatch");
+      return 3;
+    };
+
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "cancel_batch",
+      arguments: { batch_id: BATCH_ID, confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(false);
+    const out = JSON.parse(textOf(res));
+    // The response must match what the preview showed (A's two pending
+    // jobs), not the batch's true total of three.
+    expect(out.cancelled).toBe(2);
+    expect(ctx.cancelJobsCalls).toEqual([["job-a1", "job-a2"]]);
+    await close();
+  });
+
+  it("confirms a no-op cleanly instead of running and auditing an empty cancel", async () => {
+    const ctx = ctxFor();
+    (ctx as unknown as {
+      jobsRead: { batchJobs: () => Promise<{ id: string; site_id: string; status: string }[]> };
+    }).jobsRead.batchJobs = async () => [
+      { id: "job-1", site_id: SITE_ID, status: "done" },
+    ];
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "cancel_batch",
+      arguments: { batch_id: BATCH_ID, confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(false);
+    const out = JSON.parse(textOf(res));
+    expect(out.cancelled).toBe(0);
+    expect(ctx.cancelJobsCalls).toEqual([]);
+    expect(ctx.serviceCalls).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
 });
 
 describe("install_gsc_verification", () => {
-  it("fails cleanly, not with a thrown error, for a file name Google never issued", async () => {
+  it("rejects a file name Google never issued at the schema layer, never reaching the seam or gate", async () => {
     const ctx = ctxFor();
-    (ctx as unknown as { gsc: { install: typeof installVerificationFile } })
-      .gsc.install = installVerificationFile;
     const { client, close } = await connectAll(ctx);
     const res = await client.callTool({
       name: "install_gsc_verification",
       arguments: { site_id: SITE_ID, file_name: "not-a-real-verification-file.html", confirm: true, reason: REASON },
     });
     expect(isError(res)).toBe(true);
-    expect(textOf(res)).toMatch(/google/i);
+    // Schema rejection, not a dry run that then got confirmed and hit the
+    // service -- this action was never attempted, so nothing was audited.
+    expect(ctx.serviceCalls).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("reaches the seam for a well-formed file name", async () => {
+    const ctx = ctxFor();
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "install_gsc_verification",
+      arguments: { site_id: SITE_ID, file_name: "google1234abcd.html", confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(false);
+    expect(ctx.serviceCalls).toContain("gscInstall");
+    expect(ctx.audited).toHaveLength(1);
     await close();
   });
 });
@@ -457,6 +551,31 @@ describe("remove_gsc_verification", () => {
     });
     expect(isError(res)).toBe(true);
     expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("rejects a file name Google never issued at the schema layer, never reaching the seam or gate", async () => {
+    const ctx = ctxFor();
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "remove_gsc_verification",
+      arguments: { site_id: SITE_ID, file_name: "not-a-real-verification-file.html", confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(true);
+    expect(ctx.serviceCalls).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("reaches the seam for a well-formed file name", async () => {
+    const ctx = ctxFor();
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({
+      name: "remove_gsc_verification",
+      arguments: { site_id: SITE_ID, file_name: "google1234abcd.html", confirm: true, reason: REASON },
+    });
+    expect(isError(res)).toBe(false);
+    expect(ctx.serviceCalls).toContain("gscRemove");
     await close();
   });
 });

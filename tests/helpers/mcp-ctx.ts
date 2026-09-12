@@ -53,6 +53,11 @@ export function ctxFor(opts: {
   const audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[] = [];
   const enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[] = [];
   const serviceCalls: string[] = [];
+  /** Every call to jobs.cancelJobs, in order, recording exactly which ids it
+   * was asked to cancel -- see cancel_batch's authorization test in
+   * tests/mcp-tools-destructive.test.ts, which asserts an invisible site's
+   * job id never appears here. */
+  const cancelJobsCalls: string[][] = [];
   const viewer: Viewer = {
     id: "u1", email: null, role: "admin",
     // Defaults to every permission and a manage grant on the fixture site:
@@ -70,6 +75,7 @@ export function ctxFor(opts: {
     audited,
     enqueued,
     serviceCalls,
+    cancelJobsCalls,
     sites: {
       repo: {
         listSites: async () => [SITE],
@@ -143,6 +149,15 @@ export function ctxFor(opts: {
         serviceCalls.push("cancelBatch");
         return 1;
       },
+      // The write half of the seam cancel_batch actually calls -- see
+      // src/services/jobs/repo.ts's JobsRepo#cancelJobs. Records exactly the
+      // ids it was asked to cancel so a test can assert the tool never
+      // widens the request past what its preview showed the caller.
+      async cancelJobs(ids: string[]) {
+        serviceCalls.push("cancelJobs");
+        cancelJobsCalls.push(ids);
+        return ids.length;
+      },
     },
     // The injectable seam -- see src/mcp/context.ts's `manageSite` field.
     async manageSite() {
@@ -205,5 +220,6 @@ export function ctxFor(opts: {
     audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[];
     enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[];
     serviceCalls: string[];
+    cancelJobsCalls: string[][];
   };
 }

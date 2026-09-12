@@ -52,6 +52,17 @@ export interface JobsRepo {
    * actually stopped rather than what was asked for.
    */
   cancelBatch(batchId: string): Promise<number>;
+  /**
+   * Calls off exactly the given jobs, if each is still pending. Same guard as
+   * cancelBatch (`status = 'pending'`, `cancelled_at IS NULL`) but scoped to
+   * explicit ids rather than every row sharing a `batch_id` -- this is what
+   * the MCP `cancel_batch` tool calls so what actually gets stopped can never
+   * exceed what a grant-scoped viewer's preview showed them (see
+   * src/mcp/tools/jobs.ts). Returns 0 immediately for an empty array without
+   * issuing a query -- `.in("id", [])` is not a filter any other caller in
+   * this codebase sends to PostgREST.
+   */
+  cancelJobs(ids: string[]): Promise<number>;
   /** Puts every failed job in a batch back on the queue. Returns the count. */
   retryFailedInBatch(batchId: string): Promise<number>;
 }
@@ -112,6 +123,17 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .is("cancelled_at", null)
         .select("id");
       if (error) throw new Error(`jobs.cancelBatch failed: ${error.message}`, { cause: error });
+      return (data ?? []).length;
+    },
+    async cancelJobs(ids) {
+      if (ids.length === 0) return 0;
+      const { data, error } = await db.from("jobs")
+        .update({ cancelled_at: new Date().toISOString() })
+        .in("id", ids)
+        .eq("status", "pending")
+        .is("cancelled_at", null)
+        .select("id");
+      if (error) throw new Error(`jobs.cancelJobs failed: ${error.message}`, { cause: error });
       return (data ?? []).length;
     },
     async retryFailedInBatch(batchId) {

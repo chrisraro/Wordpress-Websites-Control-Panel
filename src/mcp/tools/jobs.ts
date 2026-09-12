@@ -200,12 +200,23 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         const pending = visibleJobs.filter((j) => j.status === "pending" && !j.cancelled_at);
         const notPending = visibleJobs.length - pending.length;
 
-        const summary = pending.length === 0
-          ? `Would cancel nothing: none of this batch's ${visibleJobs.length} visible job(s) are still pending.`
-          : `Would stop ${pending.length} still-pending job(s) in this batch.` +
-            (notPending > 0
-              ? ` ${notPending} job(s) are already running, finished, or cancelled, and cannot be reached from here.`
-              : "");
+        // Nothing visible is pending: there is nothing to gate a confirm on
+        // and nothing that would be attempted, so this returns before
+        // gateConfirm and leaves no audit row -- the same "no-op enqueues
+        // are not audited" rule commit af7809e established for the enqueue
+        // tools' `dedupe: true` no-op path.
+        if (pending.length === 0) {
+          return ok({
+            batch_id,
+            cancelled: 0,
+            note: `None of this batch's ${visibleJobs.length} visible job(s) are still pending.`,
+          });
+        }
+
+        const summary = `Would stop ${pending.length} still-pending job(s) in this batch.` +
+          (notPending > 0
+            ? ` ${notPending} job(s) are already running, finished, or cancelled, and cannot be reached from here.`
+            : "");
 
         const gate = gateConfirm(ctx.auth, args, summary, {
           batch_id, pending: pending.length, not_pending: notPending,
@@ -213,16 +224,19 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (!gate.proceed) return gate.result;
 
         try {
-          const cancelled = await ctx.jobs.cancelBatch(batch_id);
+          // Cancel exactly the visible pending ids the preview named --
+          // never the whole batch_id (cancelBatch), which would also reach
+          // jobs on sites this caller cannot see. See JobsRepo#cancelJobs.
+          const cancelled = await ctx.jobs.cancelJobs(pending.map((j) => j.id));
           await ctx.audit("mcp.cancel_batch", null, {
             reason: gate.reason, args: redactArgs(args), ok: true, cancelled,
           });
           return ok({
             batch_id,
             cancelled,
-            note: cancelled < visibleJobs.length
-              ? `${cancelled} of the batch's visible jobs were pending and got stopped; ` +
-                "the rest had already started, finished, or were already cancelled."
+            note: cancelled < pending.length
+              ? `${cancelled} of the batch's visible pending jobs were stopped; ` +
+                "the rest started running, or finished, or were cancelled elsewhere before this could reach them."
               : undefined,
           });
         } catch (e) {

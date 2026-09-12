@@ -58,15 +58,29 @@ export async function loadSite(
   return { site };
 }
 
-/** Runs one ManageAction through the injected seam, then audits the outcome. */
+/**
+ * Runs one ManageAction through the injected seam, then audits the outcome.
+ *
+ * `manageSite` normally catches its own failures and returns `{ ok: false }`,
+ * which is what the happy-path audit line below records. A thrown exception
+ * is audited too, on the way back out -- see ToolCtx#audit's docstring for
+ * the rule this keeps in step with the other destructive tools' seams.
+ */
 async function perform(
   ctx: ToolCtx, toolName: string, site_id: string, action: ManageAction, reason: string, args: unknown,
 ) {
-  const result = await ctx.manageSite(ctx.manage, site_id, ctx.auth.viewer.id, action);
-  await ctx.audit(`mcp.${toolName}`, site_id, {
-    reason, args: redactArgs(args as Record<string, unknown>), ok: result.ok,
-  });
-  return result;
+  try {
+    const result = await ctx.manageSite(ctx.manage, site_id, ctx.auth.viewer.id, action);
+    await ctx.audit(`mcp.${toolName}`, site_id, {
+      reason, args: redactArgs(args as Record<string, unknown>), ok: result.ok,
+    });
+    return result;
+  } catch (e) {
+    await ctx.audit(`mcp.${toolName}`, site_id, {
+      reason, args: redactArgs(args as Record<string, unknown>), ok: false, error: friendlySiteError(e),
+    });
+    throw e;
+  }
 }
 
 export function register(server: McpServer, ctx: ToolCtx): void {

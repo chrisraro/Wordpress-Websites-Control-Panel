@@ -68,6 +68,11 @@ export interface ToolCtx {
   /**
    * One activity_log row. Writes and enqueues only -- reads are never audited,
    * because activity_log records changes and logging reads would bury them.
+   *
+   * The audit rule: a performed or attempted live action is audited whether
+   * its seam reports failure by return value or by throw. Read-side failures
+   * that occur before the act (loading the site, computing a plan) are not
+   * audited, because nothing was attempted.
    */
   audit(action: string, siteId: string | null, detail: Record<string, unknown>): Promise<void>;
   /**
