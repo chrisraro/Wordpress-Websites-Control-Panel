@@ -216,6 +216,25 @@ describe("redactArgs", () => {
     const result = redactArgs({ node: cyclic });
     expect(result).toEqual({ node: { name: "x", self: "[circular]" } });
   });
+
+  it("does not hang on a cycle reached through an array", () => {
+    const cyclic: Record<string, unknown> = { name: "x" };
+    cyclic.children = [cyclic];
+    const result = redactArgs({ node: cyclic });
+    expect(result).toEqual({ node: { name: "x", children: ["[circular]"] } });
+  });
+
+  it("renders the same object referenced from two sibling keys in full both times, since a shared reference is not a cycle", () => {
+    const shared = { a: 1 };
+    const result = redactArgs({ x: shared, y: shared });
+    expect(result).toEqual({ x: { a: 1 }, y: { a: 1 } });
+  });
+
+  it("renders the same object appearing twice inside an array in full both times", () => {
+    const shared = { a: 1 };
+    const result = redactArgs({ list: [shared, shared] });
+    expect(result).toEqual({ list: [{ a: 1 }, { a: 1 }] });
+  });
 });
 
 describe("result shapes", () => {

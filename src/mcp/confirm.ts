@@ -71,12 +71,16 @@ function redactValue(v: unknown, seen: WeakSet<object>): unknown {
   if (Array.isArray(v)) {
     if (seen.has(v)) return "[circular]";
     seen.add(v);
-    return v.map((item) => redactValue(item, seen));
+    const out = v.map((item) => redactValue(item, seen));
+    seen.delete(v);
+    return out;
   }
   if (isPlainObject(v)) {
     if (seen.has(v)) return "[circular]";
     seen.add(v);
-    return redactObject(v, seen);
+    const out = redactObject(v, seen);
+    seen.delete(v);
+    return out;
   }
   return v;
 }
@@ -97,10 +101,17 @@ function redactObject(
  * permanent record (the activity log). Recurses into plain objects and
  * arrays: a key matching the pattern is redacted wholesale -- including when
  * its value is itself an object -- without descending further into it.
- * Scalars pass through unchanged, and non-plain values (Date, Map, Set,
- * class instances, functions) are left alone rather than walked. A WeakSet
- * of visited containers guards against a cyclic object hanging this
- * function.
+ * Scalars pass through unchanged. isPlainObject excludes built-ins that
+ * carry their own internal tag -- Date, Map, Set, RegExp, Function, Error --
+ * so those are left alone rather than walked. A plain `class Foo {}`
+ * instance is indistinguishable from an object literal by that check and
+ * *will* be walked via Object.entries; this is harmless because MCP tool
+ * arguments arrive as JSON and so can never actually contain a class
+ * instance. A WeakSet holding the chain of containers currently being
+ * walked (added before recursing, removed after) guards against a cyclic
+ * object hanging this function, while letting the same object appear more
+ * than once outside of a cycle -- e.g. as two sibling values -- without
+ * being mistaken for one.
  */
 export function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   return redactObject(args, new WeakSet());
