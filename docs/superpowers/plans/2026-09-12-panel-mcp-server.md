@@ -558,8 +558,11 @@ create table api_tokens (
 
 create index api_tokens_user_id_idx on api_tokens (user_id);
 
--- Authentication looks a token up by hash on every single MCP request.
-create index api_tokens_token_hash_idx on api_tokens (token_hash);
+-- Deliberately NO separate index on token_hash. Authentication looks a token up
+-- by hash on every single MCP request, but the `unique` constraint above is
+-- already implemented by a unique btree index on that column, which serves the
+-- equality lookup. A second index would only add storage and per-write
+-- maintenance on a table written to on every mint and revoke.
 
 -- Service-role only, like the other credential-adjacent tables: RLS is enabled
 -- with no policies, so anon and authenticated clients can reach nothing here.
