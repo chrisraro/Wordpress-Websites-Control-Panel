@@ -23,6 +23,7 @@
 - A site the viewer cannot reach is reported as **not found**, never as forbidden — the existence of a client's site is itself information.
 - Excluded by decision: user, role and permission management tools. OAuth, rate limiting, per-token site scoping, MCP resources and prompts are out of scope.
 - Tests live in `tests/*.test.ts` (flat, no subdirectories). Run with `npm test`. The `@` alias resolves to `src`.
+- **Every UUID in a test fixture must be a real RFC 4122 v4 UUID** — version nibble `4`, variant nibble `8`/`9`/`a`/`b`. zod 4's `.uuid()` enforces this, and a lazy fixture like `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` is rejected as invalid even though it looks UUID-shaped. Postgres `gen_random_uuid()` always produces valid v4, so strict validation is correct for production and only careless fixtures fail. The canonical fixtures this plan uses are `1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51` (site A), `2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62` (site B) and `3d8a5f6b-7e9a-4c14-8f5d-8b6e4c2a9d73` (a batch id). Reuse them; if you need another, generate it with `crypto.randomUUID()` rather than typing a repeated character.
 - Any test importing a module that transitively imports `src/lib/authz/server.ts` must call `vi.mock("server-only", () => ({}))` first — there is no real `server-only` package installed.
 
 ---
@@ -89,11 +90,11 @@ describe("the SDK accepts this project's zod and round-trips a tool", () => {
 
     const result = await client.callTool({
       name: "echo_site",
-      arguments: { site_id: "11111111-1111-1111-1111-111111111111", times: 2 },
+      arguments: { site_id: "0a5f2c3e-4b6d-4f81-9c2a-7e5d1b3f8a64", times: 2 },
     });
     const text = (result.content as { type: string; text: string }[])[0].text;
     expect(JSON.parse(text)).toEqual({
-      site_id: "11111111-1111-1111-1111-111111111111",
+      site_id: "0a5f2c3e-4b6d-4f81-9c2a-7e5d1b3f8a64",
       times: 2,
     });
 
@@ -135,7 +136,7 @@ Expected: FAIL — `Cannot find module '@/mcp/schema'`.
 
 - [ ] **Step 3: Create `src/mcp/schema.ts`, choosing the zod entry point the SDK accepts**
 
-Write this version **first**:
+**Outcome, already established — use plain `zod`, not `zod/v3`.** This step was run and the feared conversion bug does **not** exist: zod 4.4.3 converts to JSON Schema with `properties` and `required` fully intact, rejects bad values end to end, and accepts real `crypto.randomUUID()` / `gen_random_uuid()` v4 UUIDs. The only thing that failed was a fixture UUID of repeated characters, which is genuinely not a valid RFC 4122 UUID — see the fixture rule in Global Constraints. Do **not** switch to `zod/v3`: it is a deprecated migration namespace, and adopting it across the whole MCP layer to accommodate an invalid fixture would weaken production validation.
 
 ```ts
 /**
@@ -143,12 +144,18 @@ Write this version **first**:
  *
  * Why `z` is re-exported here rather than imported from "zod" in each tool
  * file: the SDK converts these schemas to JSON Schema for tools/list, and that
- * conversion is version-sensitive. This project is on zod 4; if the SDK's
- * converter cannot read zod 4 schemas it produces an EMPTY properties object
- * and every tool silently accepts anything. Pinning the import to one module
- * means switching entry points is a one-line change here rather than an edit
- * to every tool file. tests/mcp-schema.test.ts asserts the converted schema
- * keeps its properties.
+ * conversion is version-sensitive, so if it ever has to change it should be a
+ * one-line change here rather than an edit to every tool file.
+ *
+ * Verified on zod 4.4.3 + SDK 1.30.0: conversion keeps `properties` and
+ * `required` intact, and validation rejects malformed input end to end.
+ * tests/mcp-schema.test.ts pins both, because the failure mode of a mismatch
+ * is an EMPTY properties object -- every tool silently accepting anything,
+ * with nothing thrown.
+ *
+ * Note for tool authors: zod 4's `.uuid()` enforces real RFC 4122 version and
+ * variant nibbles. Production ids come from Postgres gen_random_uuid() and
+ * always pass; only placeholder fixtures made of repeated characters fail.
  */
 export { z } from "zod";
 
@@ -162,13 +169,7 @@ import pkg from "../../package.json" with { type: "json" };
 export const MCP_SERVER_VERSION: string = pkg.version;
 ```
 
-Run the test. **If the first test fails on the `properties` assertion** (empty or missing properties), change only the first export line to zod 4's built-in v3 compatibility namespace, which exists for exactly this situation:
-
-```ts
-export { z } from "zod/v3";
-```
-
-Re-run. Then replace the speculative wording in that comment with which entry point actually won and why. Do not start Task 2 until both schema tests pass — every later task depends on this answer.
+Run the test. It should pass as written. If the `properties` assertion fails on some future SDK or zod upgrade, that is the empty-schema bug this test exists to catch — report it rather than reaching for `zod/v3`, because silently weakening every tool's validation is a worse outcome than a failing test.
 
 If `import ... with { type: "json" }` is rejected by the transform, replace those two lines with:
 
@@ -1382,12 +1383,12 @@ import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 
 const SITE_A = {
-  id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "Alpha",
+  id: "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51", name: "Alpha",
   url: "https://alpha.test", environment: "production", status: "connected",
   client_label: "Alpha Co",
 };
 const SITE_B = {
-  id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name: "Beta",
+  id: "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62", name: "Beta",
   url: "https://beta.test", environment: "staging", status: "connected",
   client_label: null,
 };
@@ -1952,7 +1953,7 @@ import type { TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 
-const SITE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
 const SITE = {
   id: SITE_ID, name: "Alpha", url: "https://alpha.test",
   environment: "production", status: "connected", client_label: null,
@@ -2181,7 +2182,7 @@ import type { TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 
-const SITE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
 const SITE = {
   id: SITE_ID, name: "Alpha", url: "https://alpha.test",
   environment: "staging", status: "connected", client_label: null,
@@ -2418,8 +2419,8 @@ import type { ToolCtx } from "@/mcp/context";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 
-const SITE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-const BATCH_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
+const BATCH_ID = "3d8a5f6b-7e9a-4c14-8f5d-8b6e4c2a9d73";
 const REASON = "Applying the September security patch set";
 const SITE = {
   id: SITE_ID, name: "Alpha", url: "https://alpha.test",
