@@ -2365,7 +2365,7 @@ git commit -m "feat(mcp): enqueue tools for inventory, security, seo, geogrid an
 
 ### Task 10: The destructive tools
 
-**Before writing any code, raise this with the human.** The spec's §Tools table lists twenty-seven rows and its prose says "Twenty-eight tools". Separately, `ManageAction` in `src/services/manage/types.ts` supports three kinds the spec's table omits but the UI exposes: `activate_theme`, `delete_theme` and `flush_permalinks`. Ask which of the two counts governs and whether those three are in scope, then implement exactly that answer and correct the spec's count. Do not silently ship a different number of tools than the approved spec states. The table below assumes the answer is "include them", giving fifteen destructive tools.
+**Tool count — resolved 2026-09-12, no need to ask again.** The spec's §Tools table listed twenty-seven rows while its prose said "Twenty-eight tools", and `ManageAction` in `src/services/manage/types.ts` supports three kinds the table omitted but the UI already exposes. The human's decision: **include all three** (`activate_theme`, `delete_theme`, `flush_permalinks`), because leaving them out would let a person do more from the dashboard than an LLM can do through the server. That gives **fifteen destructive tools and thirty-one in total**, which is exactly what the table below specifies. Build it as written. Task 13 corrects the spec's stated count to thirty-one.
 
 **Files:**
 - Create: `src/mcp/tools/manage.ts`, `src/mcp/tools/fleet.ts`, `src/mcp/tools/gsc.ts`
