@@ -96,11 +96,15 @@ export function ApiTokensCard({
   }, [state, toast, router]);
 
   function handleRevoke(tokenId: string) {
+    // Close the dialog immediately and show the pending state on the row's
+    // own button instead -- the same sequencing plugin-table.tsx's bulk
+    // confirm uses, so a slow request doesn't leave the confirmation dialog
+    // sitting open indefinitely.
+    setRevokeTarget(null);
     setBusyId(tokenId);
     startRevoke(async () => {
       const result = await revokeTokenAction(tokenId);
       setBusyId(null);
-      setRevokeTarget(null);
       if (result.ok) {
         toast({ tone: "success", title: "Token revoked" });
         router.refresh();
@@ -114,7 +118,7 @@ export function ApiTokensCard({
     <div className="space-y-5">
       {mode === "self" ? (
         <form ref={formRef} action={formAction} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label htmlFor="token-name" className={labelClass}>
                 Name
@@ -143,7 +147,7 @@ export function ApiTokensCard({
             </div>
           </div>
 
-          <label className="flex cursor-pointer items-start gap-2 text-body text-ink">
+          <label className="flex min-h-8 cursor-pointer items-start gap-2 text-body text-ink">
             <input
               type="checkbox"
               name="read_only"
@@ -180,11 +184,12 @@ export function ApiTokensCard({
 
       {state?.ok && state.secret && (
         <div className="space-y-2 rounded-2xl border border-hairline bg-canvas p-3">
-          <p className="text-body font-medium text-ink">
-            Copy this token now — this will not be shown again.
+          <p className="text-body text-ink">
+            <span className="font-semibold">This will not be shown again.</span> Copy it now and
+            store it somewhere safe.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <code className="min-w-0 flex-1 break-all text-caption tracking-normal text-ink">
+            <code className="min-w-0 flex-1 break-all font-mono text-caption tracking-normal text-ink">
               {state.secret}
             </code>
             {/* secret: a bearer credential -- see the invite dialog for the
@@ -209,7 +214,7 @@ export function ApiTokensCard({
                 <div className="min-w-0">
                   <p className="truncate text-body font-medium text-ink">{t.name}</p>
                   <p className="mt-0.5 text-caption tracking-normal text-mid-gray">
-                    <span data-tabular>{t.token_prefix}…</span> · created{" "}
+                    <span className="font-mono">{t.token_prefix}…</span> · created{" "}
                     {new Date(t.created_at).toLocaleDateString()} · last used{" "}
                     {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}
                   </p>
@@ -241,7 +246,7 @@ export function ApiTokensCard({
         <p className={hintClass}>
           Use a token you&apos;ve copied in place of the placeholder below.
         </p>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words text-caption tracking-normal text-ink">
+        <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-caption tracking-normal text-ink">
           {`claude mcp add --transport http wp-control-panel ${appUrl}/api/mcp \\\n  --header "Authorization: Bearer <your token>"`}
         </pre>
       </div>
