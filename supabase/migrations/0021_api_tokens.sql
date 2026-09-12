@@ -24,9 +24,6 @@ create table api_tokens (
 
 create index api_tokens_user_id_idx on api_tokens (user_id);
 
--- Authentication looks a token up by hash on every single MCP request.
-create index api_tokens_token_hash_idx on api_tokens (token_hash);
-
 -- Service-role only, like the other credential-adjacent tables: RLS is enabled
 -- with no policies, so anon and authenticated clients can reach nothing here.
 -- The panel reads and writes this table exclusively through
