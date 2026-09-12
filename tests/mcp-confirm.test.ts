@@ -3,8 +3,9 @@ vi.mock("server-only", () => ({}));
 
 import {
   gateConfirm, redactArgs, ok, fail, preview, ENVIRONMENT_NOTE,
-  requirePermission, requireWritableToken,
+  requirePermission, requireWritableToken, CONFIRM_SHAPE,
 } from "@/mcp/confirm";
+import { z } from "@/mcp/schema";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
@@ -76,6 +77,65 @@ describe("gateConfirm", () => {
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBeFalsy();
   });
+
+  describe("reason length boundaries", () => {
+    it("errors at exactly 9 characters (one below the minimum)", () => {
+      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(9) }, "s", {});
+      expect(g.proceed).toBe(false);
+      if (g.proceed) throw new Error("unreachable");
+      expect(g.result.isError).toBe(true);
+    });
+
+    it("proceeds at exactly 10 characters (the minimum)", () => {
+      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(10) }, "s", {});
+      expect(g.proceed).toBe(true);
+      if (!g.proceed) throw new Error("unreachable");
+      expect(g.reason).toBe("x".repeat(10));
+    });
+
+    it("proceeds at exactly 500 characters (the maximum)", () => {
+      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(500) }, "s", {});
+      expect(g.proceed).toBe(true);
+      if (!g.proceed) throw new Error("unreachable");
+      expect(g.reason).toBe("x".repeat(500));
+    });
+
+    it("errors at exactly 501 characters (one above the maximum)", () => {
+      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(501) }, "s", {});
+      expect(g.proceed).toBe(false);
+      if (g.proceed) throw new Error("unreachable");
+      expect(g.result.isError).toBe(true);
+      expect(g.result.content[0].text).toMatch(/at most/i);
+    });
+  });
+});
+
+describe("CONFIRM_SHAPE", () => {
+  const schema = z.object(CONFIRM_SHAPE);
+
+  it("defaults confirm to false when omitted", () => {
+    const parsed = schema.parse({});
+    expect(parsed.confirm).toBe(false);
+  });
+
+  it("rejects a reason shorter than the minimum", () => {
+    const result = schema.safeParse({ confirm: true, reason: "x".repeat(9) });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a reason within bounds", () => {
+    const result = schema.safeParse({ confirm: true, reason: "x".repeat(10) });
+    expect(result.success).toBe(true);
+  });
+
+  it("feeds the parsed default result into gateConfirm to produce a preview", () => {
+    const parsed = schema.parse({});
+    const g = gateConfirm(auth(), parsed, "Would update 3 plugins", { count: 3 });
+    expect(g.proceed).toBe(false);
+    if (g.proceed) throw new Error("unreachable");
+    expect(g.result.isError).toBeFalsy();
+    expect(g.result.content[0].text).toContain("Would update 3 plugins");
+  });
 });
 
 describe("requirePermission", () => {
@@ -119,6 +179,42 @@ describe("redactArgs", () => {
   it("leaves ordinary values alone", () => {
     expect(redactArgs({ confirm: true, reason: "why" }))
       .toEqual({ confirm: true, reason: "why" });
+  });
+
+  it("recurses into a nested object to redact a credential", () => {
+    expect(redactArgs({ site: { id: "s1", app_password: "hunter2" } }))
+      .toEqual({ site: { id: "s1", app_password: "[redacted]" } });
+  });
+
+  it("recurses into an array of objects", () => {
+    expect(redactArgs({
+      sites: [
+        { id: "s1", api_key: "k1" },
+        { id: "s2", api_key: "k2" },
+      ],
+    })).toEqual({
+      sites: [
+        { id: "s1", api_key: "[redacted]" },
+        { id: "s2", api_key: "[redacted]" },
+      ],
+    });
+  });
+
+  it("redacts a matching key wholesale, even when its value is an object", () => {
+    expect(redactArgs({ app_password: { user: "u1", value: "p1" } }))
+      .toEqual({ app_password: "[redacted]" });
+  });
+
+  it("leaves a Date value untouched rather than trying to recurse into it", () => {
+    const date = new Date("2026-01-01T00:00:00.000Z");
+    expect(redactArgs({ created_at: date })).toEqual({ created_at: date });
+  });
+
+  it("does not hang on a cyclic object", () => {
+    const cyclic: Record<string, unknown> = { name: "x" };
+    cyclic.self = cyclic;
+    const result = redactArgs({ node: cyclic });
+    expect(result).toEqual({ node: { name: "x", self: "[circular]" } });
   });
 });
 

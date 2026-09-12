@@ -63,12 +63,47 @@ export function preview(summary: string, details: unknown): ToolResult {
 
 const SECRETISH = /password|secret|token|key/i;
 
-export function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Object.prototype.toString.call(v) === "[object Object]";
+}
+
+function redactValue(v: unknown, seen: WeakSet<object>): unknown {
+  if (Array.isArray(v)) {
+    if (seen.has(v)) return "[circular]";
+    seen.add(v);
+    return v.map((item) => redactValue(item, seen));
+  }
+  if (isPlainObject(v)) {
+    if (seen.has(v)) return "[circular]";
+    seen.add(v);
+    return redactObject(v, seen);
+  }
+  return v;
+}
+
+function redactObject(
+  obj: Record<string, unknown>,
+  seen: WeakSet<object>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) {
-    out[k] = SECRETISH.test(k) ? "[redacted]" : v;
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = SECRETISH.test(k) ? "[redacted]" : redactValue(v, seen);
   }
   return out;
+}
+
+/**
+ * Redacts anything that looks like a credential before it reaches a
+ * permanent record (the activity log). Recurses into plain objects and
+ * arrays: a key matching the pattern is redacted wholesale -- including when
+ * its value is itself an object -- without descending further into it.
+ * Scalars pass through unchanged, and non-plain values (Date, Map, Set,
+ * class instances, functions) are left alone rather than walked. A WeakSet
+ * of visited containers guards against a cyclic object hanging this
+ * function.
+ */
+export function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return redactObject(args, new WeakSet());
 }
 
 /**
