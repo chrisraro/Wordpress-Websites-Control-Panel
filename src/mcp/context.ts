@@ -2,15 +2,50 @@ import { createServiceSupabase } from "@/lib/supabase/server";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo, type JobsRepo } from "@/services/jobs/repo";
+import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
+import { supabaseSecurityRepo, type OpenVuln } from "@/services/security/repo";
+import { supabaseSeoRepo, type SeoSnapshotRow } from "@/services/seo/repo";
+import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import type { SitesDeps } from "@/services/sites/service";
 import type { ManageDeps } from "@/services/manage/service";
 import type { TokenAuth } from "@/lib/authz/token";
+import type { InventoryPayload } from "@/services/inventory/types";
+import type { Grade, SecurityCheck } from "@/services/security/types";
+import type { SeoSource } from "@/services/seo/types";
+import type { GeoGridConfig, GeoGridSnapshot } from "@/services/geogrid/types";
+
+/** The one read `get_inventory` needs -- not the writer used by the collector. */
+export interface InventoryReadDeps {
+  latestSnapshot(siteId: string): Promise<{ payload: InventoryPayload; taken_at: string } | null>;
+}
+
+/** The three reads `get_security` needs -- no feed or write access. */
+export interface SecurityReadDeps {
+  latestGrade(siteId: string): Promise<Grade | null>;
+  openVulns(siteId: string): Promise<OpenVuln[]>;
+  latestChecks(siteId: string): Promise<{ runAt: string; checks: SecurityCheck[] } | null>;
+}
+
+/** The one read `get_seo` needs -- not history, score trend, or the writer. */
+export interface SeoReadDeps {
+  latestBySource(siteId: string): Promise<Partial<Record<SeoSource, SeoSnapshotRow>>>;
+}
+
+/** The two reads `get_geogrid` needs -- not config upsert or snapshot history. */
+export interface GeoGridReadDeps {
+  getConfigBySite(siteId: string): Promise<GeoGridConfig | null>;
+  latestPerKeyword(configId: string): Promise<Record<string, GeoGridSnapshot>>;
+}
 
 export interface ToolCtx {
   auth: TokenAuth;
   sites: SitesDeps;
   manage: ManageDeps;
   jobs: JobsRepo;
+  inventory: InventoryReadDeps;
+  security: SecurityReadDeps;
+  seo: SeoReadDeps;
+  geogrid: GeoGridReadDeps;
   /**
    * One activity_log row. Writes and enqueues only -- reads are never audited,
    * because activity_log records changes and logging reads would bury them.
@@ -36,6 +71,10 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     jobs,
     sites: { repo: sitesRepo, mcp: createSiteMcpClient, jobs },
     manage: { sites: sitesRepo, jobs, mcp: createSiteMcpClient },
+    inventory: supabaseSnapshotsRepo(db),
+    security: supabaseSecurityRepo(db),
+    seo: supabaseSeoRepo(db),
+    geogrid: supabaseGeoGridRepo(db),
     async audit(action, siteId, detail) {
       await sitesRepo.insertActivity({
         actor: auth.viewer.id,

@@ -2,8 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "./schema";
 import type { ToolCtx } from "./context";
 import * as sites from "./tools/sites";
+import * as inventory from "./tools/inventory";
+import * as security from "./tools/security";
+import * as seo from "./tools/seo";
+import * as geogrid from "./tools/geogrid";
 
-const GROUPS: { register(server: McpServer, ctx: ToolCtx): void }[] = [sites];
+const GROUPS: { register(server: McpServer, ctx: ToolCtx): void }[] = [
+  sites, inventory, security, seo, geogrid,
+];
 
 /**
  * Builds a server whose tools are bound to one request's authenticated
