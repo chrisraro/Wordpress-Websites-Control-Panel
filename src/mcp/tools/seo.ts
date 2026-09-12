@@ -57,14 +57,15 @@ export function register(server: McpServer, ctx: ToolCtx): void {
 
       try {
         const job = await enqueueJob(ctx.jobs, "seo_scan", site_id, {}, { dedupe: true });
+        if (job === null) {
+          return ok({
+            queued: false,
+            job_id: null,
+            note: "An SEO scan is already pending for this site; nothing new was queued.",
+          });
+        }
         await ctx.audit("mcp.run_seo_scan", site_id, { args: redactArgs(args) });
-        return ok({
-          queued: job !== null,
-          job_id: job?.id ?? null,
-          note: job === null
-            ? "An SEO scan is already pending for this site; nothing new was queued."
-            : "Queued. Poll list_jobs for completion.",
-        });
+        return ok({ queued: true, job_id: job.id, note: "Queued. Poll list_jobs for completion." });
       } catch (e) {
         return fail(friendlySiteError(e));
       }

@@ -107,6 +107,60 @@ describe.each(ALL_ENQUEUE_TOOLS)("$name guards", (t) => {
     expect(ctx.audited).toEqual([]);
     await close();
   });
+
+  // Fix 1 (review round 1): a viewer who holds the permission and a
+  // writable token but has no grant for this site -- no `sites.view_all`
+  // and no per-site grant -- must be refused by `canAccessSite`, the same
+  // as an unrecognized site id, and distinctly from a permission or
+  // read-only-token refusal.
+  it("refuses when permitted and writable but has no grant for the site", async () => {
+    const ctx = ctxFor({ permissions: [t.permission], grants: [] });
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({ name: t.name, arguments: { site_id: SITE_ID } });
+
+    expect(isError(res)).toBe(true);
+    const text = textOf(res);
+    expect(text).toMatch(/not found/i);
+    expect(text).not.toMatch(/permission/i);
+    expect(text).not.toMatch(/forbidden/i);
+    expect(ctx.enqueued).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+});
+
+// Fix 2 (review round 1, controller decision): `enqueueJob(..., { dedupe:
+// true })` returns `null` -- inserting nothing -- when a matching job is
+// already pending. `activity_log` records changes, and "already queued" is
+// not a change, so the four simple tools must not audit a no-op enqueue.
+describe.each(SIMPLE_ENQUEUE_TOOLS)("$name dedupe", (t) => {
+  it("a job already pending is not re-enqueued and not audited", async () => {
+    const ctx = ctxFor({
+      permissions: [t.permission], grants: [[SITE_ID, "manage"]], pendingExists: true,
+    });
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({ name: t.name, arguments: { site_id: SITE_ID } });
+
+    expect(isError(res)).toBe(false);
+    expect(JSON.parse(textOf(res)).queued).toBe(false);
+    expect(ctx.enqueued).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("enqueues and audits exactly once when nothing is pending", async () => {
+    const ctx = ctxFor({
+      permissions: [t.permission], grants: [[SITE_ID, "manage"]], pendingExists: false,
+    });
+    const { client, close } = await connectAll(ctx);
+    const res = await client.callTool({ name: t.name, arguments: { site_id: SITE_ID } });
+
+    expect(isError(res)).toBe(false);
+    expect(JSON.parse(textOf(res)).queued).toBe(true);
+    expect(ctx.enqueued).toHaveLength(1);
+    expect(ctx.audited).toHaveLength(1);
+    await close();
+  });
 });
 
 describe("audit detail", () => {
@@ -203,7 +257,16 @@ describe("generate_report", () => {
     await close();
   });
 
-  it("refuses an out-of-vocabulary section", async () => {
+  // Fix 3 (review round 1): this pins schema-level rejection, not the
+  // handler -- `z.enum(...)` in generate_report's inputSchema rejects an
+  // out-of-vocabulary section before the handler ever runs, so this proves
+  // nothing about parseSections or the (now-deleted) dead
+  // `sections.length === 0` check. The "validated sections" test above is
+  // the handler-level proof: it feeds a schema-valid, non-canonically
+  // ordered `sections` array and asserts the enqueued payload comes out in
+  // REPORT_SECTIONS's canonical order, which only happens if parseSections
+  // actually ran.
+  it("the schema rejects a section outside the vocabulary", async () => {
     const ctx = ctxFor({ permissions: ["reports.generate"], grants: [[SITE_ID, "manage"]] });
     const { client, close } = await connectAll(ctx);
     const res = await client.callTool({

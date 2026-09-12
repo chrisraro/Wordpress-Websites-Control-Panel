@@ -40,6 +40,10 @@ export function ctxFor(opts: {
   permissions?: AppPermission[];
   grants?: [string, "read" | "manage"][];
   readOnly?: boolean;
+  /** When true, `jobs.pendingExists` resolves `true` instead of the default
+   * `false`, so tests can exercise `enqueueJob(..., { dedupe: true })`'s
+   * no-op path (it returns `null` without inserting). */
+  pendingExists?: boolean;
 } = {}) {
   const audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[] = [];
   const enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[] = [];
@@ -115,7 +119,7 @@ export function ctxFor(opts: {
         });
         return { id: "job-1" };
       },
-      pendingExists: async () => false,
+      pendingExists: async () => Boolean(opts.pendingExists),
     },
     // The injectable seam -- see src/mcp/context.ts's `manageSite` field.
     async manageSite() {

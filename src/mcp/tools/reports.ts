@@ -144,8 +144,11 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       if (tokenDenied) return tokenDenied;
       if (!canAccessSite(ctx.auth.viewer, site_id, "read")) return fail(NOT_FOUND);
 
+      // `rawSections` is already schema-validated to a non-empty array drawn
+      // from the enum below, so `parseSections` -- which filters against
+      // REPORT_SECTIONS in canonical order -- always returns a non-empty
+      // result here; there is no reachable "zero sections" case to guard.
       const sections = parseSections(rawSections);
-      if (sections.length === 0) return fail("Choose at least one section.");
 
       try {
         const site = await getSite(ctx.sites, site_id);
@@ -154,14 +157,15 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx.jobs, "report_generate", site_id,
           { sections, period_days }, { dedupe: true },
         );
+        if (job === null) {
+          return ok({
+            queued: false,
+            job_id: null,
+            note: "A report is already pending for this site; nothing new was queued.",
+          });
+        }
         await ctx.audit("mcp.generate_report", site_id, { args: redactArgs(args) });
-        return ok({
-          queued: job !== null,
-          job_id: job?.id ?? null,
-          note: job === null
-            ? "A report is already pending for this site; nothing new was queued."
-            : "Queued. Poll list_jobs for completion.",
-        });
+        return ok({ queued: true, job_id: job.id, note: "Queued. Poll list_jobs for completion." });
       } catch (e) {
         return fail(friendlySiteError(e));
       }
