@@ -15,10 +15,15 @@ const SITE = {
   environment: "production", status: "connected", client_label: null,
 };
 
+const BATCH_ID = "3d8a5f6b-7e9a-4c14-8f5d-8b6e4c2a9d73";
+
 const SITE_TOOLS = ["get_inventory", "get_security", "get_seo", "get_geogrid"] as const;
+const ALL_READ_TOOLS = [
+  ...SITE_TOOLS, "list_reports", "get_report_link", "list_jobs", "get_batch",
+] as const;
 
 /**
- * Builds a ctx with fakes for every repo the four read groups touch,
+ * Builds a ctx with fakes for every repo the six read groups touch,
  * recording audit calls so the "reads are not logged" assertion is real.
  */
 function ctxFor(opts: {
@@ -56,13 +61,21 @@ function ctxFor(opts: {
       getConfigBySite: async () => null,
       latestPerKeyword: async () => ({}),
     },
+    reports: {
+      listForSite: async () => [],
+      getById: async () => null,
+    },
+    jobsRead: {
+      listJobs: async () => [],
+      batchJobs: async () => [],
+    },
     async audit(action: string) { audited.push({ action }); },
   } as unknown as ToolCtx & { audited: { action: string }[] };
 }
 
 async function connectAll(ctx: ToolCtx) {
   const server = new McpServer({ name: "test", version: "0.0.1" });
-  for (const name of ["inventory", "security", "seo", "geogrid"]) {
+  for (const name of ["inventory", "security", "seo", "geogrid", "reports", "jobs"]) {
     const mod = await import(`@/mcp/tools/${name}`);
     mod.register(server, ctx);
   }
@@ -75,10 +88,10 @@ async function connectAll(ctx: ToolCtx) {
 const textOf = (r: unknown) => (r as { content: { text: string }[] }).content[0].text;
 
 describe("read tools", () => {
-  it("registers all four", async () => {
+  it("registers all eight", async () => {
     const { client, close } = await connectAll(ctxFor({ permissions: ["sites.view_all"] }));
     const names = (await client.listTools()).tools.map((t) => t.name);
-    for (const t of SITE_TOOLS) expect(names, t).toContain(t);
+    for (const t of ALL_READ_TOOLS) expect(names, t).toContain(t);
     await close();
   });
 
@@ -113,6 +126,10 @@ describe("read tools", () => {
     for (const name of SITE_TOOLS) {
       await client.callTool({ name, arguments: { site_id: SITE_ID } });
     }
+    await client.callTool({ name: "list_reports", arguments: {} });
+    await client.callTool({ name: "get_report_link", arguments: { report_id: SITE_ID } });
+    await client.callTool({ name: "list_jobs", arguments: {} });
+    await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
     expect(ctx.audited).toEqual([]);
     await close();
   });
@@ -202,6 +219,219 @@ describe("read tools", () => {
       expect(out.configured).toBe(true);
       expect(receivedConfigId).toBe(CONFIG.id);
       expect(out.keywords.plumber.keyword).toBe("plumber");
+      await close();
+    });
+  });
+
+  describe("list_reports", () => {
+    const REPORT = {
+      id: "4e9b6c7d-8f0b-4d25-9a6e-9c7f5d3b0e84",
+      site_id: SITE_ID,
+      generated_at: "2026-09-01T00:00:00Z",
+      sections: ["overview"],
+      period_start: "2026-08-01",
+      period_end: "2026-08-31",
+      storage_path: "reports/alpha/2026-09-01.pdf",
+      share_token: "shared-token-abc",
+      auto: false,
+    };
+
+    it("never includes the share token, and includes the site's environment", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { reports: { listForSite: () => Promise<(typeof REPORT)[]> } }).reports
+        .listForSite = async () => [REPORT];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "list_reports", arguments: { site_id: SITE_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.count).toBe(1);
+      expect("share_token" in out.reports[0]).toBe(false);
+      expect(out.reports[0].site.environment).toBe("production");
+      await close();
+    });
+
+    it("reports not found for a site the viewer cannot see", async () => {
+      const { client, close } = await connectAll(ctxFor({ permissions: [], grants: [] }));
+      const res = await client.callTool({ name: "list_reports", arguments: { site_id: SITE_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
+      expect(textOf(res)).not.toMatch(/permission|forbidden|denied/i);
+      await close();
+    });
+
+    it("returns an empty list rather than erroring when nothing has been generated", async () => {
+      const { client, close } = await connectAll(ctxFor({ permissions: ["sites.view_all"] }));
+      const res = await client.callTool({ name: "list_reports", arguments: {} });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      expect(JSON.parse(textOf(res))).toEqual({ count: 0, reports: [] });
+      await close();
+    });
+  });
+
+  describe("get_report_link", () => {
+    const REPORT_ID = "5f0c7d8e-9a1c-4e36-8b7f-0d8a6e4c1f95";
+
+    it("returns not found for an unknown report id", async () => {
+      const { client, close } = await connectAll(ctxFor({ permissions: ["sites.view_all"] }));
+      const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
+      await close();
+    });
+
+    it("reports not found, not forbidden, for a report on a site the viewer cannot see", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [] });
+      (ctx as unknown as { reports: { getById: () => Promise<unknown> } }).reports.getById = async () => ({
+        id: REPORT_ID, site_id: SITE_ID, generated_at: "2026-09-01T00:00:00Z",
+        sections: [], period_start: null, period_end: null,
+        storage_path: "x.pdf", share_token: "tok", auto: false,
+      });
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
+      expect(textOf(res)).not.toMatch(/permission|forbidden|denied/i);
+      await close();
+    });
+
+    it("returns the public /r/<token> path for an active report", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { reports: { getById: () => Promise<unknown> } }).reports.getById = async () => ({
+        id: REPORT_ID, site_id: SITE_ID, generated_at: "2026-09-01T00:00:00Z",
+        sections: [], period_start: null, period_end: null,
+        storage_path: "x.pdf", share_token: "shared-token-abc", auto: false,
+      });
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.revoked).toBe(false);
+      expect(out.path).toBe("/r/shared-token-abc");
+      expect(out.site.environment).toBe("production");
+      await close();
+    });
+
+    it("reports a revoked link as a successful result, not an error or a broken URL", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { reports: { getById: () => Promise<unknown> } }).reports.getById = async () => ({
+        id: REPORT_ID, site_id: SITE_ID, generated_at: "2026-09-01T00:00:00Z",
+        sections: [], period_start: null, period_end: null,
+        storage_path: "x.pdf", share_token: null, auto: false,
+      });
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.revoked).toBe(true);
+      expect(out.path).toBeNull();
+      expect(out.note).toMatch(/revoked/i);
+      await close();
+    });
+  });
+
+  describe("list_jobs", () => {
+    const JOB = {
+      id: "job-1", type: "geogrid_run" as const, site_id: SITE_ID, batch_id: null,
+      payload: {}, status: "done" as const, attempts: 1,
+      scheduled_for: "2026-09-01T00:00:00Z", last_error: null,
+      cancelled_at: null, dismissed_at: null, finished_at: "2026-09-01T00:05:00Z",
+    };
+
+    it("reports not found for a site the viewer cannot see", async () => {
+      const { client, close } = await connectAll(ctxFor({ permissions: [], grants: [] }));
+      const res = await client.callTool({ name: "list_jobs", arguments: { site_id: SITE_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
+      expect(textOf(res)).not.toMatch(/permission|forbidden|denied/i);
+      await close();
+    });
+
+    it("passes siteIds: null through to the repo for a viewer holding sites.view_all", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      let received: unknown;
+      (ctx as unknown as { jobsRead: { listJobs: (f: unknown) => Promise<unknown[]> } }).jobsRead
+        .listJobs = async (f) => { received = f; return [JOB]; };
+      const { client, close } = await connectAll(ctx);
+      await client.callTool({ name: "list_jobs", arguments: {} });
+      expect(received).toMatchObject({ siteIds: null, limit: 20 });
+      await close();
+    });
+
+    it("passes only the visible site ids through for a viewer scoped by grants", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [[SITE_ID, "read"]] });
+      let received: unknown;
+      (ctx as unknown as { jobsRead: { listJobs: (f: unknown) => Promise<unknown[]> } }).jobsRead
+        .listJobs = async (f) => { received = f; return [JOB]; };
+      const { client, close } = await connectAll(ctx);
+      await client.callTool({ name: "list_jobs", arguments: {} });
+      expect(received).toMatchObject({ siteIds: [SITE_ID] });
+      await close();
+    });
+
+    it("passes status and limit through to the repo", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      let received: unknown;
+      (ctx as unknown as { jobsRead: { listJobs: (f: unknown) => Promise<unknown[]> } }).jobsRead
+        .listJobs = async (f) => { received = f; return []; };
+      const { client, close } = await connectAll(ctx);
+      await client.callTool({ name: "list_jobs", arguments: { status: "failed", limit: 5 } });
+      expect(received).toMatchObject({ status: "failed", limit: 5 });
+      await close();
+    });
+
+    it("includes each job's site environment", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { jobsRead: { listJobs: () => Promise<(typeof JOB)[]> } }).jobsRead
+        .listJobs = async () => [JOB];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "list_jobs", arguments: {} });
+      const out = JSON.parse(textOf(res));
+      expect(out.jobs[0].site.environment).toBe("production");
+      await close();
+    });
+  });
+
+  describe("get_batch", () => {
+    const JOB_ON_SITE = {
+      id: "job-1", type: "plugin_install" as const, site_id: SITE_ID, batch_id: BATCH_ID,
+      payload: {}, status: "done" as const, attempts: 1,
+      scheduled_for: "2026-09-01T00:00:00Z", last_error: null,
+      cancelled_at: null, dismissed_at: null, finished_at: "2026-09-01T00:05:00Z",
+    };
+
+    it("returns the batch's jobs, each with its site's environment, and a done flag", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<(typeof JOB_ON_SITE)[]> } }).jobsRead
+        .batchJobs = async () => [JOB_ON_SITE];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.jobs).toHaveLength(1);
+      expect(out.jobs[0].site.environment).toBe("production");
+      expect(out.done).toBe(true);
+      await close();
+    });
+
+    it("reports not found, not an empty list, when no job in the batch is visible", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [] });
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<(typeof JOB_ON_SITE)[]> } }).jobsRead
+        .batchJobs = async () => [JOB_ON_SITE];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
+      expect(textOf(res)).not.toMatch(/permission|forbidden|denied/i);
+      await close();
+    });
+
+    it("reports not found for a genuinely empty batch, even for a viewer who can see every site", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      // jobsRead.batchJobs already defaults to an empty array in ctxFor.
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBe(true);
+      expect(textOf(res)).toMatch(/not found/i);
       await close();
     });
   });

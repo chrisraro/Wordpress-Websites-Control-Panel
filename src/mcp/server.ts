@@ -6,9 +6,11 @@ import * as inventory from "./tools/inventory";
 import * as security from "./tools/security";
 import * as seo from "./tools/seo";
 import * as geogrid from "./tools/geogrid";
+import * as reports from "./tools/reports";
+import * as jobs from "./tools/jobs";
 
 const GROUPS: { register(server: McpServer, ctx: ToolCtx): void }[] = [
-  sites, inventory, security, seo, geogrid,
+  sites, inventory, security, seo, geogrid, reports, jobs,
 ];
 
 /**

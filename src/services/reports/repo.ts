@@ -19,6 +19,7 @@ export interface ReportsRepo {
   }): Promise<ReportRow>;
   listForSite(siteId: string, limit?: number): Promise<ReportRow[]>;
   getByToken(token: string): Promise<ReportRow | null>;
+  getById(id: string): Promise<ReportRow | null>;
   revoke(id: string, siteId: string): Promise<void>;
   autoExistsSince(siteId: string, sinceIso: string): Promise<boolean>;
 }
@@ -43,6 +44,12 @@ export function supabaseReportsRepo(db: SupabaseClient): ReportsRepo {
       const { data, error } = await db.from("reports").select(COLUMNS)
         .eq("share_token", token).maybeSingle();
       if (error) throw new Error(`reports.getByToken failed: ${error.message}`, { cause: error });
+      return (data as ReportRow) ?? null;
+    },
+    async getById(id) {
+      const { data, error } = await db.from("reports").select(COLUMNS)
+        .eq("id", id).maybeSingle();
+      if (error) throw new Error(`reports.getById failed: ${error.message}`, { cause: error });
       return (data as ReportRow) ?? null;
     },
     async revoke(id, siteId) {

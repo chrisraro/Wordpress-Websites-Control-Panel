@@ -79,6 +79,7 @@ function memoryJobsRepo(opts: { failInsert?: boolean } = {}) {
     async getJob() { return null; },
     async listStaleAwaiting() { return []; },
     async listGlobalFailures() { return []; },
+    async listJobs() { return []; },
     async cancelBatch() { return 0; },
     async retryFailedInBatch() { return 0; },
     async dismissFailed() {},

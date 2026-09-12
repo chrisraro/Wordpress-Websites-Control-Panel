@@ -42,6 +42,7 @@ function fakes() {
     },
     async listForSite() { return []; },
     async getByToken() { return null; },
+    async getById() { return null; },
     async revoke() {},
     async autoExistsSince() { return false; },
   };

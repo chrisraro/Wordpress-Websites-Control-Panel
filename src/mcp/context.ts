@@ -6,6 +6,7 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo, type OpenVuln } from "@/services/security/repo";
 import { supabaseSeoRepo, type SeoSnapshotRow } from "@/services/seo/repo";
 import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
+import { supabaseReportsRepo, type ReportRow } from "@/services/reports/repo";
 import type { SitesDeps } from "@/services/sites/service";
 import type { ManageDeps } from "@/services/manage/service";
 import type { TokenAuth } from "@/lib/authz/token";
@@ -13,6 +14,7 @@ import type { InventoryPayload } from "@/services/inventory/types";
 import type { Grade, SecurityCheck } from "@/services/security/types";
 import type { SeoSource } from "@/services/seo/types";
 import type { GeoGridConfig, GeoGridSnapshot } from "@/services/geogrid/types";
+import type { JobRow, JobStatus } from "@/services/jobs/types";
 
 /** The one read `get_inventory` needs -- not the writer used by the collector. */
 export interface InventoryReadDeps {
@@ -37,6 +39,18 @@ export interface GeoGridReadDeps {
   latestPerKeyword(configId: string): Promise<Record<string, GeoGridSnapshot>>;
 }
 
+/** The two reads `list_reports` and `get_report_link` need -- not insert, revoke, or storage. */
+export interface ReportsReadDeps {
+  listForSite(siteId: string, limit?: number): Promise<ReportRow[]>;
+  getById(id: string): Promise<ReportRow | null>;
+}
+
+/** The two reads `list_jobs` and `get_batch` need -- no claim, write, or dismiss access. */
+export interface JobsReadDeps {
+  listJobs(filter: { siteIds: string[] | null; status?: JobStatus; limit: number }): Promise<JobRow[]>;
+  batchJobs(batchId: string): Promise<JobRow[]>;
+}
+
 export interface ToolCtx {
   auth: TokenAuth;
   sites: SitesDeps;
@@ -46,6 +60,8 @@ export interface ToolCtx {
   security: SecurityReadDeps;
   seo: SeoReadDeps;
   geogrid: GeoGridReadDeps;
+  reports: ReportsReadDeps;
+  jobsRead: JobsReadDeps;
   /**
    * One activity_log row. Writes and enqueues only -- reads are never audited,
    * because activity_log records changes and logging reads would bury them.
@@ -75,6 +91,11 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     security: supabaseSecurityRepo(db),
     seo: supabaseSeoRepo(db),
     geogrid: supabaseGeoGridRepo(db),
+    reports: supabaseReportsRepo(db),
+    // Same repo instance as `jobs` above -- JobsRepo (writes and all) is a
+    // superset of JobsReadDeps. A distinct field exists so the read tools
+    // only ever declare the two methods they actually use.
+    jobsRead: jobs,
     async audit(action, siteId, detail) {
       await sitesRepo.insertActivity({
         actor: auth.viewer.id,

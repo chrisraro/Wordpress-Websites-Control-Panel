@@ -50,6 +50,15 @@ function memoryJobsRepo() {
     async listGlobalFailures() {
       return rows.filter((r) => r.site_id === null && r.status === "failed" && !r.dismissed_at);
     },
+    async listJobs(filter) {
+      let out = rows;
+      if (filter.siteIds !== null) out = out.filter((r) => r.site_id && filter.siteIds!.includes(r.site_id));
+      if (filter.status) out = out.filter((r) => r.status === filter.status);
+      return out
+        .slice()
+        .sort((a, b) => b.scheduled_for.localeCompare(a.scheduled_for))
+        .slice(0, filter.limit);
+    },
     async cancelBatch() { return 0; },
     async retryFailedInBatch() { return 0; },
     async dismissFailed(siteId, type) {

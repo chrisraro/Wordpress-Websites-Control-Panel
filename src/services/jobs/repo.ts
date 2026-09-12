@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceSupabase } from "@/lib/supabase/server";
-import type { JobRow, JobType } from "./types";
+import type { JobRow, JobStatus, JobType } from "./types";
 
 export interface JobsRepo {
   insert(job: {
@@ -23,6 +23,18 @@ export interface JobsRepo {
    * how the dashboard's system-health panel finds them.
    */
   listGlobalFailures(): Promise<JobRow[]>;
+  /**
+   * General, caller-scoped job listing, for the MCP `list_jobs` read tool.
+   *
+   * `siteIds: null` means no site restriction at all (a viewer holding
+   * `sites.view_all`); an array restricts to exactly those ids via `.in`, so
+   * a viewer scoped to a few sites never sees a job outside them regardless
+   * of `status`. Newest-first by `scheduled_for`. `limit` is applied in the
+   * query itself, not by slicing the resolved array afterward -- filtering a
+   * fetched page down to visible sites first would silently return fewer
+   * rows than the caller asked for.
+   */
+  listJobs(filter: { siteIds: string[] | null; status?: JobStatus; limit: number }): Promise<JobRow[]>;
   /**
    * Clears the failed-runs alert for a site/type without touching the rows.
    * `siteId: null` is the global variant — jobs enqueued with no site
@@ -149,6 +161,15 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .is("site_id", null).eq("status", "failed").is("dismissed_at", null)
         .order("scheduled_for", { ascending: false });
       if (error) throw new Error(`jobs.listGlobalFailures failed: ${error.message}`, { cause: error });
+      return (data ?? []) as JobRow[];
+    },
+    async listJobs(filter) {
+      let q = db.from("jobs").select("*");
+      if (filter.siteIds !== null) q = q.in("site_id", filter.siteIds);
+      if (filter.status) q = q.eq("status", filter.status);
+      q = q.order("scheduled_for", { ascending: false }).limit(filter.limit);
+      const { data, error } = await q;
+      if (error) throw new Error(`jobs.listJobs failed: ${error.message}`, { cause: error });
       return (data ?? []) as JobRow[];
     },
     async dismissFailed(siteId, type) {
