@@ -1,7 +1,7 @@
 import { requireViewer } from "@/lib/authz/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseTokensRepo } from "@/services/tokens/repo";
-import { listTokens } from "@/services/tokens/service";
+import { listTokensOrUnavailable } from "@/services/tokens/service";
 import { Card, CardTitle, PageHeader } from "@/components/ui/primitives";
 import { ApiTokensCard } from "@/app/(dashboard)/users/[id]/api-tokens-card";
 
@@ -26,7 +26,9 @@ export default async function AccountPage() {
   const viewer = await requireViewer();
 
   const db = createServiceSupabase();
-  const tokens = await listTokens(supabaseTokensRepo(db), viewer.id);
+  // Same deploy-order guard as /users/[id]: if migration 0021 (api_tokens)
+  // has not been applied yet, render the hint rather than a 500.
+  const tokenList = await listTokensOrUnavailable(supabaseTokensRepo(db), viewer.id);
 
   return (
     <main>
@@ -38,7 +40,12 @@ export default async function AccountPage() {
       <Card className="overflow-hidden">
         <CardTitle>API tokens</CardTitle>
         <div className="p-5">
-          <ApiTokensCard mode="self" userId={viewer.id} tokens={tokens} />
+          <ApiTokensCard
+            mode="self"
+            userId={viewer.id}
+            tokens={tokenList.tokens}
+            tokensUnavailable={tokenList.unavailable}
+          />
         </div>
       </Card>
     </main>

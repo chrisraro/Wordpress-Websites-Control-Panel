@@ -9,11 +9,16 @@ import { MCP_SERVER_NAME } from "@/mcp/schema";
 export const dynamic = "force-dynamic";
 // Manage tools registered on this route carry their own timeouts --
 // ACTION_TIMEOUT_MS (180_000) and HEAVY_TIMEOUT_MS (270_000) in
-// src/services/manage/service.ts, and INSTALL_TIMEOUT_MS (300_000) in
-// src/services/marketplace/install.ts -- so the function's own ceiling must
-// exceed the largest of them or the platform kills the request with a 504
-// before a tool's own abort ever fires. 300 matches src/app/api/cron/process
-// /route.ts, which needs the same headroom, and is honoured on Vercel Pro.
+// src/services/manage/service.ts -- so the function's own ceiling must
+// exceed the larger of them or the platform kills the request with a 504
+// before a tool's own abort ever fires. (No install tool is registered on
+// this route, so INSTALL_TIMEOUT_MS does not apply here.) That arithmetic
+// only holds because every tool on this route makes at most ONE manageSite
+// call per invocation -- `update_themes` takes a single slug for exactly
+// this reason; a loop of two ACTION_TIMEOUT_MS calls would reach 360 s and
+// be killed after the first with nothing audited. 300 matches
+// src/app/api/cron/process/route.ts, which needs the same headroom, and is
+// honoured on Vercel Pro.
 export const maxDuration = 300;
 
 const CHALLENGE = { "WWW-Authenticate": `Bearer realm="${MCP_SERVER_NAME}"` };

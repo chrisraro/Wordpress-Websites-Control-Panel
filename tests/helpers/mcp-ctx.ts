@@ -1,5 +1,5 @@
 import type { ToolCtx } from "@/mcp/context";
-import type { TokenAuth } from "@/lib/authz/token";
+import { applyReadOnly, type TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import { APP_PERMISSIONS, type AppPermission } from "@/lib/authz/types";
 
@@ -58,7 +58,7 @@ export function ctxFor(opts: {
    * tests/mcp-tools-destructive.test.ts, which asserts an invisible site's
    * job id never appears here. */
   const cancelJobsCalls: string[][] = [];
-  const viewer: Viewer = {
+  const base: Viewer = {
     id: "u1", email: null, role: "admin",
     // Defaults to every permission and a manage grant on the fixture site:
     // the destructive tools' tests call `ctxFor()` bare and expect the
@@ -69,6 +69,14 @@ export function ctxFor(opts: {
     permissions: new Set(opts.permissions ?? [...APP_PERMISSIONS]),
     grants: new Map(opts.grants ?? [[SITE_ID, "manage"]]),
   };
+  // A read-only token's viewer goes through the real `applyReadOnly`, exactly
+  // as `authenticateToken` does in production: every write permission is
+  // stripped and every grant is demoted to "read". A fixture that set
+  // `readOnly: true` while leaving the write permissions in place described
+  // a state production never produces, and hid that every write tool's
+  // `requirePermission` fired -- with the wrong message -- before
+  // `requireWritableToken` was ever reached (final review, Fix 1).
+  const viewer = opts.readOnly ? applyReadOnly(base) : base;
   const auth: TokenAuth = { viewer, tokenId: "tok-1", readOnly: Boolean(opts.readOnly) };
   return {
     auth,

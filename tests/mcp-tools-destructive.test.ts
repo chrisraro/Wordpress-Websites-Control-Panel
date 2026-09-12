@@ -23,7 +23,7 @@ const REASON = "Applying the September security patch set";
 /** Minimal valid arguments per tool, beyond confirm/reason. */
 const ARGS: Record<string, Record<string, unknown>> = {
   update_plugins: { site_id: SITE_ID },
-  update_themes: { site_id: SITE_ID, slugs: ["twentytwentyfour"] },
+  update_themes: { site_id: SITE_ID, slug: "twentytwentyfour" },
   update_core: { site_id: SITE_ID },
   activate_plugin: { site_id: SITE_ID, plugin_file: "akismet/akismet.php" },
   deactivate_plugin: { site_id: SITE_ID, plugin_file: "akismet/akismet.php" },
@@ -167,7 +167,7 @@ describe.each(DESTRUCTIVE_TOOLS)("%s", (name) => {
     expect(ctx.audited[0].action).toBe(`mcp.${name}`);
     expect(JSON.stringify(ctx.audited[0].detail)).toContain(REASON);
     // The audited args must carry this tool's actual target (plugin_file,
-    // slug, slugs, enable, batch_id, environment, file_name -- whatever
+    // slug, enable, batch_id, environment, file_name -- whatever
     // ARGS[name] declares beyond site_id) unredacted, not merely a reason
     // string somewhere in the JSON blob.
     const target = Object.fromEntries(
@@ -264,73 +264,43 @@ describe("manage.ts perform()", () => {
 });
 
 describe("update_themes", () => {
-  it("builds one update_theme action per slug", async () => {
+  // Final review, Fix 2: one theme per call, one `manageSite` call per
+  // invocation, audited through `perform()` like every other single-site
+  // tool. The multi-slug loop (and its partial-success audit shape) is gone:
+  // a throw on the second slug used to leave the first updated on the live
+  // site with no audit row, and two slow themes could outrun the route's
+  // maxDuration. The failure path is covered by the shared describe.each.
+  it("builds exactly one update_theme action for the given slug", async () => {
     const ctx = ctxFor();
-    const { client, close } = await connectAll(ctx);
-    const res = await client.callTool({
-      name: "update_themes",
-      arguments: {
-        site_id: SITE_ID, slugs: ["twentytwentyfour", "twentytwentythree"],
-        confirm: true, reason: REASON,
-      },
-    });
-    expect(isError(res)).toBe(false);
-    expect(ctx.serviceCalls.length).toBe(2);
-    await close();
-  });
-
-  it("still succeeds and reports both when one slug fails", async () => {
-    const ctx = ctxFor();
-    let call = 0;
-    (ctx as unknown as { manageSite: () => Promise<{ ok: boolean; output?: string; error?: string }> })
-      .manageSite = async () => {
-        call += 1;
+    const seen: unknown[] = [];
+    (ctx as unknown as { manageSite: (...a: unknown[]) => Promise<{ ok: boolean; output?: string }> })
+      .manageSite = async (...a: unknown[]) => {
+        seen.push(a[3]);
         ctx.serviceCalls.push("manageSite");
-        return call === 1
-          ? { ok: true, output: "Theme updated" }
-          : { ok: false, error: "No update available" };
+        return { ok: true, output: "Theme updated" };
       };
     const { client, close } = await connectAll(ctx);
     const res = await client.callTool({
       name: "update_themes",
-      arguments: {
-        site_id: SITE_ID, slugs: ["twentytwentyfour", "twentytwentythree"],
-        confirm: true, reason: REASON,
-      },
+      arguments: { site_id: SITE_ID, slug: "twentytwentyfour", confirm: true, reason: REASON },
     });
     expect(isError(res)).toBe(false);
-    const out = JSON.parse(textOf(res));
-    expect(out.results).toHaveLength(2);
-    expect(out.results.some((r: { ok: boolean }) => r.ok)).toBe(true);
-    expect(out.results.some((r: { ok: boolean }) => !r.ok)).toBe(true);
-    expect(ctx.audited).toHaveLength(1);
-    expect(ctx.audited[0].detail.args).toMatchObject({
-      slugs: ["twentytwentyfour", "twentytwentythree"],
-    });
-    // A 1-of-2 success must not read as an unqualified success in the audit
-    // row: ok is false, partial is explicit, and the failed slug is named.
-    expect(ctx.audited[0].detail.ok).toBe(false);
-    expect(ctx.audited[0].detail.partial).toBe(true);
-    expect(ctx.audited[0].detail.results).toEqual([
-      { slug: "twentytwentyfour", ok: true },
-      { slug: "twentytwentythree", ok: false, error: "No update available" },
-    ]);
+    expect(seen).toEqual([{ kind: "update_theme", slug: "twentytwentyfour" }]);
+    expect(ctx.serviceCalls).toEqual(["manageSite"]);
+    expect(JSON.parse(textOf(res)).slug).toBe("twentytwentyfour");
     await close();
   });
 
-  it("fails the tool only when every slug fails", async () => {
+  it("rejects the old multi-slug argument shape", async () => {
     const ctx = ctxFor();
-    (ctx as unknown as { manageSite: () => Promise<{ ok: boolean; error?: string }> })
-      .manageSite = async () => {
-        ctx.serviceCalls.push("manageSite");
-        return { ok: false, error: "No update available" };
-      };
     const { client, close } = await connectAll(ctx);
     const res = await client.callTool({
       name: "update_themes",
       arguments: { site_id: SITE_ID, slugs: ["twentytwentyfour"], confirm: true, reason: REASON },
     });
     expect(isError(res)).toBe(true);
+    expect(ctx.serviceCalls).toEqual([]);
+    expect(ctx.audited).toEqual([]);
     await close();
   });
 });

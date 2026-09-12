@@ -149,6 +149,27 @@ describe("requirePermission", () => {
     expect(r?.isError).toBe(true);
     expect(r?.content[0].text).toContain("wp_toolkit.manage");
   });
+
+  // Final review, Fix 1: applyReadOnly strips every write permission from a
+  // read-only token's viewer, so `can()` is false here for a permission the
+  // user really holds. The refusal must send them to mint a writable token,
+  // not to ask for a permission they already have.
+  it("blames the token, not the permission, for a missing WRITE permission on a read-only token", () => {
+    const r = requirePermission(auth({ readOnly: true }), "wp_toolkit.manage");
+    expect(r?.isError).toBe(true);
+    expect(r?.content[0].text).toMatch(/read-only/i);
+    expect(r?.content[0].text).toMatch(/token/i);
+    expect(r?.content[0].text).not.toMatch(/permission/i);
+  });
+
+  it("still names a missing READ permission on a read-only token", () => {
+    // Read-only never strips read permissions, so a read-only viewer missing
+    // sites.view_all genuinely lacks it and the fix really is to be granted it.
+    const r = requirePermission(auth({ readOnly: true }), "sites.view_all");
+    expect(r?.isError).toBe(true);
+    expect(r?.content[0].text).toContain("sites.view_all");
+    expect(r?.content[0].text).not.toMatch(/read-only/i);
+  });
 });
 
 describe("requireWritableToken", () => {

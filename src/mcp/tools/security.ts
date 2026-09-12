@@ -35,7 +35,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           checks: checks ?? null,
           note: grade || checks
             ? undefined
-            : "No security data has been collected yet. Use refresh_security to collect it.",
+            : "No security data has been collected yet. Use run_security_scan to collect it.",
         });
       } catch (e) {
         return fail(friendlySiteError(e));

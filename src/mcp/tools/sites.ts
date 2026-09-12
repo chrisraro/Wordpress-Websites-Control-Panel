@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
-import { ok, fail, ENVIRONMENT_NOTE, requireWritableToken } from "../confirm";
+import {
+  ok, fail, ENVIRONMENT_NOTE, requirePermission, requireWritableToken, redactArgs,
+} from "../confirm";
 import type { ToolCtx } from "../context";
 import { listSitesForViewer, getSite, testSiteConnection } from "@/services/sites/service";
 import { siteEnvironment } from "@/services/sites/portfolio";
@@ -78,22 +80,39 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
   );
 
+  // Mirrors the panel's "Test connection" button -- `runConnectionTest` in
+  // src/app/(dashboard)/sites/[id]/actions.ts -- which requires
+  // `sites.manage`. A token must never be able to do over MCP what the same
+  // user cannot do in the panel (final review, Fix 3). The permission check
+  // runs first: on a read-only token `applyReadOnly` has stripped
+  // sites.manage, and `requirePermission` then returns the read-only-token
+  // refusal itself, so a read-only caller is still told to mint a writable
+  // token rather than to ask for a permission they hold.
   server.registerTool(
     "test_site_connection",
     {
       description:
         "Open a connection to a site over MCP to check that it's reachable. " +
         "This changes nothing on the WordPress site itself, but it records the " +
-        "resulting status and an activity-log entry in the panel, so a token " +
-        `minted read-only cannot call it. ${ENVIRONMENT_NOTE}`,
+        "resulting status and an activity-log entry in the panel, so it needs " +
+        `the sites.manage permission and a token minted read-only cannot call it. ${ENVIRONMENT_NOTE}`,
       inputSchema: { site_id: z.string().uuid().describe("The site's id, from list_sites.") },
     },
-    async ({ site_id }) => {
+    async (args) => {
+      const { site_id } = args;
+      const permDenied = requirePermission(ctx.auth, "sites.manage");
+      if (permDenied) return permDenied;
       const tokenDenied = requireWritableToken(ctx.auth);
       if (tokenDenied) return tokenDenied;
       if (!canAccessSite(ctx.auth.viewer, site_id, "read")) return fail(NOT_FOUND);
       try {
-        return ok(await testSiteConnection(ctx.sites, site_id, ctx.auth.viewer.id));
+        const result = await testSiteConnection(ctx.sites, site_id, ctx.auth.viewer.id);
+        // The service writes its own `site.test_connection` row, which a
+        // panel click writes too. This row is what makes a token-driven
+        // probe distinguishable from a click: it carries the `mcp.` action
+        // and, through ctx.audit, the token id.
+        await ctx.audit("mcp.test_site_connection", site_id, { args: redactArgs(args), ok: result.ok });
+        return ok(result);
       } catch (e) {
         return fail(friendlySiteError(e));
       }

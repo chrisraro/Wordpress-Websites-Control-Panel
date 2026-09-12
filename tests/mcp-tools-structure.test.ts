@@ -1,4 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+// The CONFIRM_SHAPE test below imports `@/mcp/tools/manage` for
+// DESTRUCTIVE_TOOLS. Since the final review's Fix 1, `src/mcp/confirm.ts`
+// imports PERMISSION_KIND from `@/lib/authz/token` at runtime, whose module
+// graph reaches `import "server-only"` -- a Next.js-only package that throws
+// outside a server bundle. Every other MCP test file stubs it the same way.
+vi.mock("server-only", () => ({}));
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 

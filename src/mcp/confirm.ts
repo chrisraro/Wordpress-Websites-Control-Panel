@@ -1,7 +1,7 @@
 import { z } from "./schema";
 import { can } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
-import type { TokenAuth } from "@/lib/authz/token";
+import { PERMISSION_KIND, type TokenAuth } from "@/lib/authz/token";
 
 /**
  * Appended to every tool description. An LLM that cannot tell a client's
@@ -120,9 +120,18 @@ export function redactArgs(args: Record<string, unknown>): Record<string, unknow
 /**
  * A missing permission NAMES the permission: the fix is to be granted it, and
  * the user cannot work that out from a generic refusal.
+ *
+ * Read-only aware. `applyReadOnly` strips every write permission from a
+ * read-only token's viewer, so on such a token `can()` is false for every
+ * write permission the user actually holds. Naming the permission there
+ * would send the user to ask for something they already have; the real fix
+ * is to mint a writable token, and that is the refusal returned instead.
+ * The permission refusal is kept for a read permission (which read-only
+ * never strips) and for a writable token that genuinely lacks the grant.
  */
 export function requirePermission(auth: TokenAuth, p: AppPermission): ToolResult | null {
   if (can(auth.viewer, p)) return null;
+  if (auth.readOnly && PERMISSION_KIND[p] === "write") return requireWritableToken(auth);
   return fail(`You do not hold the ${p} permission, which this action requires.`);
 }
 
@@ -142,10 +151,15 @@ export type ConfirmGate =
  * The single decision point for every destructive tool.
  *
  * Order matters: a caller who did not ask to change anything gets a preview
- * even on a read-only token, because previewing is a read. The read-only
- * refusal is reserved for someone who actually tried to write, and it names
- * the token rather than a permission -- the two have different fixes, and
- * conflating them sends the user to the wrong place.
+ * before the token is checked, because previewing changes nothing. Note that
+ * a read-only token never reaches this function on a destructive tool --
+ * every one of them runs `requirePermission` on a write permission first,
+ * and `applyReadOnly` has stripped that permission, so the token is refused
+ * there (with the read-only-token message) and cannot preview. The ordering
+ * here still matters for a tool gated on a writable token alone, with no
+ * write permission in front of it. The read-only refusal names the token
+ * rather than a permission -- the two have different fixes, and conflating
+ * them sends the user to the wrong place.
  */
 export function gateConfirm(
   auth: TokenAuth,

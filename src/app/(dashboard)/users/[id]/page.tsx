@@ -9,7 +9,7 @@ import { listSites } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseTokensRepo } from "@/services/tokens/repo";
-import { listTokens } from "@/services/tokens/service";
+import { listTokensOrUnavailable } from "@/services/tokens/service";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, PageHeader, StatusBadge } from "@/components/ui/primitives";
@@ -51,13 +51,18 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   const usersRepo = supabaseUsersRepo(db);
   const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
 
-  const [person, users, grants, allSites, rolePermissions, tokens] = await Promise.all([
+  // The token list is the one read here that must not take the page down:
+  // this page predates the api_tokens table, so a deploy that serves this
+  // build before migration 0021 runs would otherwise 500 an admin page
+  // that used to work. listTokensOrUnavailable swallows that into an empty
+  // list and a flag the card renders as a hint (final review, Fix 4).
+  const [person, users, grants, allSites, rolePermissions, tokenList] = await Promise.all([
     usersRepo.getUser(id),
     usersRepo.listUsers(),
     listSiteGrants(usersRepo, id),
     listSites(sitesDeps),
     listRolePermissions(usersRepo),
-    listTokens(supabaseTokensRepo(db), id),
+    listTokensOrUnavailable(supabaseTokensRepo(db), id),
   ]);
   if (!person) notFound();
 
@@ -163,7 +168,12 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               and /account, the only place "mode=self" ever renders. */}
           <CardTitle>API tokens</CardTitle>
           <div className="p-5">
-            <ApiTokensCard mode="admin" userId={id} tokens={tokens} />
+            <ApiTokensCard
+              mode="admin"
+              userId={id}
+              tokens={tokenList.tokens}
+              tokensUnavailable={tokenList.unavailable}
+            />
           </div>
         </Card>
 

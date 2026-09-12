@@ -131,54 +131,44 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
   );
 
+  // One theme per call, deliberately (final review, Fix 2). A multi-slug
+  // loop would make several `manageSite` calls per invocation: a throw on
+  // the second slug left the first updated with no audit row, and two slow
+  // themes at ACTION_TIMEOUT_MS each could outrun the route's maxDuration.
+  // The tool keeps its spec name; an LLM updating several themes calls it
+  // once per theme, each call audited on its own.
   server.registerTool(
     "update_themes",
     {
       description:
-        "Update one or more themes, each with an update available, on a " +
-        `site. ${ENVIRONMENT_NOTE}`,
+        "Update one theme with an update available on a site. Updates a single " +
+        `theme per call; call once per theme to update several. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
-        slugs: z
-          .array(z.string().regex(SLUG_RE))
-          .min(1)
-          .describe("Theme stylesheet slugs to update, e.g. twentytwentyfour, from get_inventory."),
+        slug: z.string().regex(SLUG_RE).describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
     },
     async (args) => {
-      const { site_id, slugs } = args;
+      const { site_id, slug } = args;
       const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
       const gate = gateConfirm(
         ctx.auth, args,
-        `Would update ${slugs.length} theme(s) (${slugs.join(", ")}) on ${site.name} (${siteEnvironment(site)}).`,
-        { site: siteSummary(site), slugs },
+        `Would update the theme ${slug} on ${site.name} (${siteEnvironment(site)}).`,
+        { site: siteSummary(site), slug },
       );
       if (!gate.proceed) return gate.result;
 
       try {
-        const results: { slug: string; ok: boolean; output?: string; error?: string }[] = [];
-        for (const slug of slugs) {
-          const r = await ctx.manageSite(ctx.manage, site_id, ctx.auth.viewer.id, {
-            kind: "update_theme", slug,
-          });
-          results.push({ slug, ok: r.ok, output: r.output, error: r.error });
-        }
-        const allOk = results.every((r) => r.ok);
-        const anyOk = results.some((r) => r.ok);
-        await ctx.audit("mcp.update_themes", site_id, {
-          reason: gate.reason,
-          args: redactArgs(args),
-          ok: allOk,
-          results: results.map((r) => ({ slug: r.slug, ok: r.ok, ...(r.error !== undefined ? { error: r.error } : {}) })),
-          ...(anyOk && !allOk ? { partial: true } : {}),
-        });
-        return anyOk
-          ? ok({ site: siteSummary(site), results })
-          : fail(`All theme updates failed: ${results.map((r) => `${r.slug} (${r.error})`).join("; ")}`);
+        const result = await perform(
+          ctx, "update_themes", site_id, { kind: "update_theme", slug }, gate.reason, args,
+        );
+        return result.ok
+          ? ok({ site: siteSummary(site), slug, output: result.output })
+          : fail(result.error ?? "The site rejected the theme update.");
       } catch (e) {
         return fail(friendlySiteError(e));
       }

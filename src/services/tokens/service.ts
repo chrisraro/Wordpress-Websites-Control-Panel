@@ -53,6 +53,30 @@ export async function listTokens(repo: TokensRepo, userId: string): Promise<ApiT
   return repo.listForUser(userId);
 }
 
+/**
+ * `listTokens` for a page that must keep rendering when the `api_tokens`
+ * table is missing (final review, Fix 4). /users/[id] existed and worked
+ * before this feature; if a build carrying it serves traffic before
+ * migration 0021 is applied, `listForUser` throws on the missing relation
+ * and the whole admin page would 500. This turns that one failure into an
+ * empty list plus an `unavailable` flag the card renders as a hint, and
+ * logs the real error server-side. It deliberately catches everything --
+ * distinguishing "relation does not exist" from a transient outage is not
+ * worth a 500 on an unrelated page either way -- and is used ONLY for
+ * page reads: the token actions still throw, because minting or revoking
+ * against a missing table must fail loudly.
+ */
+export async function listTokensOrUnavailable(
+  repo: TokensRepo, userId: string,
+): Promise<{ tokens: ApiTokenRow[]; unavailable: boolean }> {
+  try {
+    return { tokens: await repo.listForUser(userId), unavailable: false };
+  } catch (e) {
+    console.error("[tokens] listForUser failed -- is migration 0021 (api_tokens) applied?", e);
+    return { tokens: [], unavailable: true };
+  }
+}
+
 export async function revokeToken(repo: TokensRepo, tokenId: string): Promise<void> {
   await repo.revoke(tokenId);
 }

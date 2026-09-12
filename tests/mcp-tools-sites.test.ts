@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { register, siteSummary } from "@/mcp/tools/sites";
 import type { ToolCtx } from "@/mcp/context";
-import type { TokenAuth } from "@/lib/authz/token";
+import { applyReadOnly, type TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 
@@ -32,9 +32,12 @@ function viewerWith(perms: AppPermission[], grants: [string, "read" | "manage"][
  * A ctx whose repo is a fake and whose audit calls are recorded, so a test can
  * assert that reads write no audit rows.
  */
-export function ctxWith(viewer: Viewer, opts: { readOnly?: boolean } = {}) {
-  const audited: { action: string; siteId: string | null }[] = [];
+export function ctxWith(base: Viewer, opts: { readOnly?: boolean } = {}) {
+  const audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[] = [];
   const all = [SITE_A, SITE_B];
+  // A read-only token's viewer goes through the real applyReadOnly, as
+  // authenticateToken does: write permissions stripped, grants demoted.
+  const viewer = opts.readOnly ? applyReadOnly(base) : base;
   const auth: TokenAuth = {
     viewer, tokenId: "tok-1", readOnly: Boolean(opts.readOnly),
   };
@@ -48,8 +51,12 @@ export function ctxWith(viewer: Viewer, opts: { readOnly?: boolean } = {}) {
         getSiteCredentials: async () => null,
       },
     },
-    async audit(action: string, siteId: string | null) { audited.push({ action, siteId }); },
-  } as unknown as ToolCtx & { audited: { action: string; siteId: string | null }[] };
+    async audit(action: string, siteId: string | null, detail: Record<string, unknown>) {
+      audited.push({ action, siteId, detail });
+    },
+  } as unknown as ToolCtx & {
+    audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[];
+  };
 }
 
 async function connect(ctx: ToolCtx) {
@@ -157,7 +164,9 @@ describe("get_site", () => {
 
 describe("test_site_connection", () => {
   it("refuses a read-only token, naming the token rather than a permission", async () => {
-    const ctx = ctxWith(viewerWith(["sites.view_all"], []), { readOnly: true });
+    // The user holds sites.manage; the read-only token strips it. The
+    // refusal must still point at the token, not the permission they hold.
+    const ctx = ctxWith(viewerWith(["sites.view_all", "sites.manage"], []), { readOnly: true });
     const { client, close } = await connect(ctx);
     const res = await client.callTool({
       name: "test_site_connection", arguments: { site_id: SITE_A.id },
@@ -171,17 +180,49 @@ describe("test_site_connection", () => {
     await close();
   });
 
-  it("lets a writable token reach the service", async () => {
+  // Final review, Fix 3: the panel button this mirrors (runConnectionTest)
+  // requires sites.manage, so a client-role token must not be able to probe
+  // a site over MCP that it could not probe from the panel.
+  it("refuses a viewer without sites.manage, naming the permission", async () => {
     const ctx = ctxWith(viewerWith(["sites.view_all"], []));
     const { client, close } = await connect(ctx);
     const res = await client.callTool({
       name: "test_site_connection", arguments: { site_id: SITE_A.id },
     });
-    // Not blocked by the write gate -- the fake repo's getSiteCredentials
-    // returns null, so the service itself reports "Site not found" rather
-    // than the tool refusing the call outright.
+    expect((res as { isError?: boolean }).isError).toBe(true);
+    expect(textOf(res)).toContain("sites.manage");
+    expect(textOf(res)).not.toMatch(/read-only/i);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("lets a writable token with sites.manage reach the service", async () => {
+    const ctx = ctxWith(viewerWith(["sites.view_all", "sites.manage"], []));
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({
+      name: "test_site_connection", arguments: { site_id: SITE_A.id },
+    });
+    // Not blocked by the permission or write gate -- the fake repo's
+    // getSiteCredentials returns null, so the service itself reports "Site
+    // not found" rather than the tool refusing the call outright.
     expect((res as { isError?: boolean }).isError).toBeFalsy();
     expect(payload(res).error).toBe("Site not found");
+    await close();
+  });
+
+  it("writes one mcp.test_site_connection audit row for a completed call", async () => {
+    const ctx = ctxWith(viewerWith(["sites.view_all", "sites.manage"], []));
+    const { client, close } = await connect(ctx);
+    await client.callTool({
+      name: "test_site_connection", arguments: { site_id: SITE_A.id },
+    });
+    // The service's own site.test_connection row is what a panel click
+    // writes too; this mcp.-prefixed row (with the token id, via ctx.audit)
+    // is what makes a token-driven probe distinguishable from a click.
+    expect(ctx.audited).toHaveLength(1);
+    expect(ctx.audited[0].action).toBe("mcp.test_site_connection");
+    expect(ctx.audited[0].siteId).toBe(SITE_A.id);
+    expect(ctx.audited[0].detail).toMatchObject({ args: { site_id: SITE_A.id }, ok: false });
     await close();
   });
 });

@@ -131,11 +131,15 @@ function SidebarBody({
           href="/account"
           onClick={onNavigate}
           title={email}
-          className="flex min-h-10 items-center truncate rounded-2xl px-3 text-caption
+          className="flex min-h-10 items-center rounded-2xl px-3 text-caption
             tracking-normal text-mid-gray transition-colors duration-150 hover:bg-canvas
             hover:text-ink pointer-coarse:min-h-11"
         >
-          {email}
+          {/* `truncate` must sit on an element that owns the text, not on
+              the flex container: text-overflow does nothing for a bare
+              text node inside a flex box, so a long email hard-clipped
+              instead of ending in an ellipsis. */}
+          <span className="min-w-0 truncate">{email}</span>
         </Link>
         <form action={logout} className="mt-1">
           <SubmitButton

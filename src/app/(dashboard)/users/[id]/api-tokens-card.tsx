@@ -45,11 +45,15 @@ function tokenStatus(t: ApiTokenRow): { label: string; tone: StatusTone } {
 }
 
 export function ApiTokensCard({
-  mode, userId, tokens,
+  mode, userId, tokens, tokensUnavailable = false,
 }: {
   mode: "self" | "admin";
   userId: string;
   tokens: ApiTokenRow[];
+  /** True when the page could not read api_tokens at all (migration 0021
+   * has not been applied yet) -- see listTokensOrUnavailable. The list is
+   * replaced by a one-line hint; nothing else on the page is affected. */
+  tokensUnavailable?: boolean;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -199,7 +203,15 @@ export function ApiTokensCard({
         </div>
       )}
 
-      {tokens.length === 0 ? (
+      {tokensUnavailable ? (
+        <p className={`flex items-start gap-2 ${hintClass}`}>
+          <IconAlert size={16} className="mt-0.5 shrink-0" />
+          <span>
+            API tokens are unavailable — the{" "}
+            <code className="font-mono">api_tokens</code> migration has not been applied.
+          </span>
+        </p>
+      ) : tokens.length === 0 ? (
         <p className={hintClass}>No API tokens yet.</p>
       ) : (
         <ul className="divide-y divide-hairline overflow-hidden rounded-3xl border border-hairline">

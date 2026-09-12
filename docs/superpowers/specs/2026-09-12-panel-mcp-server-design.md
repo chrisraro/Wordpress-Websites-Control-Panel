@@ -80,6 +80,14 @@ RLS: service-role only. The panel reads and writes this table exclusively throug
 `createServiceSupabase()` after its own authz checks, the same as the other
 credential-adjacent tables.
 
+Deploy order: this migration must be applied before a build containing this
+feature serves traffic, because `/users/[id]` existed and worked before the
+table did. If it has not been, `/users/[id]` and `/account` still render — the
+token list is read through `listTokensOrUnavailable`, which turns the missing
+relation into an empty list plus a one-line hint in the API tokens card ("API
+tokens are unavailable — the `api_tokens` migration has not been applied") and
+logs the real error server-side; minting and revoking still fail loudly.
+
 Secret format: `wpcp_` + base64url of 32 random bytes (43 chars). Generated
 server-side, shown once, never stored. `token_hash` is sha256 of the whole
 secret including the prefix.
@@ -100,12 +108,17 @@ be used; tokens have no such need.
 - New `src/lib/authz/token.ts`:
   - `authenticateToken(secret: string, db): Promise<TokenAuth | null>` — hash,
     look up, reject when `revoked_at` is set or `expires_at` is past, call
-    `loadViewer(user_id)`, apply `read_only`, stamp `last_used_at`
-    (fire-and-forget; a failed stamp must not fail the request).
+    `loadViewer(user_id)`, apply `read_only`, stamp `last_used_at`. The stamp
+    is **awaited** deliberately, not fire-and-forget: this app deploys to
+    Vercel, where a function can freeze the moment the response is returned
+    and a floating promise may simply never land. A failed stamp is caught
+    and logged and must not fail the request.
   - `TokenAuth = { viewer: Viewer; tokenId: string; readOnly: boolean }`.
-  - `applyReadOnly(viewer): Viewer` — removes every permission ending in
-    `.manage`, `.run`, `.generate`, `.process`; downgrades every site grant to
-    `read`. Pure, tested.
+  - `applyReadOnly(viewer): Viewer` — keeps only the permissions classified
+    `"read"` in `PERMISSION_KIND`, an exhaustive `Record<AppPermission, "read"
+    | "write">` table (adding a permission without classifying it fails
+    `tsc`; a test pins the key set to `APP_PERMISSIONS`) — not suffix
+    matching; downgrades every site grant to `read`. Pure, tested.
 
 The property this buys: a token-authenticated `Viewer` and a cookie-authenticated
 `Viewer` for the same user are built by the same function and are identical. A
@@ -147,16 +160,25 @@ to fire cleanly.
 ### Tools
 
 Location: `src/mcp/tools/<group>.ts`, one file per group, each exporting
-`register(server, ctx)` where `ctx = { auth: TokenAuth, db, deps }`. A single
+`register(server, ctx)` where `ctx: ToolCtx` carries `auth: TokenAuth` plus
+narrowed accessors (`sites`, `manage`, `jobs`, `inventory`, `security`, `seo`,
+`geogrid`, `reports`, `jobsRead`) and injected seams for the writes
+(`manageSite`, `enqueueBatch`, `planFleetPluginUpdate`, `gsc`, `audit`). There
+is deliberately no `db` on `ToolCtx`: a tool never sees a Supabase client. A single
 `src/mcp/server.ts` builds the server and calls every group's `register`.
 
 Every tool:
 - validates its arguments with a schema (the SDK's zod integration);
-- calls a `src/services/*` function with `ctx.auth.viewer` (or the viewer's id as
-  actor), never a repo directly;
+- reaches data only through the narrowed accessors and seams on `ctx`, with
+  `ctx.auth.viewer` (or the viewer's id as actor); a tool file never
+  constructs a repo, calls `.from(`, or creates a Supabase client —
+  `tests/mcp-tools-structure.test.ts` source-scans `src/mcp/tools/` to forbid
+  all three;
 - returns `{ content: [{ type: "text", text: JSON }] }` on success, and
   `{ isError: true, content: [...friendlySiteError text...] }` on failure.
-  Authorization failures name the missing permission or site grant.
+  A missing permission names the permission. A missing site grant returns
+  "Site not found." — never a message naming the grant, because the
+  existence of a site is itself information (see Errors and edge cases).
 
 Every result that names a site includes `environment: "production" | "staging"`.
 Every tool description states that sites carry an environment and that staging
@@ -166,7 +188,7 @@ and production must not be confused.
 |---|---|---|---|
 | sites | `list_sites` | read | `listSitesForViewer` |
 | sites | `get_site` | read | `getSite` |
-| sites | `test_site_connection` | read, but needs a writable token | `testSiteConnection` |
+| sites | `test_site_connection` | read, but needs `sites.manage` and a writable token; audited as `mcp.test_site_connection` | `testSiteConnection` |
 | inventory | `get_inventory` | read | `latestSnapshot` (plugins, themes, core, maintenance, gsc) |
 | inventory | `refresh_inventory` | enqueue | `enqueueJob("snapshot_refresh")` |
 | security | `get_security` | read | `latestGrade`, `openVulns`, `latestChecks` |
@@ -182,7 +204,7 @@ and production must not be confused.
 | jobs | `get_batch` | read | same data as `/api/batches/[id]` |
 | jobs | `cancel_batch` | **destructive** | existing cancel action |
 | manage | `update_plugins` | **destructive** | `manageSite` `update_all_plugins` / `update_plugin` |
-| manage | `update_themes` | **destructive** | `manageSite` `update_theme` per slug |
+| manage | `update_themes` | **destructive** | `manageSite` `update_theme`, one `slug` per call |
 | manage | `update_core` | **destructive** | `manageSite` `update_core` |
 | manage | `activate_plugin` | **destructive** | `manageSite` |
 | manage | `deactivate_plugin` | **destructive** | `manageSite` |
@@ -192,7 +214,7 @@ and production must not be confused.
 | manage | `set_maintenance` | **destructive** | `manageSite` `maintenance` |
 | manage | `flush_cache` | **destructive** | `manageSite` `flush_cache` |
 | manage | `flush_permalinks` | **destructive** | `manageSite` |
-| fleet | `update_all_plugins` | **destructive** | same logic as `updateAllPluginsAction(env)` |
+| fleet | `update_all_plugins_fleet` | **destructive** | same logic as `updateAllPluginsAction(env)` |
 | gsc | `install_gsc_verification` | **destructive** | `installVerificationFile` |
 | gsc | `remove_gsc_verification` | **destructive** | `removeVerificationFile` |
 
@@ -228,9 +250,16 @@ reason?:  string    // required when confirm is true; 10–500 chars
 - `confirm: true` without `reason`: `isError: true`, "a reason is required".
 - `confirm: true` with `reason`: the action runs; `reason` is written to the audit
   row.
-- On a `read_only` token, `confirm: true` returns `isError: true` with text
-  saying the **token** is read-only (distinct from a permission denial, which
-  names the missing permission — the fixes differ).
+- On a `read_only` token, every destructive tool returns `isError: true` with
+  text saying the **token** is read-only (distinct from a permission denial,
+  which names the missing permission — the fixes differ). This is decided at
+  the permission step, before the confirm gate: `applyReadOnly` has stripped
+  the tool's write permission, and `requirePermission` recognises that a
+  read-only token missing a *write* permission should be told to mint a
+  writable token, not to ask for a permission it already holds. A read-only
+  token therefore cannot preview a destructive tool either — `confirm: false`
+  is refused the same way. (A read-only token missing a *read* permission is
+  still told which permission it lacks.)
 - An enqueue tool whose job is already pending (`enqueueJob` returns `null`)
   reports `queued: false` and writes **no** audit row — `activity_log` records
   changes, and "already queued" is not one. `cancel_batch` with nothing pending
@@ -238,6 +267,12 @@ reason?:  string    // required when confirm is true; 10–500 chars
 
 Preview text is generated by a small pure function per tool so it is testable
 without a site.
+
+Every tool on the MCP route makes at most **one** `manageSite` call per
+invocation. `update_themes` therefore takes a single `slug` (it keeps its name
+for continuity; call it once per theme). A multi-slug loop would break the
+audit rule — a throw on the second slug leaves the first updated with no row —
+and two `ACTION_TIMEOUT_MS` calls would outrun the route's `maxDuration`.
 
 ### Audit
 
@@ -252,7 +287,11 @@ detail:  { token_id, reason, args }   -- args with every key matching /password|
 ```
 
 Reads are not logged. `activity_log` records changes; logging reads would bury
-them. A performed or attempted live action is audited whether its seam reports
+them. `test_site_connection` is the one non-destructive tool that is audited
+(`mcp.test_site_connection`, with `token_id`): the service already writes a
+`site.test_connection` row, exactly as a panel click does, and the `mcp.` row
+is what makes a token-driven probe distinguishable from that click. A
+performed or attempted live action is audited whether its seam reports
 failure by return value (e.g. `manageSite`'s `{ ok: false, error }`) or by
 throwing — both write a row with the failure recorded in `detail`; read-side
 failures before the act (a missing permission, a site not visible, a bad
@@ -302,7 +341,8 @@ above, using a `src/services/tokens/` service and repo.
   gives, never "forbidden" — existence of a site is itself information.
 - Service throws → `isError` with `friendlySiteError(e)`; the raw error is
   logged server-side, as today.
-- `last_used_at` stamp failure → logged, request proceeds.
+- `last_used_at` stamp failure → logged, request proceeds (the stamp is
+  awaited, so the failure is seen and logged in-request — see Identity).
 
 ### Testing
 

@@ -30,7 +30,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           sources,
           note: Object.keys(sources).length > 0
             ? undefined
-            : "No SEO data has been collected yet. Use refresh_seo to collect it.",
+            : "No SEO data has been collected yet. Use run_seo_scan to collect it.",
         });
       } catch (e) {
         return fail(friendlySiteError(e));

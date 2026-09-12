@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createHash } from "node:crypto";
 import {
-  hashToken, generateSecret, tokenPrefix, expiryToIso, mintToken,
+  hashToken, generateSecret, tokenPrefix, expiryToIso, mintToken, listTokensOrUnavailable,
 } from "@/services/tokens/service";
 import type { TokensRepo } from "@/services/tokens/repo";
 import type { ApiTokenAuthRow, ApiTokenRow } from "@/services/tokens/types";
@@ -97,5 +97,35 @@ describe("mintToken", () => {
     await mintToken(repo, { userId: "u1", name: "n8n", readOnly: true, expiry: "none" });
     expect(repo.rows[0].read_only).toBe(true);
     expect(repo.rows[0].expires_at).toBeNull();
+  });
+});
+
+describe("listTokensOrUnavailable", () => {
+  // Final review, Fix 4: /users/[id] and /account read tokens through this
+  // so a build that reaches production before migration 0021 (api_tokens)
+  // is applied degrades to a hint instead of a 500 on a page that worked
+  // before the feature existed.
+  it("returns the rows and unavailable: false when the repo works", async () => {
+    const repo = fakeRepo();
+    await mintToken(repo, { userId: "u1", name: "Claude Code", readOnly: false, expiry: "30d" });
+    const out = await listTokensOrUnavailable(repo, "u1");
+    expect(out.unavailable).toBe(false);
+    expect(out.tokens.map((t) => t.name)).toEqual(["Claude Code"]);
+  });
+
+  it("returns an empty list and unavailable: true when the repo throws, logging the error", async () => {
+    const repo = fakeRepo();
+    repo.listForUser = async () => {
+      throw new Error('relation "public.api_tokens" does not exist');
+    };
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const out = await listTokensOrUnavailable(repo, "u1");
+      expect(out).toEqual({ tokens: [], unavailable: true });
+      expect(err).toHaveBeenCalledTimes(1);
+      expect(String(err.mock.calls[0][1])).toContain("api_tokens");
+    } finally {
+      err.mockRestore();
+    }
   });
 });
