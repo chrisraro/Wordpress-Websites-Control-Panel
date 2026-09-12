@@ -110,7 +110,7 @@ describe("addSite", () => {
     const mcp = async () =>
       new MockMcpClient({ abilities: [{ name: "novamira/run-wp-cli" }, { name: "rank-math/audit-site-seo" }] });
 
-    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
+    const { id } = await addSite({ repo, mcp, jobs, discover }, INPUT, "user-1");
 
     expect(id).toBe("site-1");
     const row = sites[0];
@@ -124,7 +124,7 @@ describe("addSite", () => {
     const { repo, sites } = memoryRepo();
     const { repo: jobs } = memoryJobsRepo();
     const mcp = async () => new MockMcpClient({ failWith: new McpAuthError("401") });
-    await expect(addSite({ repo, mcp, jobs }, INPUT, "user-1")).rejects.toThrow(/application password/i);
+    await expect(addSite({ repo, mcp, jobs, discover }, INPUT, "user-1")).rejects.toThrow(/application password/i);
     expect(sites).toHaveLength(0);
   });
 
@@ -133,7 +133,7 @@ describe("addSite", () => {
     const { repo: jobs, jobs: enqueued } = memoryJobsRepo();
     const mcp = async () => new MockMcpClient();
 
-    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
+    const { id } = await addSite({ repo, mcp, jobs, discover }, INPUT, "user-1");
 
     const forSite = enqueued.filter((j) => j.type === "snapshot_refresh" && j.site_id === id);
     expect(forSite).toHaveLength(1);
@@ -146,7 +146,7 @@ describe("addSite", () => {
     const mcp = async () => new MockMcpClient();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { id } = await addSite({ repo, mcp, jobs }, INPUT, "user-1");
+    const { id } = await addSite({ repo, mcp, jobs, discover }, INPUT, "user-1");
 
     expect(id).toBe("site-1");
     expect(sites).toHaveLength(1);
