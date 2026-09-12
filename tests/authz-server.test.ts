@@ -197,6 +197,26 @@ describe("getViewer — database errors fail closed", () => {
 describe("loadViewer is the one place a Viewer is built", () => {
   it("builds the same Viewer as getViewer does for the same user", async () => {
     state.user = { id: "u1", email: "u@example.com" };
+    // Give the fixture real overrides and mixed-level site grants so the
+    // permission-Set and grant-Map comparisons below actually compare
+    // something nontrivial, instead of one element and two empty arrays.
+    state.db = fakeDb({
+      role_permissions: { data: [{ permission: "seo.run" }], error: null },
+      user_permission_overrides: {
+        data: [
+          { permission: "reports.generate", effect: "allow" },
+          { permission: "seo.run", effect: "deny" },
+        ],
+        error: null,
+      },
+      user_site_access: {
+        data: [
+          { site_id: "s1", access_level: "read" },
+          { site_id: "s2", access_level: "manage" },
+        ],
+        error: null,
+      },
+    });
     const viaSession = await getViewer();
     const viaToken = await loadViewer("u1", "u@example.com");
 
