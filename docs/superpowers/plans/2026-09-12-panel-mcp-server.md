@@ -1805,8 +1805,10 @@ Expected: FAIL — cannot resolve `@/app/api/mcp/route`.
 
 - [ ] **Step 3: Write `src/app/api/mcp/route.ts`**
 
+**Transport choice — verified, do not substitute.** Use `WebStandardStreamableHTTPServerTransport`, **not** `StreamableHTTPServerTransport`. The latter's signature in SDK 1.30.0 is `handleRequest(req: IncomingMessage, res: ServerResponse, parsedBody?): Promise<void>` — Node's HTTP objects, which an App Router route handler does not have. Its own doc comment describes it as a wrapper that converts those to Web Standard objects and delegates to the web transport. The web transport is the real implementation, and its signature is `handleRequest(req: Request, options?): Promise<Response>` — exactly what a route handler receives and returns. Confirmed by importing and constructing it. The SDK's own examples show this transport used from Hono and Cloudflare Workers, which is the same web-standard shape Next.js uses.
+
 ```ts
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { supabaseTokensRepo } from "@/services/tokens/repo";
 import { authenticateToken } from "@/lib/authz/token";
@@ -1850,8 +1852,11 @@ export async function POST(req: Request): Promise<Response> {
   const server = buildServer(buildToolCtx(auth));
   // Stateless is required, not preferred: consecutive requests may land on
   // different Vercel instances and there is no shared session store, so every
-  // request must carry its own auth and be complete in itself.
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  // request must carry its own auth and be complete in itself. Passing
+  // sessionIdGenerator: undefined is what selects that mode.
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
   await server.connect(transport);
   try {
     return await transport.handleRequest(req);
@@ -1874,13 +1879,15 @@ export async function DELETE(): Promise<Response> {
 }
 ```
 
-- [ ] **Step 4: Verify the transport's request signature before relying on it**
+- [ ] **Step 4: Confirm the transport contract holds, then leave it alone**
 
-`StreamableHTTPServerTransport.handleRequest` in SDK 1.30 may expect Node's `IncomingMessage`/`ServerResponse` rather than a web `Request`. Check the installed type:
+The transport question is already settled (see above): `WebStandardStreamableHTTPServerTransport.handleRequest(req: Request, options?): Promise<Response>`. Confirm it for yourself once so the code is not resting on someone else's note:
 
-Run: `grep -n "handleRequest" node_modules/@modelcontextprotocol/sdk/dist/esm/server/streamableHttp.d.ts`
+Run: `grep -n "handleRequest(req: Request" node_modules/@modelcontextprotocol/sdk/dist/esm/server/webStandardStreamableHttp.d.ts`
 
-If the signature is Node-shaped, keep the auth block and the `finally` cleanup exactly as written and change only the three transport lines: use the SDK's Fetch-API transport if one is exported, otherwise bridge explicitly (read `await req.text()`, hand it to the transport, return its response body). Record what the installed SDK required in a comment so the next reader does not rediscover it.
+Expected: one line declaring `handleRequest(req: Request, options?: HandleRequestOptions): Promise<Response>`.
+
+If that grep finds nothing — meaning the SDK changed under us — stop and report BLOCKED rather than reaching for the Node transport or hand-rolling a bridge. Both are worse than pausing, and the plan's assumption would need revisiting.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
