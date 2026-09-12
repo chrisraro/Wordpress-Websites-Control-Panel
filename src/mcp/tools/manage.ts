@@ -11,6 +11,7 @@ import { friendlySiteError } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
 import type { ManageAction } from "@/services/manage/types";
 import type { SiteRow } from "@/services/sites/types";
+import { PLUGIN_FILE_RE, SLUG_RE } from "@/services/manage/service";
 
 /**
  * All fifteen destructive tools per the task-10 brief's table, so a tool
@@ -73,6 +74,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         plugin_file: z
           .string()
+          .min(1)
+          .regex(PLUGIN_FILE_RE)
           .optional()
           .describe(
             "One plugin's file, e.g. akismet/akismet.php, from get_inventory. " +
@@ -87,10 +90,10 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
-      const action: ManageAction = plugin_file
+      const action: ManageAction = plugin_file !== undefined
         ? { kind: "update_plugin", file: plugin_file }
         : { kind: "update_all_plugins" };
-      const summary = plugin_file
+      const summary = plugin_file !== undefined
         ? `Would update the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}).`
         : `Would update every plugin with an update available on ${site.name} (${siteEnvironment(site)}).`;
 
@@ -117,7 +120,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         slugs: z
-          .array(z.string())
+          .array(z.string().regex(SLUG_RE))
           .min(1)
           .describe("Theme stylesheet slugs to update, e.g. twentytwentyfour, from get_inventory."),
         ...CONFIRM_SHAPE,
@@ -144,10 +147,15 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           });
           results.push({ slug, ok: r.ok, output: r.output, error: r.error });
         }
-        await ctx.audit("mcp.update_themes", site_id, {
-          reason: gate.reason, args: redactArgs(args), ok: results.some((r) => r.ok),
-        });
+        const allOk = results.every((r) => r.ok);
         const anyOk = results.some((r) => r.ok);
+        await ctx.audit("mcp.update_themes", site_id, {
+          reason: gate.reason,
+          args: redactArgs(args),
+          ok: allOk,
+          results: results.map((r) => ({ slug: r.slug, ok: r.ok, ...(r.error !== undefined ? { error: r.error } : {}) })),
+          ...(anyOk && !allOk ? { partial: true } : {}),
+        });
         return anyOk
           ? ok({ site: siteSummary(site), results })
           : fail(`All theme updates failed: ${results.map((r) => `${r.slug} (${r.error})`).join("; ")}`);
@@ -198,6 +206,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         plugin_file: z
           .string()
+          .regex(PLUGIN_FILE_RE)
           .describe("The plugin's file, e.g. akismet/akismet.php, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
@@ -236,6 +245,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         plugin_file: z
           .string()
+          .regex(PLUGIN_FILE_RE)
           .describe("The plugin's file, e.g. akismet/akismet.php, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
@@ -277,6 +287,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         plugin_file: z
           .string()
+          .regex(PLUGIN_FILE_RE)
           .describe("The plugin's file, e.g. akismet/akismet.php, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
@@ -318,7 +329,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       description: `Activate an installed theme on a site. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
-        slug: z.string().describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
+        slug: z.string().regex(SLUG_RE).describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
     },
@@ -356,7 +367,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         `cannot be undone from the panel. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
-        slug: z.string().describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
+        slug: z.string().regex(SLUG_RE).describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
         ...CONFIRM_SHAPE,
       },
     },
