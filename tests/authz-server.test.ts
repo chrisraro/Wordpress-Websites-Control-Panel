@@ -199,9 +199,15 @@ describe("loadViewer is the one place a Viewer is built", () => {
     state.user = { id: "u1", email: "u@example.com" };
     // Give the fixture real overrides and mixed-level site grants so the
     // permission-Set and grant-Map comparisons below actually compare
-    // something nontrivial, instead of one element and two empty arrays.
+    // something nontrivial. Two role permissions with only one denied means
+    // the compared set ends up with two entries (wp_toolkit.manage survives
+    // the role grant; reports.generate arrives via the allow override), not
+    // one -- otherwise the Set comparison below is nearly vacuous.
     state.db = fakeDb({
-      role_permissions: { data: [{ permission: "seo.run" }], error: null },
+      role_permissions: {
+        data: [{ permission: "seo.run" }, { permission: "wp_toolkit.manage" }],
+        error: null,
+      },
       user_permission_overrides: {
         data: [
           { permission: "reports.generate", effect: "allow" },

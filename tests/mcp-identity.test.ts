@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
-import { applyReadOnly, authenticateToken } from "@/lib/authz/token";
+import { applyReadOnly, authenticateToken, PERMISSION_KIND } from "@/lib/authz/token";
 import { hashToken } from "@/services/tokens/service";
 import { APP_PERMISSIONS, type AppPermission } from "@/lib/authz/types";
 import type { Viewer } from "@/lib/authz/decide";
@@ -59,6 +59,17 @@ describe("applyReadOnly", () => {
   });
 });
 
+describe("PERMISSION_KIND", () => {
+  it("classifies every permission APP_PERMISSIONS currently has -- no more, no less", () => {
+    // The Record type already forces every APP_PERMISSIONS entry to be
+    // classified at compile time. This is the mirror case a type can't
+    // catch: a permission removed from APP_PERMISSIONS but left as a stale
+    // key here, which would silently widen or narrow applyReadOnly's output
+    // without APP_PERMISSIONS itself showing any sign of it.
+    expect(Object.keys(PERMISSION_KIND).sort()).toEqual([...APP_PERMISSIONS].sort());
+  });
+});
+
 describe("authenticateToken", () => {
   const secret = "wpcp_testsecrettestsecrettestsecrettestsecre";
   const base: ApiTokenAuthRow = {
@@ -99,6 +110,22 @@ describe("authenticateToken", () => {
     const row = { ...base, expires_at: "2026-10-01T00:00:00.000Z" };
     const now = new Date("2026-09-12T00:00:00.000Z");
     expect(await authenticateToken(secret, repoWith(row), load, now)).not.toBeNull();
+  });
+
+  it("rejects a token whose expiry is exactly now", async () => {
+    // Pins the fail-closed boundary: expires_at <= now must reject, so a
+    // later refactor can't flip <= to < with a green suite.
+    const now = new Date("2026-09-12T00:00:00.000Z");
+    const row = { ...base, expires_at: now.toISOString() };
+    expect(await authenticateToken(secret, repoWith(row), load, now)).toBeNull();
+  });
+
+  it("rejects a token with an unparseable expires_at", async () => {
+    // Defence in depth: the column is timestamptz so this shouldn't happen
+    // in practice, but new Date("garbage").getTime() is NaN, and NaN <= now
+    // is false, which would otherwise treat the token as not expired.
+    const row = { ...base, expires_at: "garbage" };
+    expect(await authenticateToken(secret, repoWith(row), load)).toBeNull();
   });
 
   it("rejects an unknown token", async () => {

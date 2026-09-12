@@ -24,7 +24,10 @@ function fakeDb(result: { data?: unknown; error?: { message: string } | null }) 
     },
     maybeSingle() {
       calls.push({ method: "maybeSingle", args: [] });
-      return Promise.resolve({ data: result.data ?? null, error: result.error ?? null });
+      // No `?? null` here: this must return `result.data` exactly as given
+      // (including `undefined`) so findByHash's own `?? null` guard is what
+      // the "returns null, not undefined" test actually exercises.
+      return Promise.resolve({ data: result.data, error: result.error ?? null });
     },
     then(onFulfilled: (v: { data: unknown; error: unknown }) => unknown) {
       return Promise
