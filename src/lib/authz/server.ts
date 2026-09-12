@@ -6,21 +6,20 @@ import { APP_ROLES, type AppPermission, type SiteAccessLevel } from "./types";
 import { can, canAccessSite, type Viewer } from "./decide";
 
 /**
- * Role, permissions and grants are read per request rather than carried in the
- * JWT, so removing someone's access takes effect on their next request instead
- * of whenever their token happens to refresh. cache() keeps that to one round
- * of queries per render.
+ * Builds a Viewer from a user id. The single source of truth for "what may
+ * this person do", shared by the cookie-session path (getViewer) and the API
+ * token path (src/lib/authz/token.ts) so the two cannot diverge.
+ * tests/authz-server.test.ts and tests/mcp-identity.test.ts pin that.
  */
-export const getViewer = cache(async (): Promise<Viewer | null> => {
-  const auth = await createServerSupabase();
-  const { data } = await auth.auth.getUser();
-  if (!data.user) return null;
-
+export async function loadViewer(
+  userId: string,
+  email: string | null,
+): Promise<Viewer | null> {
   const db = createServiceSupabase();
   const [roleRow, overrides, grants] = await Promise.all([
-    db.from("user_roles").select("role").eq("user_id", data.user.id).maybeSingle(),
-    db.from("user_permission_overrides").select("permission,effect").eq("user_id", data.user.id),
-    db.from("user_site_access").select("site_id,access_level").eq("user_id", data.user.id),
+    db.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
+    db.from("user_permission_overrides").select("permission,effect").eq("user_id", userId),
+    db.from("user_site_access").select("site_id,access_level").eq("user_id", userId),
   ]);
 
   // A database error is not "no data" — Supabase returns data:[] for a
@@ -68,12 +67,25 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
   }
 
   return {
-    id: data.user.id,
-    email: data.user.email ?? null,
+    id: userId,
+    email,
     role,
     permissions,
     grants: new Map((grants.data ?? []).map((g) => [g.site_id, g.access_level as SiteAccessLevel])),
   };
+}
+
+/**
+ * Role, permissions and grants are read per request rather than carried in the
+ * JWT, so removing someone's access takes effect on their next request instead
+ * of whenever their token happens to refresh. cache() keeps that to one round
+ * of queries per render.
+ */
+export const getViewer = cache(async (): Promise<Viewer | null> => {
+  const auth = await createServerSupabase();
+  const { data } = await auth.auth.getUser();
+  if (!data.user) return null;
+  return loadViewer(data.user.id, data.user.email ?? null);
 });
 
 /** For pages: a viewer who may not see this thing is told it does not exist. */

@@ -33,7 +33,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 // Import after the mocks above so getViewer picks up the mocked
 // dependencies rather than the real Supabase/Next.js modules.
-import { getViewer } from "@/lib/authz/server";
+import { getViewer, loadViewer } from "@/lib/authz/server";
 
 type QueryResult = { data: unknown; error: { message: string } | null };
 
@@ -192,4 +192,32 @@ describe("getViewer — database errors fail closed", () => {
       errorSpy.mockRestore();
     });
   }
+});
+
+describe("loadViewer is the one place a Viewer is built", () => {
+  it("builds the same Viewer as getViewer does for the same user", async () => {
+    state.user = { id: "u1", email: "u@example.com" };
+    const viaSession = await getViewer();
+    const viaToken = await loadViewer("u1", "u@example.com");
+
+    expect(viaToken).not.toBeNull();
+    expect(viaSession).not.toBeNull();
+    // Sets and Maps do not compare usefully with toEqual, so compare contents.
+    expect(viaToken!.id).toBe(viaSession!.id);
+    expect(viaToken!.email).toBe(viaSession!.email);
+    expect(viaToken!.role).toBe(viaSession!.role);
+    expect([...viaToken!.permissions].sort()).toEqual([...viaSession!.permissions].sort());
+    expect([...viaToken!.grants.entries()].sort()).toEqual(
+      [...viaSession!.grants.entries()].sort(),
+    );
+  });
+
+  it("returns null when the user has no role row", async () => {
+    // Arrange an empty user_roles result the way this file's existing
+    // "no role" test already does, then assert loadViewer agrees.
+    state.db = fakeDb({ user_roles: { data: null, error: null } });
+
+    const v = await loadViewer("no-role-user", null);
+    expect(v).toBeNull();
+  });
 });
