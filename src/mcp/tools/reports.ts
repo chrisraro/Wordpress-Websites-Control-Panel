@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
-import { ok, fail, ENVIRONMENT_NOTE } from "../confirm";
+import { ok, fail, ENVIRONMENT_NOTE, requirePermission, requireWritableToken, redactArgs } from "../confirm";
 import { siteSummary, NOT_FOUND } from "./sites";
 import type { ToolCtx } from "../context";
 import { getSite, listSitesForViewer } from "@/services/sites/service";
 import type { SiteRow } from "@/services/sites/types";
+import { enqueueJob } from "@/services/jobs/service";
+import { parseSections } from "@/services/reports/types";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
 
@@ -103,6 +105,62 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           site: site ? siteSummary(site) : null,
           revoked: false,
           path: `/r/${report.share_token}`,
+        });
+      } catch (e) {
+        return fail(friendlySiteError(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "generate_report",
+    {
+      description:
+        "Queue a PDF report for a site covering the given sections over the " +
+        "given period. Returns a job id; the work runs on the queue within " +
+        "about a minute, not during this call. Poll list_jobs for " +
+        `completion, then get_report_link for its share link. ${ENVIRONMENT_NOTE}`,
+      inputSchema: {
+        site_id: z.string().uuid().describe("The site's id, from list_sites."),
+        sections: z
+          .array(z.enum(["security", "seo", "geogrid", "inventory"]))
+          .min(1)
+          .default(["security", "seo", "geogrid", "inventory"])
+          .describe("Which sections to include in the report."),
+        period_days: z
+          .number()
+          .int()
+          .min(1)
+          .max(365)
+          .default(30)
+          .describe("Number of days the report covers, 1-365."),
+      },
+    },
+    async (args) => {
+      const { site_id, sections: rawSections, period_days } = args;
+      const permDenied = requirePermission(ctx.auth, "reports.generate");
+      if (permDenied) return permDenied;
+      const tokenDenied = requireWritableToken(ctx.auth);
+      if (tokenDenied) return tokenDenied;
+      if (!canAccessSite(ctx.auth.viewer, site_id, "read")) return fail(NOT_FOUND);
+
+      const sections = parseSections(rawSections);
+      if (sections.length === 0) return fail("Choose at least one section.");
+
+      try {
+        const site = await getSite(ctx.sites, site_id);
+        if (!site) return fail(NOT_FOUND);
+        const job = await enqueueJob(
+          ctx.jobs, "report_generate", site_id,
+          { sections, period_days }, { dedupe: true },
+        );
+        await ctx.audit("mcp.generate_report", site_id, { args: redactArgs(args) });
+        return ok({
+          queued: job !== null,
+          job_id: job?.id ?? null,
+          note: job === null
+            ? "A report is already pending for this site; nothing new was queued."
+            : "Queued. Poll list_jobs for completion.",
         });
       } catch (e) {
         return fail(friendlySiteError(e));

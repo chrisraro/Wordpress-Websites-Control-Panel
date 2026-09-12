@@ -32,20 +32,29 @@ const ALL_READ_TOOLS = [
 /**
  * Builds a ctx with fakes for every repo the six read groups touch,
  * recording audit calls so the "reads are not logged" assertion is real.
+ *
+ * Also exported for tests/mcp-audit.test.ts, which drives the five enqueue
+ * tools against the same fixture: it needs the same read accessors (the
+ * enqueue tools call getSite/canAccessSite before queueing), plus a `jobs`
+ * fake recording every insert and an `enqueued` list to assert against, and
+ * a `readOnly` switch to exercise the writable-token guard.
  */
-function ctxFor(opts: {
+export function ctxFor(opts: {
   permissions?: AppPermission[]; grants?: [string, "read" | "manage"][];
+  readOnly?: boolean;
 } = {}) {
-  const audited: { action: string }[] = [];
+  const audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[] = [];
+  const enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[] = [];
   const viewer: Viewer = {
     id: "u1", email: null, role: "admin",
     permissions: new Set(opts.permissions ?? []),
     grants: new Map(opts.grants ?? []),
   };
-  const auth: TokenAuth = { viewer, tokenId: "tok-1", readOnly: false };
+  const auth: TokenAuth = { viewer, tokenId: "tok-1", readOnly: Boolean(opts.readOnly) };
   return {
     auth,
     audited,
+    enqueued,
     sites: {
       repo: {
         listSites: async () => [SITE],
@@ -76,8 +85,26 @@ function ctxFor(opts: {
       listJobs: async () => [],
       batchJobs: async () => [],
     },
-    async audit(action: string) { audited.push({ action }); },
-  } as unknown as ToolCtx & { audited: { action: string }[] };
+    jobs: {
+      insert: async (r: {
+        type: string; site_id?: string | null; batch_id?: string | null;
+        payload?: Record<string, unknown>;
+      }) => {
+        enqueued.push({
+          type: r.type, siteId: r.site_id ?? null,
+          batchId: r.batch_id ?? null, payload: r.payload ?? {},
+        });
+        return { id: "job-1" };
+      },
+      pendingExists: async () => false,
+    },
+    async audit(action: string, siteId: string | null, detail: Record<string, unknown>) {
+      audited.push({ action, siteId, detail });
+    },
+  } as unknown as ToolCtx & {
+    audited: { action: string; siteId: string | null; detail: Record<string, unknown> }[];
+    enqueued: { type: string; siteId: string | null; batchId: string | null; payload: Record<string, unknown> }[];
+  };
 }
 
 async function connectAll(ctx: ToolCtx) {
