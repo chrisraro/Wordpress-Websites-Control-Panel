@@ -44,7 +44,13 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
         // fleet-wide actions that have no site, and converts at this boundary.
         site_id: siteId ?? undefined,
         action,
-        detail: { token_id: auth.tokenId, ...detail },
+        // detail last-writes over token_id, not the other way around: a
+        // caller-supplied detail carrying its own `token_id` key (e.g. a
+        // destructive tool auditing redactArgs(args), which rewrites any
+        // `/token/i` key to "[redacted]") must never overwrite the
+        // authoritative value -- that would sever the only link back to
+        // which API token performed the action.
+        detail: { ...detail, token_id: auth.tokenId },
       });
     },
   };

@@ -3,7 +3,7 @@ import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "./schema";
 import type { ToolCtx } from "./context";
 import * as sites from "./tools/sites";
 
-const GROUPS = [sites];
+const GROUPS: { register(server: McpServer, ctx: ToolCtx): void }[] = [sites];
 
 /**
  * Builds a server whose tools are bound to one request's authenticated

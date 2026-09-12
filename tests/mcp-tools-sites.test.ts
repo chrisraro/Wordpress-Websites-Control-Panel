@@ -145,6 +145,45 @@ describe("get_site", () => {
     expect(textOf(res)).not.toMatch(/permission|forbidden|denied/i);
     await close();
   });
+
+  it("logs nothing -- reads are not audited", async () => {
+    const ctx = ctxWith(viewerWith(["sites.view_all"], []));
+    const { client, close } = await connect(ctx);
+    await client.callTool({ name: "get_site", arguments: { site_id: SITE_A.id } });
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+});
+
+describe("test_site_connection", () => {
+  it("refuses a read-only token, naming the token rather than a permission", async () => {
+    const ctx = ctxWith(viewerWith(["sites.view_all"], []), { readOnly: true });
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({
+      name: "test_site_connection", arguments: { site_id: SITE_A.id },
+    });
+    expect((res as { isError?: boolean }).isError).toBe(true);
+    expect(textOf(res)).toMatch(/read-only/i);
+    expect(textOf(res)).toMatch(/token/i);
+    expect(textOf(res)).not.toMatch(/permission/i);
+    // Refused before it ever reaches the panel-mutating service call.
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("lets a writable token reach the service", async () => {
+    const ctx = ctxWith(viewerWith(["sites.view_all"], []));
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({
+      name: "test_site_connection", arguments: { site_id: SITE_A.id },
+    });
+    // Not blocked by the write gate -- the fake repo's getSiteCredentials
+    // returns null, so the service itself reports "Site not found" rather
+    // than the tool refusing the call outright.
+    expect((res as { isError?: boolean }).isError).toBeFalsy();
+    expect(payload(res).error).toBe("Site not found");
+    await close();
+  });
 });
 
 describe("tool descriptions", () => {

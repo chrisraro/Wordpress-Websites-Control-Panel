@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
-import { ok, fail, ENVIRONMENT_NOTE } from "../confirm";
+import { ok, fail, ENVIRONMENT_NOTE, requireWritableToken } from "../confirm";
 import type { ToolCtx } from "../context";
 import { listSitesForViewer, getSite, testSiteConnection } from "@/services/sites/service";
 import { siteEnvironment } from "@/services/sites/portfolio";
@@ -82,11 +82,15 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     "test_site_connection",
     {
       description:
-        "Check that the panel can still reach a site over MCP and report its status. " +
-        `This is a read: it changes nothing on the site. ${ENVIRONMENT_NOTE}`,
+        "Open a connection to a site over MCP to check that it's reachable. " +
+        "This changes nothing on the WordPress site itself, but it records the " +
+        "resulting status and an activity-log entry in the panel, so a token " +
+        `minted read-only cannot call it. ${ENVIRONMENT_NOTE}`,
       inputSchema: { site_id: z.string().uuid().describe("The site's id, from list_sites.") },
     },
     async ({ site_id }) => {
+      const tokenDenied = requireWritableToken(ctx.auth);
+      if (tokenDenied) return tokenDenied;
       if (!canAccessSite(ctx.auth.viewer, site_id, "read")) return fail(NOT_FOUND);
       try {
         return ok(await testSiteConnection(ctx.sites, site_id, ctx.auth.viewer.id));
