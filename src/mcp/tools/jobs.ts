@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
-import { ok, fail, ENVIRONMENT_NOTE } from "../confirm";
+import {
+  ok, fail, ENVIRONMENT_NOTE, CONFIRM_SHAPE, gateConfirm, redactArgs, requirePermission,
+} from "../confirm";
 import { siteSummary, NOT_FOUND } from "./sites";
 import type { ToolCtx } from "../context";
 import { listSites } from "@/services/sites/service";
@@ -151,6 +153,85 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         // work is all cancelled is finished too.
         const done = rows.every((r) => r.status === "done" || r.status === "failed" || r.cancelled_at !== null);
         return ok({ batch_id, jobs: rows, done });
+      } catch (e) {
+        return fail(friendlySiteError(e));
+      }
+    },
+  );
+
+  server.registerTool(
+    "cancel_batch",
+    {
+      description:
+        "Cancel the still-queued jobs in a batch. Only pending jobs are " +
+        "stopped: a job already running is executing PHP on a live " +
+        "WordPress install and cannot be reached from here, and a job " +
+        "awaiting an external callback is equally out of reach. The count " +
+        "returned is what was actually stopped, which can be fewer than the " +
+        "batch's total size -- this never claims to have undone work that " +
+        `had already started. Not scoped to a site. ${ENVIRONMENT_NOTE}`,
+      inputSchema: {
+        batch_id: z.string().uuid().describe("The batch's id, from get_batch or list_jobs."),
+        ...CONFIRM_SHAPE,
+      },
+    },
+    async (args) => {
+      const { batch_id } = args;
+      const permDenied = requirePermission(ctx.auth, "queue.process");
+      if (permDenied) return permDenied;
+
+      try {
+        const [jobs, sites] = await Promise.all([
+          ctx.jobsRead.batchJobs(batch_id),
+          listSites(ctx.sites),
+        ]);
+
+        // Same "not found, not forbidden" rule get_batch applies: filter to
+        // visible sites before anything about the batch -- including
+        // whether it exists at all -- reaches a preview. An empty preview
+        // that still resolved to "0 pending" would confirm the batch id
+        // exists to someone who should not know that.
+        const visible = visibleSiteIds(ctx.auth.viewer, sites.map((s) => s.id));
+        const visibleJobs = visible === "all"
+          ? jobs
+          : jobs.filter((j) => j.site_id && visible.includes(j.site_id));
+        if (visibleJobs.length === 0) return fail(BATCH_NOT_FOUND);
+
+        const pending = visibleJobs.filter((j) => j.status === "pending" && !j.cancelled_at);
+        const notPending = visibleJobs.length - pending.length;
+
+        const summary = pending.length === 0
+          ? `Would cancel nothing: none of this batch's ${visibleJobs.length} visible job(s) are still pending.`
+          : `Would stop ${pending.length} still-pending job(s) in this batch.` +
+            (notPending > 0
+              ? ` ${notPending} job(s) are already running, finished, or cancelled, and cannot be reached from here.`
+              : "");
+
+        const gate = gateConfirm(ctx.auth, args, summary, {
+          batch_id, pending: pending.length, not_pending: notPending,
+        });
+        if (!gate.proceed) return gate.result;
+
+        try {
+          const cancelled = await ctx.jobs.cancelBatch(batch_id);
+          await ctx.audit("mcp.cancel_batch", null, {
+            reason: gate.reason, args: redactArgs(args), ok: true, cancelled,
+          });
+          return ok({
+            batch_id,
+            cancelled,
+            note: cancelled < visibleJobs.length
+              ? `${cancelled} of the batch's visible jobs were pending and got stopped; ` +
+                "the rest had already started, finished, or were already cancelled."
+              : undefined,
+          });
+        } catch (e) {
+          const message = friendlySiteError(e);
+          await ctx.audit("mcp.cancel_batch", null, {
+            reason: gate.reason, args: redactArgs(args), ok: false, error: message,
+          });
+          return fail(message);
+        }
       } catch (e) {
         return fail(friendlySiteError(e));
       }

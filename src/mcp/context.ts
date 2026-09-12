@@ -9,6 +9,9 @@ import { supabaseGeoGridRepo } from "@/services/geogrid/repo";
 import { supabaseReportsRepo, type ReportRow } from "@/services/reports/repo";
 import type { SitesDeps } from "@/services/sites/service";
 import { manageSite, type ManageDeps } from "@/services/manage/service";
+import { planFleetPluginUpdate } from "@/services/manage/fleet";
+import { installVerificationFile, removeVerificationFile, type GscDeps } from "@/services/gsc/service";
+import { enqueueBatch } from "@/services/jobs/service";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { InventoryPayload } from "@/services/inventory/types";
 import type { Grade, SecurityCheck } from "@/services/security/types";
@@ -74,6 +77,31 @@ export interface ToolCtx {
    * be nothing to intercept if the tool imported the real function itself.
    */
   manageSite: typeof manageSite;
+  /**
+   * The seam `install_gsc_verification` / `remove_gsc_verification` call
+   * instead of importing `@/services/gsc/service` directly, for the same
+   * dry-run-provability reason as `manageSite`. `deps` travels alongside the
+   * functions rather than being threaded through from elsewhere, because
+   * `GscDeps` (a `SitesRepo` + an `McpFactory`) isn't otherwise assembled on
+   * `ToolCtx` -- `ctx.manage.sites` is shaped for `ManageDeps`, not this.
+   */
+  gsc: { install: typeof installVerificationFile; remove: typeof removeVerificationFile; deps: GscDeps };
+  /**
+   * The seam `update_all_plugins_fleet` calls to enqueue its batch, instead
+   * of importing `enqueueBatch` from "@/services/jobs/service" directly --
+   * same dry-run-provability reason as `manageSite`.
+   */
+  enqueueBatch: typeof enqueueBatch;
+  /**
+   * The seam `update_all_plugins_fleet` calls to compute which sites are
+   * eligible, both for its preview and before enqueueing. Unlike
+   * `manageSite`/`enqueueBatch`, this one is also exercised on every dry run
+   * (the preview needs the eligible list), so it is never itself "the
+   * action" a dry-run test proves didn't happen -- that role belongs to
+   * `enqueueBatch` above, the same way `getSite`/`loadSite` are read-only
+   * scaffolding around `manageSite`'s single-site tools.
+   */
+  planFleetPluginUpdate: typeof planFleetPluginUpdate;
 }
 
 /**
@@ -104,6 +132,13 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     // only ever declare the two methods they actually use.
     jobsRead: jobs,
     manageSite,
+    gsc: {
+      install: installVerificationFile,
+      remove: removeVerificationFile,
+      deps: { repo: sitesRepo, mcp: createSiteMcpClient },
+    },
+    enqueueBatch,
+    planFleetPluginUpdate,
     async audit(action, siteId, detail) {
       await sitesRepo.insertActivity({
         actor: auth.viewer.id,

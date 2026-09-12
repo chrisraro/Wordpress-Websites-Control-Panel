@@ -194,6 +194,36 @@ describe("read tools", () => {
       expect(out.note).toBeTruthy();
       await close();
     });
+
+    it("omits note entirely once latestPerKeyword has results -- not merely falsy", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      const CONFIG = {
+        id: "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62", site_id: SITE_ID,
+        business_name: "Alpha Co", place_ref: null, keywords: ["plumber"],
+        grid_size: 5, spacing_m: 500, center_lat: 1, center_lng: 2,
+        provider: "stub" as const, created_at: "2026-09-01T00:00:00Z",
+      };
+      const geo = (ctx as unknown as {
+        geogrid: {
+          getConfigBySite: () => Promise<typeof CONFIG>;
+          latestPerKeyword: () => Promise<Record<string, unknown>>;
+        };
+      }).geogrid;
+      geo.getConfigBySite = async () => CONFIG;
+      geo.latestPerKeyword = async () => ({
+        plumber: { id: "s1", config_id: CONFIG.id, run_at: "now", keyword: "plumber", points: [] },
+      });
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_geogrid", arguments: { site_id: SITE_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.configured).toBe(true);
+      // JSON.stringify drops an `undefined` value entirely, so this proves
+      // `note` was never set for a config with results -- not just that it
+      // happens to be falsy.
+      expect("note" in out).toBe(false);
+      await close();
+    });
   });
 
   describe("list_reports", () => {
@@ -451,11 +481,55 @@ describe("read tools", () => {
 
     it("reports not found for a genuinely empty batch, even for a viewer who can see every site", async () => {
       const ctx = ctxFor({ permissions: ["sites.view_all"] });
-      // jobsRead.batchJobs already defaults to an empty array in ctxFor.
+      // ctxFor's default batchJobs returns one job (for cancel_batch's
+      // happy-path tests) -- override it to a genuinely empty batch here.
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<unknown[]> } }).jobsRead
+        .batchJobs = async () => [];
       const { client, close } = await connectAll(ctx);
       const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
       expect((res as { isError?: boolean }).isError).toBe(true);
       expect(textOf(res)).toMatch(/not found/i);
+      await close();
+    });
+
+    it("surfaces label, kind, target and activate from the job's payload", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      const job = {
+        ...JOB_ON_SITE,
+        payload: { label: "Update akismet", kind: "plugin_install", target: "akismet/akismet.php", activate: true },
+      };
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<(typeof job)[]> } }).jobsRead
+        .batchJobs = async () => [job];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.jobs[0]).toMatchObject({
+        label: "Update akismet", kind: "plugin_install", target: "akismet/akismet.php", activate: true,
+      });
+      await close();
+    });
+
+    it("never throws or emits a non-string label/kind/target for a malformed payload, falling back to the site name", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      const job = {
+        ...JOB_ON_SITE,
+        // A stored payload need not match the shape this tool expects --
+        // label/target are read with a runtime typeof guard specifically
+        // because a numeric label or a null target must not reach the
+        // client as-is.
+        payload: { label: 42, target: null, kind: 7 },
+      };
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<(typeof job)[]> } }).jobsRead
+        .batchJobs = async () => [job];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      // Falls back to the job's site name, since the stored label isn't a string.
+      expect(out.jobs[0].label).toBe(SITE.name);
+      expect(out.jobs[0].kind).toBeUndefined();
+      expect(out.jobs[0].target).toBeUndefined();
       await close();
     });
   });

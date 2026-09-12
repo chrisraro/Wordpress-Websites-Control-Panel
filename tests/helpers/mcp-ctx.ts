@@ -21,6 +21,11 @@ export const SITE = {
   environment: "production", status: "connected", client_label: null,
 };
 
+/** Shared batch id fixture -- used as the default ctx.jobsRead.batchJobs
+ * payload below, and by tests/mcp-tools-reads.test.ts and
+ * tests/mcp-tools-destructive.test.ts for `get_batch`/`cancel_batch`. */
+export const BATCH_ID = "3d8a5f6b-7e9a-4c14-8f5d-8b6e4c2a9d73";
+
 /**
  * Builds a ctx with fakes for every repo the read, enqueue and destructive
  * tool groups touch, recording audit calls, enqueued job inserts and raw
@@ -106,7 +111,17 @@ export function ctxFor(opts: {
     },
     jobsRead: {
       listJobs: async () => [],
-      batchJobs: async () => [],
+      // A single pending job on the fixture site by default, so
+      // `cancel_batch`'s existence/visibility check (mirroring get_batch's)
+      // has something to find and its happy-path tests reach the confirm
+      // gate instead of a not-found refusal. Tests that need a genuinely
+      // empty or fully-invisible batch override this explicitly.
+      batchJobs: async () => [{
+        id: "job-1", type: "update_all_plugins" as const, site_id: SITE_ID,
+        batch_id: BATCH_ID, payload: {}, status: "pending" as const, attempts: 0,
+        scheduled_for: "2026-09-01T00:00:00Z", last_error: null,
+        cancelled_at: null, dismissed_at: null, finished_at: null,
+      }],
     },
     jobs: {
       insert: async (r: {
@@ -120,11 +135,68 @@ export function ctxFor(opts: {
         return { id: "job-1" };
       },
       pendingExists: async () => Boolean(opts.pendingExists),
+      // The write half of the seam `cancel_batch` calls -- see
+      // src/services/jobs/repo.ts's JobsRepo#cancelBatch. Recorded like
+      // `manageSite` below so a dry-run test can assert no service call
+      // happened.
+      async cancelBatch() {
+        serviceCalls.push("cancelBatch");
+        return 1;
+      },
     },
     // The injectable seam -- see src/mcp/context.ts's `manageSite` field.
     async manageSite() {
       serviceCalls.push("manageSite");
       return { ok: true, output: "Done" };
+    },
+    /**
+     * `update_all_plugins_fleet`'s two Task 10b seams.
+     *
+     * `planFleetPluginUpdate` is deliberately grant-aware rather than a dumb
+     * recorder: it is also the tool's *preview* computation (called on every
+     * dry run, not only on confirm), so it must behave like `loadSite` does
+     * for the single-site tools -- respecting the fixture viewer's grants --
+     * for the shared "ungranted caller" guard-order test to mean anything
+     * for this tool. It is never pushed to `serviceCalls`: like `getSite`,
+     * it is a read, not the action being gated.
+     */
+    async planFleetPluginUpdate(_deps: unknown, viewer: Viewer) {
+      const canManage = viewer.permissions.has("sites.view_all") || viewer.grants.get(SITE_ID) === "manage";
+      return {
+        eligible: canManage ? [SITE] : [],
+        alreadyQueued: [],
+        noUpdates: [],
+      };
+    },
+    async enqueueBatch() {
+      serviceCalls.push("enqueueBatch");
+      return { batchId: "b1", count: 1 };
+    },
+    // `install_gsc_verification` / `remove_gsc_verification`'s seam. `deps`
+    // is never touched by these default stubs -- only a test that swaps in
+    // the real `installVerificationFile`/`removeVerificationFile` functions
+    // (to exercise their own validation) ever reaches into it.
+    gsc: {
+      async install() {
+        serviceCalls.push("gscInstall");
+        return {
+          fileName: "google1234abcd5678.html",
+          url: `${SITE.url}/google1234abcd5678.html`,
+          sha256: "0".repeat(64),
+          replaced: false,
+          reachable: true,
+        };
+      },
+      async remove() {
+        serviceCalls.push("gscRemove");
+      },
+      deps: {
+        repo: {
+          getSite: async (id: string) => (id === SITE_ID ? SITE : null),
+          getSiteCredentials: async () => ({ url: SITE.url }),
+        },
+        mcp: () => { throw new Error("no network in tests"); },
+      },
     },
     async audit(action: string, siteId: string | null, detail: Record<string, unknown>) {
       audited.push({ action, siteId, detail });

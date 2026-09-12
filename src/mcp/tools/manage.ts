@@ -9,6 +9,7 @@ import { getSite } from "@/services/sites/service";
 import { siteEnvironment } from "@/services/sites/portfolio";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
+import type { AppPermission } from "@/lib/authz/types";
 import type { ManageAction } from "@/services/manage/types";
 import type { SiteRow } from "@/services/sites/types";
 import { PLUGIN_FILE_RE, SLUG_RE } from "@/services/manage/service";
@@ -39,11 +40,16 @@ const PERMISSION = "wp_toolkit.manage" as const;
  * refusal or the resolved site. Order matters and is pinned by tests:
  * gating on confirm before site access would tell a caller that a site they
  * cannot see exists, because the preview would name it.
+ *
+ * Parameterised on `permission` (rather than hardcoding this file's
+ * `wp_toolkit.manage`) so Task 10b's `gsc.ts` -- gated on `sites.manage`
+ * instead -- can reuse the exact same guard order without copying it.
+ * Every call site in this file still passes the local `PERMISSION` constant.
  */
-async function loadSite(
-  ctx: ToolCtx, site_id: string,
+export async function loadSite(
+  ctx: ToolCtx, site_id: string, permission: AppPermission,
 ): Promise<{ result: ReturnType<typeof fail> } | { site: SiteRow }> {
-  const permDenied = requirePermission(ctx.auth, PERMISSION);
+  const permDenied = requirePermission(ctx.auth, permission);
   if (permDenied) return { result: permDenied };
   if (!canAccessSite(ctx.auth.viewer, site_id, "manage")) return { result: fail(NOT_FOUND) };
 
@@ -86,7 +92,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, plugin_file } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -128,7 +134,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, slugs } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -176,7 +182,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -213,7 +219,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, plugin_file } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -252,7 +258,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, plugin_file } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -298,7 +304,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       // Order matters, and the tests pin it: permission, then site access,
       // then existence, then the confirm gate. Gating on confirm before site
       // access would tell a caller that a site they cannot see exists.
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -335,7 +341,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, slug } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -373,7 +379,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, slug } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -412,7 +418,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id, enable } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -452,7 +458,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
@@ -489,7 +495,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     },
     async (args) => {
       const { site_id } = args;
-      const loaded = await loadSite(ctx, site_id);
+      const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
