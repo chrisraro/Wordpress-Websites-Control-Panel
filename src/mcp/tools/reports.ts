@@ -49,9 +49,19 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         const reports = lists
           .flat()
           .sort((a, b) => b.generated_at.localeCompare(a.generated_at))
-          .map(({ share_token: _share_token, ...rest }) => ({
-            ...rest,
-            site: siteById.has(rest.site_id) ? siteSummary(siteById.get(rest.site_id)!) : null,
+          // Explicit field list, not `...rest`: a report row also carries
+          // `share_token` (excluded on purpose -- see get_report_link) and
+          // `storage_path`, an internal bucket path with no use to an MCP
+          // caller. Naming fields here means a future column added to the
+          // row does not leak by default.
+          .map((r) => ({
+            id: r.id,
+            site: siteById.has(r.site_id) ? siteSummary(siteById.get(r.site_id)!) : null,
+            generated_at: r.generated_at,
+            sections: r.sections,
+            period_start: r.period_start,
+            period_end: r.period_end,
+            auto: r.auto,
           }));
         return ok({ count: reports.length, reports });
       } catch (e) {

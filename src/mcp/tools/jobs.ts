@@ -60,6 +60,14 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           siteIds = visible === "all" ? null : visible;
         }
 
+        // A viewer with no grants and no sites.view_all has an empty visible
+        // set. Passing that through would reach PostgREST as
+        // `site_id=in.()`, which no other query in this codebase does --
+        // short-circuit instead of relying on how that's handled downstream.
+        if (Array.isArray(siteIds) && siteIds.length === 0) {
+          return ok({ count: 0, jobs: [] });
+        }
+
         const jobs = await ctx.jobsRead.listJobs({ siteIds, status, limit });
         return ok({
           count: jobs.length,
@@ -115,15 +123,30 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (visibleJobs.length === 0) return fail(BATCH_NOT_FOUND);
 
         const siteById = new Map(sites.map((s) => [s.id, s]));
-        const rows = visibleJobs.map((j) => ({
-          id: j.id,
-          type: j.type,
-          site: j.site_id && siteById.has(j.site_id) ? siteSummary(siteById.get(j.site_id)!) : null,
-          status: j.status,
-          attempts: j.attempts,
-          last_error: j.last_error,
-          cancelled_at: j.cancelled_at ?? null,
-        }));
+        const rows = visibleJobs.map((j) => {
+          const site = j.site_id && siteById.has(j.site_id) ? siteSummary(siteById.get(j.site_id)!) : null;
+          // `type` ("plugin_install" vs "bulk_manage") plus this non-secret
+          // bulk metadata is what lets a caller tell what the batch is
+          // actually doing instead of just that jobs exist -- mirrors
+          // src/app/api/batches/[id]/route.ts.
+          const payload = j.payload as { label?: unknown; kind?: unknown; target?: unknown; activate?: unknown };
+          const payloadLabel = payload.label;
+          return {
+            id: j.id,
+            type: j.type,
+            site,
+            status: j.status,
+            attempts: j.attempts,
+            last_error: j.last_error,
+            cancelled_at: j.cancelled_at ?? null,
+            // Bulk batches are one site, many items; install batches are one
+            // item, many sites. The payload label distinguishes them.
+            label: typeof payloadLabel === "string" && payloadLabel ? payloadLabel : site?.name ?? "—",
+            kind: typeof payload.kind === "string" ? payload.kind : undefined,
+            target: typeof payload.target === "string" ? payload.target : undefined,
+            activate: typeof payload.activate === "boolean" ? payload.activate : undefined,
+          };
+        });
         // A cancelled job will never be claimed, so a batch whose remaining
         // work is all cancelled is finished too.
         const done = rows.every((r) => r.status === "done" || r.status === "failed" || r.cancelled_at !== null);

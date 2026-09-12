@@ -38,6 +38,10 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           configured: true,
           config,
           keywords,
+          note: Object.keys(keywords).length > 0
+            ? undefined
+            : "This site's GeoGrid is configured but has not produced any results yet. " +
+              "run_geogrid collects them.",
         });
       } catch (e) {
         return fail(friendlySiteError(e));

@@ -8,10 +8,17 @@ import type { ToolCtx } from "@/mcp/context";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { Viewer } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
+import type { JobRow } from "@/services/jobs/types";
 
 const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
 const SITE = {
   id: SITE_ID, name: "Alpha", url: "https://alpha.test",
+  environment: "production", status: "connected", client_label: null,
+};
+
+const SITE_B_ID = "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c63";
+const SITE_B = {
+  id: SITE_B_ID, name: "Beta", url: "https://beta.test",
   environment: "production", status: "connected", client_label: null,
 };
 
@@ -221,6 +228,31 @@ describe("read tools", () => {
       expect(out.keywords.plumber.keyword).toBe("plumber");
       await close();
     });
+
+    it("notes that GeoGrid is configured but has not produced results when latestPerKeyword is empty", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      const CONFIG = {
+        id: "2c7f4e5a-6d8f-4b03-9e4c-7a5d3b1f8c62", site_id: SITE_ID,
+        business_name: "Alpha Co", place_ref: null, keywords: ["plumber"],
+        grid_size: 5, spacing_m: 500, center_lat: 1, center_lng: 2,
+        provider: "stub" as const, created_at: "2026-09-01T00:00:00Z",
+      };
+      const geo = (ctx as unknown as {
+        geogrid: {
+          getConfigBySite: () => Promise<typeof CONFIG>;
+          latestPerKeyword: () => Promise<Record<string, unknown>>;
+        };
+      }).geogrid;
+      geo.getConfigBySite = async () => CONFIG;
+      geo.latestPerKeyword = async () => ({});
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_geogrid", arguments: { site_id: SITE_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const out = JSON.parse(textOf(res));
+      expect(out.configured).toBe(true);
+      expect(out.note).toBeTruthy();
+      await close();
+    });
   });
 
   describe("list_reports", () => {
@@ -246,7 +278,22 @@ describe("read tools", () => {
       const out = JSON.parse(textOf(res));
       expect(out.count).toBe(1);
       expect("share_token" in out.reports[0]).toBe(false);
+      expect("storage_path" in out.reports[0]).toBe(false);
       expect(out.reports[0].site.environment).toBe("production");
+      await close();
+    });
+
+    it("calls listForSite only with the sites a grant-scoped viewer can see, when site_id is omitted", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [[SITE_ID, "read"]] });
+      (ctx as unknown as { sites: { repo: { listSites: () => Promise<unknown[]> } } }).sites.repo
+        .listSites = async () => [SITE, SITE_B];
+      const calledWith: string[] = [];
+      (ctx as unknown as { reports: { listForSite: (id: string) => Promise<unknown[]> } }).reports
+        .listForSite = async (id: string) => { calledWith.push(id); return []; };
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "list_reports", arguments: {} });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      expect(calledWith).toEqual([SITE_ID]);
       await close();
     });
 
@@ -389,6 +436,19 @@ describe("read tools", () => {
       expect(out.jobs[0].site.environment).toBe("production");
       await close();
     });
+
+    it("returns an empty result without calling the repo for a viewer with zero visible sites", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [] });
+      let called = false;
+      (ctx as unknown as { jobsRead: { listJobs: (f: unknown) => Promise<unknown[]> } }).jobsRead
+        .listJobs = async () => { called = true; return []; };
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "list_jobs", arguments: {} });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      expect(JSON.parse(textOf(res))).toEqual({ count: 0, jobs: [] });
+      expect(called).toBe(false);
+      await close();
+    });
   });
 
   describe("get_batch", () => {
@@ -409,6 +469,29 @@ describe("read tools", () => {
       const out = JSON.parse(textOf(res));
       expect(out.jobs).toHaveLength(1);
       expect(out.jobs[0].site.environment).toBe("production");
+      expect(out.done).toBe(true);
+      await close();
+    });
+
+    it("filters a mixed-visibility batch to only the visible site's job, and done reflects only that job", async () => {
+      const ctx = ctxFor({ permissions: [], grants: [[SITE_ID, "read"]] });
+      (ctx as unknown as { sites: { repo: { listSites: () => Promise<unknown[]> } } }).sites.repo
+        .listSites = async () => [SITE, SITE_B];
+      const JOB_A: JobRow = { ...JOB_ON_SITE, id: "job-a", site_id: SITE_ID, status: "done", cancelled_at: null };
+      const JOB_B: JobRow = { ...JOB_ON_SITE, id: "job-b", site_id: SITE_B_ID, status: "pending", cancelled_at: null };
+      (ctx as unknown as { jobsRead: { batchJobs: () => Promise<JobRow[]> } }).jobsRead
+        .batchJobs = async () => [JOB_A, JOB_B];
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_batch", arguments: { batch_id: BATCH_ID } });
+      expect((res as { isError?: boolean }).isError).toBeFalsy();
+      const text = textOf(res);
+      const out = JSON.parse(text);
+      expect(out.jobs).toHaveLength(1);
+      expect(out.jobs[0].id).toBe("job-a");
+      expect(text).not.toMatch(/Beta/);
+      // JOB_B (the unfiltered site's job) is "pending" -- if `done` were
+      // computed over all jobs instead of just the visible ones, this would
+      // be false.
       expect(out.done).toBe(true);
       await close();
     });
