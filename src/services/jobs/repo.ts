@@ -2,16 +2,32 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import type { JobRow, JobStatus, JobType } from "./types";
 
+/**
+ * The state a transition expects the row to still be in. A worker passes the
+ * status and attempt it claimed, so a late writer (an attempt the 15-minute
+ * stale reclaim already superseded, or a stale-callback sweep racing the n8n
+ * callback) updates nothing instead of overwriting the row's current state.
+ */
+export interface JobTransitionGuard { status: JobStatus; attempts: number }
+
 export interface JobsRepo {
   insert(job: {
     type: JobType; site_id?: string | null;
     payload?: Record<string, unknown>; scheduled_for?: string; batch_id?: string | null;
   }): Promise<{ id: string }>;
+  /**
+   * True when a live job of this type+site is queued or in flight: `pending`,
+   * `running` or `awaiting_callback`, and not cancelled. The name predates
+   * the wider meaning; callers use it as "is this work already underway",
+   * and two concurrent update passes on one site corrupt its plugin
+   * directory, so a running job must count. A cancelled row never runs, so
+   * it must not block new work.
+   */
   pendingExists(type: JobType, siteId: string | null): Promise<boolean>;
   claim(batchSize: number): Promise<JobRow[]>;
-  markDone(id: string): Promise<void>;
-  retry(id: string, error: string, retryAtIso: string): Promise<void>;
-  markFailed(id: string, error: string): Promise<void>;
+  markDone(id: string, guard?: JobTransitionGuard): Promise<void>;
+  retry(id: string, error: string, retryAtIso: string, guard?: JobTransitionGuard): Promise<void>;
+  markFailed(id: string, error: string, guard?: JobTransitionGuard): Promise<void>;
   batchJobs(batchId: string): Promise<JobRow[]>;
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
@@ -67,6 +83,12 @@ export interface JobsRepo {
   retryFailedInBatch(batchId: string): Promise<number>;
 }
 
+interface Filterable<Q> { eq(column: string, value: unknown): Q }
+
+function guarded<Q extends Filterable<Q>>(q: Q, guard?: JobTransitionGuard): Q {
+  return guard ? q.eq("status", guard.status).eq("attempts", guard.attempts) : q;
+}
+
 export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
   return {
     async insert(job) {
@@ -82,7 +104,8 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
     },
     async pendingExists(type, siteId) {
       let q = db.from("jobs").select("id", { head: true, count: "exact" })
-        .eq("type", type).eq("status", "pending");
+        .eq("type", type).in("status", ["pending", "running", "awaiting_callback"])
+        .is("cancelled_at", null);
       q = siteId === null ? q.is("site_id", null) : q.eq("site_id", siteId);
       const { count, error } = await q;
       if (error) throw new Error(`jobs.pendingExists failed: ${error.message}`, { cause: error });
@@ -93,26 +116,29 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       if (error) throw new Error(`claim_jobs failed: ${error.message}`, { cause: error });
       return (data ?? []) as JobRow[];
     },
-    async markDone(id) {
-      const { error } = await db.from("jobs")
+    async markDone(id, guard) {
+      const q = db.from("jobs")
         .update({ status: "done", finished_at: new Date().toISOString() }).eq("id", id);
+      const { error } = await guarded(q, guard);
       if (error) throw new Error(`jobs.markDone failed: ${error.message}`, { cause: error });
     },
-    async retry(id, err, retryAtIso) {
+    async retry(id, err, retryAtIso, guard) {
       // Clears any prior dismissal: `failed` is terminal today so this path
       // isn't reachable for a dismissed job yet, but a future `failed ->
       // pending` retry path must not resurrect a job that was born dismissed
       // — a job back on the ladder should reappear in the failed-runs alert
       // if it fails again.
-      const { error } = await db.from("jobs")
+      const q = db.from("jobs")
         .update({ status: "pending", last_error: err, scheduled_for: retryAtIso, dismissed_at: null })
         .eq("id", id);
+      const { error } = await guarded(q, guard);
       if (error) throw new Error(`jobs.retry failed: ${error.message}`, { cause: error });
     },
-    async markFailed(id, err) {
-      const { error } = await db.from("jobs")
+    async markFailed(id, err, guard) {
+      const q = db.from("jobs")
         .update({ status: "failed", last_error: err, finished_at: new Date().toISOString() })
         .eq("id", id);
+      const { error } = await guarded(q, guard);
       if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
     },
     async cancelBatch(batchId) {
