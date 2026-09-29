@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getSite } from "@/services/sites/service";
+import { getSite, listSitesForViewer } from "@/services/sites/service";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { createSiteMcpClient } from "@/lib/mcp/client";
@@ -14,6 +14,11 @@ import { RootFilesCard } from "./root-files-card";
 import { ReconnectCard } from "./reconnect-card";
 import { OriginOverrideForm } from "./origin-override-form";
 import { siteEnvironment } from "@/services/sites/portfolio";
+import { supabasePairingRepo } from "@/services/sites/pairing-repo";
+import { effectivePairId } from "@/services/sites/pairing";
+import { diffInventories, type InventoryDrift } from "@/services/sites/drift";
+import { PairingCard, StagingPairsLinks } from "./pairing-card";
+import { PairingForm } from "./pairing-form";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
@@ -34,7 +39,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const viewer = await requireSiteAccess(id);
   const db = await readDbFor(viewer);
-  const site = await getSite({ repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) }, id);
+  const sitesDeps = { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs: supabaseJobsRepo(db) };
+  const site = await getSite(sitesDeps, id);
   if (!site) notFound();
 
   const canTestConnection = can(viewer, "sites.manage");
@@ -77,8 +83,42 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   // off SITE_COLUMNS/SiteRow entirely -- getSite above never carries them.
   const connection = canViewAdminUsers ? await supabaseSitesRepo(db).getSiteConnection(id) : null;
 
-  const snapshot = await supabaseSnapshotsRepo(db).latestSnapshot(id);
+  const snapshots = supabaseSnapshotsRepo(db);
+  const snapshot = await snapshots.latestSnapshot(id);
   const inv = snapshot?.payload ?? null;
+  const environment = siteEnvironment(site);
+
+  // Staging ↔ production pairing (0026_site_production_pair.sql). Staff-only,
+  // on the same gate as the other staff-only reads above: production_site_id
+  // is deliberately not granted to `authenticated`, so it can only be read
+  // through the service-role client `db` already is for these viewers -- a
+  // client's user-scoped client would have the whole select refused.
+  const pairsRepo = canViewAdminUsers ? supabasePairingRepo(db) : null;
+  const pairId = pairsRepo ? effectivePairId(site, await pairsRepo.getProductionSiteId(id)) : null;
+  const pairedProduction = pairId && canAccessSite(viewer, pairId) ? await getSite(sitesDeps, pairId) : null;
+  let pairing: {
+    drift: InventoryDrift | null;
+    missing: "staging" | "production" | "both" | null;
+    productionTakenAt: string | null;
+  } | null = null;
+  if (pairedProduction) {
+    const prodSnap = await snapshots.latestSnapshot(pairedProduction.id);
+    pairing = {
+      drift: inv && prodSnap ? diffInventories(inv, prodSnap.payload) : null,
+      missing: inv && prodSnap ? null : !inv && !prodSnap ? "both" : !inv ? "staging" : "production",
+      productionTakenAt: prodSnap?.taken_at ?? null,
+    };
+  }
+  const stagingPairs = pairsRepo && environment === "production"
+    ? (await pairsRepo.listStagingPairs(id)).filter((p) => canAccessSite(viewer, p.id))
+    : [];
+  // setProductionPairAction needs a manage grant on both ends, so only
+  // production sites this viewer can manage are offered.
+  const pairOptions = pairsRepo && canManageConnection && environment === "staging"
+    ? (await listSitesForViewer(sitesDeps, viewer))
+        .filter((s) => s.id !== id && siteEnvironment(s) === "production" && canAccessSite(viewer, s.id, "manage"))
+        .map((s) => ({ id: s.id, name: s.name }))
+    : [];
   const adminUsers = canViewAdminUsers ? await supabaseAdminUsersRepo(db).latestAdminUsers(id) : null;
 
   // See the canViewAdminUsers comment above: activity_log's RLS policy
@@ -100,7 +140,6 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const maintenanceOff = manageAction.bind(null, id, { kind: "maintenance" as const, enable: false });
   const flushCache = manageAction.bind(null, id, { kind: "flush_cache" as const });
   const flushPermalinks = manageAction.bind(null, id, { kind: "flush_permalinks" as const });
-  const environment = siteEnvironment(site);
   // Flips to the other one; the button label and confirm say which.
   const flipEnvironment = setEnvironmentAction.bind(
     null, id, environment === "staging" ? "production" : "staging",
@@ -136,6 +175,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               </span>
             )}
           </div>
+          <StagingPairsLinks pairs={stagingPairs} />
         </div>
         <div className="flex flex-col items-end gap-2">
           <div className="flex flex-wrap items-start gap-2">
@@ -260,6 +300,16 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
+      {pairedProduction && pairing && (
+        <PairingCard
+          production={{ id: pairedProduction.id, name: pairedProduction.name }}
+          drift={pairing.drift}
+          missing={pairing.missing}
+          stagingTakenAt={snapshot?.taken_at ?? null}
+          productionTakenAt={pairing.productionTakenAt}
+        />
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardTitle>Connection</CardTitle>
@@ -325,6 +375,15 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
                 }}
               />
             </div>
+          )}
+
+          {pairsRepo && canManageConnection && environment === "staging" && (
+            <PairingForm
+              siteId={id}
+              currentId={pairId}
+              currentName={pairedProduction?.name ?? (pairId ? "A site you cannot open" : null)}
+              options={pairOptions}
+            />
           )}
 
           {/* Rotating a working credential is planned maintenance, so it sits
