@@ -1,10 +1,19 @@
 import tls from "node:tls";
 import type { UptimeRow } from "./types";
 
+/**
+ * Days until the site's certificate expires; negative once it has expired.
+ *
+ * Verification is off on purpose: this only reads the certificate's expiry.
+ * With Node's default rejectUnauthorized:true an expired or otherwise invalid
+ * certificate fails the handshake and would come back as null -- hiding the
+ * very case this check exists to flag. Math.floor makes any expired cert
+ * strictly negative (-1 as soon as it lapses).
+ */
 export function sslDaysRemaining(hostname: string): Promise<number | null> {
   return new Promise((resolve) => {
     const socket = tls.connect(
-      { host: hostname, port: 443, servername: hostname, timeout: 10_000 },
+      { host: hostname, port: 443, servername: hostname, timeout: 10_000, rejectUnauthorized: false },
       () => {
         const cert = socket.getPeerCertificate();
         socket.end();
