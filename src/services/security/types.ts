@@ -10,6 +10,12 @@ export interface UptimeRow {
   response_ms: number | null;
   ssl_days_remaining: number | null;
   ok: boolean;
+  /**
+   * Whether the homepage allows being shown in the panel's live card preview
+   * (no X-Frame-Options, and CSP frame-ancestors, if any, admits us).
+   * null = no response to judge. Column added in 0029.
+   */
+  frameable?: boolean | null;
 }
 export type Severity = "critical" | "high" | "medium" | "low";
 export type CoverageGap = "vuln_feed" | "core_checksums" | "http_probes";

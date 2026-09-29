@@ -27,6 +27,11 @@ export interface SecurityRepo {
   insertUptime(rows: UptimeRow[]): Promise<void>;
   uptimeSummary(siteId: string): Promise<{
     latestOk: boolean | null; responseMs: number | null; sslDays: number | null; uptime24h: number | null;
+    /** Consecutive failed checks, newest first; 0 when the latest passed. */
+    failStreak?: number;
+    latestAt?: string | null;
+    /** Newest non-null frameability verdict in the window (0029); null = unknown. */
+    frameable?: boolean | null;
   }>;
 }
 
@@ -180,20 +185,33 @@ export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
     },
     async insertUptime(rows) {
       if (rows.length === 0) return;
-      const { error } = await db.from("uptime_checks").insert(rows);
+      let { error } = await db.from("uptime_checks").insert(rows);
+      // Before 0029 is applied the column does not exist. Losing the verdict
+      // is fine; losing the uptime row (and the alerts that read it) is not.
+      if (error && /frameable/i.test(error.message)) {
+        ({ error } = await db.from("uptime_checks")
+          .insert(rows.map(({ frameable: _drop, ...rest }) => rest)));
+      }
       if (error) throw new Error(`uptime insert failed: ${error.message}`, { cause: error });
     },
     async uptimeSummary(siteId) {
       const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const { data, error } = await db.from("uptime_checks")
-        .select("ok,response_ms,ssl_days_remaining,checked_at")
+        // "*" rather than a column list, so this keeps working whether or
+        // not 0029's frameable column exists yet.
+        .select("*")
         .eq("site_id", siteId).gte("checked_at", since)
         .order("checked_at", { ascending: false }).limit(500);
       if (error) throw new Error(`uptimeSummary failed: ${error.message}`, { cause: error });
       if (!data?.length) return { latestOk: null, responseMs: null, sslDays: null, uptime24h: null };
       const latest = data[0];
       const okCount = data.filter((r) => r.ok).length;
+      const streakEnd = data.findIndex((r) => r.ok);
+      const judged = data.find((r) => typeof r.frameable === "boolean");
       return {
+        failStreak: streakEnd === -1 ? data.length : streakEnd,
+        latestAt: latest.checked_at ?? null,
+        frameable: judged ? (judged.frameable as boolean) : null,
         latestOk: latest.ok,
         responseMs: latest.response_ms,
         sslDays: latest.ssl_days_remaining,
