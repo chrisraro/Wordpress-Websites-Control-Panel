@@ -61,14 +61,19 @@ Local dev has no scheduler: hit the routes manually, e.g.
 then `.../api/cron/process`.
 
 Note: `/api/cron/process` declares `maxDuration = 300`, which needs Vercel Pro
-(or Fluid Compute). On the Hobby plan the function is capped lower — jobs still
-complete because each run claims at most 3 and unfinished jobs retry, but keep
-individual site jobs fast.
+(or Fluid Compute). On the Hobby plan the function is capped lower. Each run
+claims one job at a time, up to 3, and stops claiming after 120s so it never
+claims work it cannot finish. A job whose worker is killed stays `running`;
+after 15 minutes `claim_jobs` reclaims it while it has attempts left and fails
+it after the third (migration 0022). Keep individual site jobs fast. Jobs for
+one site never run concurrently: a pending job waits while another job for the
+same site is running.
 
 ## Why pg_cron only
 
 `enqueueJob(..., { dedupe: true })` only suppresses a duplicate while an
-identical job is still **pending** (see `JobsRepo.pendingExists`). It does
+identical job is still queued or in flight (pending, running or awaiting a
+callback, and not cancelled — see `JobsRepo.pendingExists`). It does
 not — and cannot, without a much bigger change — know that a job it enqueued
 an hour ago already ran to completion. A second scheduler hitting
 `/api/cron/enqueue` after the first batch has finished re-enqueues the whole
