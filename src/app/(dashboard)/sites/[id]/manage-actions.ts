@@ -14,6 +14,8 @@ import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { isPrivateAddress } from "@/lib/net-guard";
 import type { SiteEnvironment } from "@/services/sites/types";
+import { backupReadyForInlineUpdate } from "@/services/backup/gate";
+import { parseBackupChoice } from "@/services/backup/choice";
 
 function revalidateSite(siteId: string) {
   for (const p of [`/sites/${siteId}`, `/sites/${siteId}/plugins`, `/sites/${siteId}/themes`, "/dashboard"]) {
@@ -21,11 +23,18 @@ function revalidateSite(siteId: string) {
   }
 }
 
+/**
+ * `update_core` runs inline, so unlike queued updates it cannot wait for a
+ * backup: it goes ahead only when UpdraftPlus already has a successful backup
+ * from the last 6 hours (backupReadyForInlineUpdate), and otherwise refuses
+ * with the reason. The confirm dialog's "Update core without a backup"
+ * button posts `backup=skip` to go ahead anyway.
+ */
 export async function manageAction(
   siteId: string,
   action: ManageAction,
   _prevState?: { ok: boolean; error?: string } | null,
-  _formData?: FormData,
+  formData?: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
   const user = await requireUser();
   const gate = await checkPermission("wp_toolkit.manage");
@@ -34,6 +43,12 @@ export async function manageAction(
   if (isDenied(site)) return site;
   const db = createServiceSupabase();
   try {
+    if (action.kind === "update_core" && parseBackupChoice(formData) !== "skip") {
+      const backup = await backupReadyForInlineUpdate(
+        { sites: supabaseSitesRepo(db), mcp: createSiteMcpClient }, siteId,
+      );
+      if (!backup.ready) return { ok: false, error: backup.reason };
+    }
     const result = await manageSite(
       { sites: supabaseSitesRepo(db), jobs: supabaseJobsRepo(db), mcp: createSiteMcpClient },
       siteId, user.id, action,

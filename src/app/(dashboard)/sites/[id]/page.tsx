@@ -300,10 +300,13 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               variant="primary"
               confirm={{
                 title: `Update WordPress core on ${site.name}${environmentSuffix(site)}?`,
-                description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
+                description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. It needs a successful UpdraftPlus backup from the last 6 hours; without one the update is refused, so use “Back up now” first, or update without a backup.`,
                 confirmLabel: "Update core",
               }}
-
+              // The core update runs inline and cannot wait for a backup, so
+              // the unbacked path is an explicit second button rather than a
+              // checkbox that is easy to leave ticked.
+              secondaryConfirm={{ label: "Update core without a backup", name: "backup", value: "skip" }}
             />
           )}
         </div>

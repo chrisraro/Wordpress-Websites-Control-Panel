@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
 import {
-  ok, fail, ENVIRONMENT_NOTE, CONFIRM_SHAPE, gateConfirm, redactArgs, requirePermission,
+  ok, fail, ENVIRONMENT_NOTE, CONFIRM_SHAPE, SKIP_BACKUP_SHAPE, gateConfirm, redactArgs, requirePermission,
 } from "../confirm";
 import { siteSummary, NOT_FOUND } from "./sites";
 import type { ToolCtx } from "../context";
@@ -191,22 +191,48 @@ export function register(server: McpServer, ctx: ToolCtx): void {
   server.registerTool(
     "update_core",
     {
-      description: `Update WordPress core on a site, including its database upgrade. ${ENVIRONMENT_NOTE}`,
+      description:
+        "Update WordPress core on a site, including its database upgrade. Runs " +
+        "immediately, so it cannot wait for a backup: it is refused unless the " +
+        "site's UpdraftPlus has a successful backup from the last 6 hours. Pass " +
+        "skip_backup: true only when the user explicitly wants to update without " +
+        `a backup. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
+        ...SKIP_BACKUP_SHAPE,
         ...CONFIRM_SHAPE,
       },
     },
     async (args) => {
-      const { site_id } = args;
+      const { site_id, skip_backup } = args;
       const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
+      // Checked on the dry run as well as the real call: a dry run for an
+      // update that would be refused must not hand out a confirm code, and
+      // the backup can go stale (or fail) between the two.
+      if (!skip_backup) {
+        try {
+          const backup = await ctx.backupReadyForInlineUpdate(ctx.backup, site_id);
+          if (!backup.ready) {
+            return fail(
+              `${backup.reason} To update WordPress core without a backup, call again ` +
+              "with skip_backup: true (a new dry run is needed).",
+            );
+          }
+        } catch (e) {
+          return fail(friendlySiteError(e));
+        }
+      }
+
       const gate = gateConfirm(
         ctx.auth, "update_core", args,
-        `Would update WordPress core on ${site.name} (${siteEnvironment(site)}), including its database upgrade.`,
-        { site: siteSummary(site) },
+        `Would update WordPress core on ${site.name} (${siteEnvironment(site)}), including its database upgrade, ` +
+        (skip_backup
+          ? "WITHOUT a backup (skip_backup: true)."
+          : "after confirming a successful UpdraftPlus backup from the last 6 hours."),
+        { site: siteSummary(site), backup: skip_backup ? "skip" : "required" },
       );
       if (!gate.proceed) return gate.result;
 

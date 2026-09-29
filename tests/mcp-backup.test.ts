@@ -107,3 +107,118 @@ describe("update_all_plugins_fleet skip_backup", () => {
     await close();
   });
 });
+
+describe("update_core backup check", () => {
+  const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
+  type Ready = { ready: true } | { ready: false; reason: string };
+
+  function stubBackup(ctx: ReturnType<typeof ctxFor>, answer: () => Ready | Promise<Ready>) {
+    const checks: string[] = [];
+    (ctx as unknown as { backupReadyForInlineUpdate: unknown }).backupReadyForInlineUpdate = async (
+      _deps: unknown, siteId: string,
+    ) => {
+      checks.push(siteId);
+      return answer();
+    };
+    return checks;
+  }
+
+  it("updates when a fresh backup exists", async () => {
+    const ctx = ctxFor();
+    const checks = stubBackup(ctx, () => ({ ready: true }));
+    const { client, close } = await connect(ctx);
+    const res = await dryThenConfirm(client, "update_core", { site_id: SITE_ID });
+    expect(isError(res)).toBe(false);
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.every((id) => id === SITE_ID)).toBe(true);
+    expect(ctx.serviceCalls).toEqual(["manageSite"]);
+    await close();
+  });
+
+  it("refuses with the gate's reason, before any dry-run code, when there is no fresh backup", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => ({ ready: false, reason: "No successful backup in the last 6 hours." }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: "update_core", arguments: { site_id: SITE_ID } });
+    expect(isError(dry)).toBe(true);
+    expect(textOf(dry)).toContain("No successful backup in the last 6 hours.");
+    expect(textOf(dry)).toMatch(/skip_backup/);
+    expect(codeOf(dry)).toBeUndefined();
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("refuses a confirmed call too when the backup went missing after the dry run", async () => {
+    let ready = true;
+    const ctx = ctxFor();
+    stubBackup(ctx, () => (ready ? { ready: true } : { ready: false, reason: "The last backup failed." }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: "update_core", arguments: { site_id: SITE_ID } });
+    ready = false;
+    const res = await client.callTool({
+      name: "update_core",
+      arguments: { site_id: SITE_ID, confirm: true, reason: REASON, confirm_code: codeOf(dry) },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toContain("The last backup failed.");
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("with skip_backup: true, never checks and updates anyway", async () => {
+    const ctx = ctxFor();
+    const checks = stubBackup(ctx, () => ({ ready: false, reason: "No backup plugin" }));
+    const { client, close } = await connect(ctx);
+    const res = await dryThenConfirm(client, "update_core", { site_id: SITE_ID, skip_backup: true });
+    expect(isError(res)).toBe(false);
+    expect(checks).toEqual([]);
+    expect(ctx.serviceCalls).toEqual(["manageSite"]);
+    expect(ctx.audited[0].detail.args).toMatchObject({ skip_backup: true });
+    await close();
+  });
+
+  it("cannot replay a backed-up dry run as a skip_backup call", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => ({ ready: true }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: "update_core", arguments: { site_id: SITE_ID } });
+    const res = await client.callTool({
+      name: "update_core",
+      arguments: { site_id: SITE_ID, skip_backup: true, confirm: true, reason: REASON, confirm_code: codeOf(dry) },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toMatch(/does not match/i);
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("reports an unreachable site as a failure, not a crash", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => { throw new Error("fetch failed"); });
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({ name: "update_core", arguments: { site_id: SITE_ID } });
+    expect(isError(res)).toBe(true);
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("checks nothing for a caller without access to the site", async () => {
+    const ctx = ctxFor({ grants: [], permissions: ["wp_toolkit.manage"] });
+    const checks = stubBackup(ctx, () => ({ ready: true }));
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({ name: "update_core", arguments: { site_id: SITE_ID } });
+    expect(textOf(res)).toMatch(/not found/i);
+    expect(checks).toEqual([]);
+    await close();
+  });
+
+  it("documents skip_backup on update_core", async () => {
+    const ctx = ctxFor();
+    const { client, close } = await connect(ctx);
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "update_core")!;
+    expect(tool.description).toMatch(/skip_backup/);
+    expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("skip_backup");
+    await close();
+  });
+});
