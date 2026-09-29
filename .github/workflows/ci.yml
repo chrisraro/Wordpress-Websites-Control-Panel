@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Generate placeholder encryption key
+        run: |
+          key=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+          echo "::add-mask::$key"
+          echo "APP_ENCRYPTION_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: npx next build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci
+          SUPABASE_SERVICE_ROLE_KEY: ci
+          CRON_SECRET: ci
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=critical
