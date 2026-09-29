@@ -46,6 +46,23 @@ export const CONFIRM_SHAPE = {
     ),
 };
 
+/**
+ * Spread into the inputSchema of a tool that updates WordPress. Deliberately
+ * not a gate key (GATE_KEYS below): it is an action argument, so it is part
+ * of the confirm code's canonical arguments and a dry run taken without it
+ * cannot be replayed with it.
+ */
+export const SKIP_BACKUP_SHAPE = {
+  skip_backup: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Default false: the site must have a successful UpdraftPlus backup (taken " +
+      "first, or from the last 6 hours) before anything is updated. true updates " +
+      "WITHOUT a backup -- only set it when the user explicitly asked for that.",
+    ),
+};
+
 export type ToolResult = {
   content: { type: "text"; text: string }[];
   isError?: boolean;

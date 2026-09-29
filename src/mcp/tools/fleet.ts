@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "../schema";
 import {
-  ok, fail, ENVIRONMENT_NOTE, CONFIRM_SHAPE, gateConfirm, redactArgs, requirePermission,
+  ok, fail, ENVIRONMENT_NOTE, CONFIRM_SHAPE, SKIP_BACKUP_SHAPE, gateConfirm, redactArgs, requirePermission,
 } from "../confirm";
 import { siteSummary } from "./sites";
 import type { ToolCtx } from "../context";
 import { friendlySiteError } from "@/lib/mcp/errors";
+import { backupPayload } from "@/services/backup/choice";
 
 const PERMISSION = "wp_toolkit.manage" as const;
 
@@ -27,16 +28,21 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         "site you can manage in one environment, in a single batch. Skips " +
         "disabled sites, sites with nothing to update, and any site that " +
         "already has an update run queued -- two concurrent update passes " +
-        `on one WordPress install is how a plugin directory gets corrupted. ${ENVIRONMENT_NOTE}`,
+        "on one WordPress install is how a plugin directory gets corrupted. " +
+        "Each site is backed up with its own UpdraftPlus before its update " +
+        "runs (the update waits up to 60 minutes for it); a site without " +
+        "UpdraftPlus fails instead of updating. Pass skip_backup: true only " +
+        `when the user explicitly wants to update without a backup. ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         environment: z
           .enum(["production", "staging"])
           .describe("Which environment's sites to queue plugin updates for."),
+        ...SKIP_BACKUP_SHAPE,
         ...CONFIRM_SHAPE,
       },
     },
     async (args) => {
-      const { environment } = args;
+      const { environment, skip_backup } = args;
       const permDenied = requirePermission(ctx.auth, PERMISSION);
       if (permDenied) return permDenied;
 
@@ -65,12 +71,16 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         }
         const summary =
           `Would queue plugin updates for ${plan.eligible.length} site(s): ${names}.` +
-          (skips.length > 0 ? ` Skipping ${skips.join(" and ")}.` : "");
+          (skips.length > 0 ? ` Skipping ${skips.join(" and ")}.` : "") +
+          (skip_backup
+            ? " They will update WITHOUT a backup (skip_backup: true)."
+            : " Each site is backed up with UpdraftPlus first; a site without it fails instead of updating.");
 
         const gate = gateConfirm(ctx.auth, "update_all_plugins_fleet", args, summary, {
           sites: plan.eligible.map(siteSummary),
           skipped_already_queued: plan.alreadyQueued.length,
           skipped_no_updates: plan.noUpdates.length,
+          backup: skip_backup ? "skip" : "required",
         });
         if (!gate.proceed) return gate.result;
 
@@ -81,7 +91,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         let batch: { batchId: string; count: number };
         try {
           batch = await ctx.enqueueBatch(
-            ctx.jobs, "update_all_plugins", siteIds, { actor: ctx.auth.viewer.id },
+            ctx.jobs, "update_all_plugins", siteIds,
+            { actor: ctx.auth.viewer.id, ...backupPayload(skip_backup ? "skip" : "required") },
           );
         } catch (e) {
           const message = friendlySiteError(e);
