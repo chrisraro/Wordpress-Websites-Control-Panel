@@ -10,12 +10,15 @@ export interface ReportRow {
   storage_path: string;
   share_token: string | null;
   auto: boolean;
+  /** Security coverage gaps at generation time; see migration 0024. */
+  security_incomplete: string[] | null;
 }
 
 export interface ReportsRepo {
   insert(row: {
     site_id: string; sections: string[]; period_start: string; period_end: string;
     storage_path: string; share_token: string; auto: boolean;
+    security_incomplete: string[] | null;
   }): Promise<ReportRow>;
   listForSite(siteId: string, limit?: number): Promise<ReportRow[]>;
   getByToken(token: string): Promise<ReportRow | null>;
@@ -24,8 +27,12 @@ export interface ReportsRepo {
   autoExistsSince(siteId: string, sinceIso: string): Promise<boolean>;
 }
 
+// security_incomplete requires 0024_report_share_expiry_and_coverage.sql:
+// PostgREST rejects a select naming an unknown column, so apply it first.
+// One literal, not a concatenation: supabase-js parses the select string at
+// the type level, and a widened `string` would lose the row typing.
 const COLUMNS =
-  "id,site_id,generated_at,sections,period_start,period_end,storage_path,share_token,auto";
+  "id,site_id,generated_at,sections,period_start,period_end,storage_path,share_token,auto,security_incomplete";
 
 export function supabaseReportsRepo(db: SupabaseClient): ReportsRepo {
   return {

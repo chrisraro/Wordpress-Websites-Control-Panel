@@ -42,6 +42,9 @@ export async function generateReport(
     storage_path: path,
     share_token: newShareToken(),
     auto,
+    // Kept on the row for /r/<token>, which cannot re-derive it: the site's
+    // grade may have changed since this PDF was rendered.
+    security_incomplete: data.security?.incomplete ?? null,
   });
   return { report, bytes: pdf.length };
 }

@@ -1,4 +1,6 @@
-export type ReportSection = "security" | "seo" | "geogrid" | "inventory";
+import type { CoverageGap } from "@/services/security/types";
+
+export type ReportSection ="security" | "seo" | "geogrid" | "inventory";
 
 export const REPORT_SECTIONS: ReportSection[] = ["security", "seo", "geogrid", "inventory"];
 
@@ -20,6 +22,11 @@ export interface ReportMeta {
 export interface SecuritySection {
   grade: string | null;
   score: number | null;
+  /**
+   * What the scan behind `grade` could not check. [] = complete; null = no
+   * grade, or one stored before coverage was tracked (says nothing either way).
+   */
+  incomplete: CoverageGap[] | null;
   openVulns: number;
   criticalVulns: number;
   failedChecks: Array<{ id: string; result: string }>;

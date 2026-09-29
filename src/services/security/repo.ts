@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FeedEntry } from "@/lib/adapters/vulnfeed/wordfence";
 import type { VulnMatch } from "./vulns";
-import type { Grade, SecurityCheck, UptimeRow } from "./types";
-import { isInformationalAdvisory } from "./types";
+import type { CoverageGap, Grade, SecurityCheck, UptimeRow } from "./types";
+import { COVERAGE_GAPS, isInformationalAdvisory } from "./types";
 
 export interface OpenVuln extends VulnMatch {
   title: string;
@@ -167,8 +167,16 @@ export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
         .select("details").eq("site_id", siteId).eq("check_id", "grade")
         .order("run_at", { ascending: false }).limit(1).maybeSingle();
       if (error) throw new Error(`latestGrade failed: ${error.message}`, { cause: error });
-      const d = data?.details as { grade?: Grade["grade"]; score?: number } | null;
-      return d?.grade ? { grade: d.grade, score: d.score ?? 0 } : null;
+      const d = data?.details as { grade?: Grade["grade"]; score?: number; incomplete?: unknown } | null;
+      if (!d?.grade) return null;
+      const grade: Grade = { grade: d.grade, score: d.score ?? 0 };
+      // Rows written before coverage tracking carry no list: leave them
+      // unmarked rather than guess. Unknown ids are dropped, not rendered.
+      if (!Array.isArray(d.incomplete)) return grade;
+      const incomplete = d.incomplete.filter(
+        (g): g is CoverageGap => COVERAGE_GAPS.includes(g as CoverageGap),
+      );
+      return { ...grade, incomplete };
     },
     async insertUptime(rows) {
       if (rows.length === 0) return;

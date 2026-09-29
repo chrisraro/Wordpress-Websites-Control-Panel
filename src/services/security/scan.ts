@@ -8,7 +8,7 @@ import { refreshSnapshot } from "@/services/inventory/service";
 import { matchInventory } from "./vulns";
 import { runPhpHardening, runHttpHardening } from "./hardening";
 import { runChecksums } from "./checksums";
-import { computeGrade, type Grade, type SecurityCheck, type Severity } from "./types";
+import { computeGrade, scanCoverage, type Grade, type SecurityCheck, type Severity } from "./types";
 import type { SecurityRepo } from "./repo";
 
 // A scan grading against a feed this old is grading against data that is
@@ -147,11 +147,20 @@ export async function securityScan(
     checks.push(...(await runHttpHardening(site.url, deps.fetchImpl)));
 
     const { uptime24h } = await deps.security.uptimeSummary(siteId);
-    const grade = computeGrade({ vulnSeverities, checks, uptime24h });
+    const coverage = scanCoverage(checks);
+    const grade = computeGrade({ vulnSeverities, checks, uptime24h, coverage });
     const runAt = new Date().toISOString();
     await deps.security.insertChecks(siteId, runAt, [
       ...checks,
-      { check_id: "grade", result: "pass", details: { grade: grade.grade, score: grade.score, vulns: vulnCount } },
+      // Coverage rides on the grade row's jsonb `details`: no migration, and
+      // whoever reads a grade gets what it was based on from the same row.
+      {
+        check_id: "grade", result: "pass",
+        details: {
+          grade: grade.grade, score: grade.score, vulns: vulnCount,
+          coverage, incomplete: grade.incomplete ?? [],
+        },
+      },
     ]);
     await deps.sites.recordScanResult(siteId, true);
     return { grade, vulnCount };
