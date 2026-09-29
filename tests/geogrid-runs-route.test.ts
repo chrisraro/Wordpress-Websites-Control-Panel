@@ -12,7 +12,8 @@ const canAccessSiteMock = vi.fn();
 vi.mock("@/lib/authz/server", () => ({
   getViewer: (...args: unknown[]) => getViewerMock(...args),
 }));
-vi.mock("@/lib/authz/decide", () => ({
+vi.mock("@/lib/authz/decide", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/authz/decide")>()),
   canAccessSite: (...args: unknown[]) => canAccessSiteMock(...args),
 }));
 
@@ -80,7 +81,9 @@ describe("GET /api/sites/[id]/geogrid-runs — authorisation", () => {
 
 describe("GET /api/sites/[id]/geogrid-runs — still open vs settled", () => {
   beforeEach(() => {
-    getViewerMock.mockResolvedValue({ id: "u1" });
+    // Staff (sites.view_all): the raw failure reason is only shown to staff;
+    // tests/job-error-redaction.test.ts covers what everyone else sees.
+    getViewerMock.mockResolvedValue({ id: "u1", permissions: new Set(["sites.view_all"]) });
     canAccessSiteMock.mockReturnValue(true);
   });
 

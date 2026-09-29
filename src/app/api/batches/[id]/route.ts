@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/authz/server";
 import { visibleSiteIds } from "@/lib/authz/decide";
+import { canSeeJobDiagnostics, jobErrorFor } from "@/lib/authz/job-detail";
 import { isUuidShaped } from "@/lib/uuid";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
@@ -45,6 +46,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const names = new Map(sites.map((s) => [s.id, s.name]));
+  // Raw worker diagnostics (last_error, attempts) are for staff only; see
+  // src/lib/authz/job-detail.ts.
+  const staff = canSeeJobDiagnostics(viewer);
   const rows = visibleJobs.map((j) => {
     const siteName = j.site_id ? names.get(j.site_id) ?? j.site_id : "—";
     const payload = j.payload as { label?: unknown; kind?: unknown; target?: unknown; activate?: unknown };
@@ -57,8 +61,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       // many sites. The payload label distinguishes them.
       label: typeof payloadLabel === "string" && payloadLabel ? payloadLabel : siteName,
       status: j.status,
-      attempts: j.attempts,
-      last_error: j.last_error,
+      ...(staff ? { attempts: j.attempts } : {}),
+      last_error: jobErrorFor(viewer, j.last_error),
       // Needed so the page can count what is genuinely still stoppable: a
       // cancelled row keeps status 'pending' by design (0018), so status
       // alone would over-count what "Cancel queued" can deliver.

@@ -8,6 +8,7 @@ import type { ToolCtx } from "../context";
 import { listSites } from "@/services/sites/service";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { canAccessSite, visibleSiteIds } from "@/lib/authz/decide";
+import { canSeeJobDiagnostics, jobErrorFor } from "@/lib/authz/job-detail";
 
 /**
  * A batch the caller cannot reach at all: either no such id, or every job in
@@ -71,6 +72,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         }
 
         const jobs = await ctx.jobsRead.listJobs({ siteIds, status, limit });
+        // Raw worker diagnostics are for staff only (lib/authz/job-detail).
+        const staff = canSeeJobDiagnostics(ctx.auth.viewer);
         return ok({
           count: jobs.length,
           jobs: jobs.map((j) => ({
@@ -78,9 +81,9 @@ export function register(server: McpServer, ctx: ToolCtx): void {
             type: j.type,
             site: j.site_id && siteById.has(j.site_id) ? siteSummary(siteById.get(j.site_id)!) : null,
             status: j.status,
-            attempts: j.attempts,
+            ...(staff ? { attempts: j.attempts } : {}),
             scheduled_for: j.scheduled_for,
-            last_error: j.last_error,
+            last_error: jobErrorFor(ctx.auth.viewer, j.last_error),
             cancelled_at: j.cancelled_at ?? null,
             batch_id: j.batch_id,
           })),
@@ -125,6 +128,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (visibleJobs.length === 0) return fail(BATCH_NOT_FOUND);
 
         const siteById = new Map(sites.map((s) => [s.id, s]));
+        const staff = canSeeJobDiagnostics(ctx.auth.viewer);
         const rows = visibleJobs.map((j) => {
           const site = j.site_id && siteById.has(j.site_id) ? siteSummary(siteById.get(j.site_id)!) : null;
           // `type` ("plugin_install" vs "bulk_manage") plus this non-secret
@@ -138,8 +142,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
             type: j.type,
             site,
             status: j.status,
-            attempts: j.attempts,
-            last_error: j.last_error,
+            ...(staff ? { attempts: j.attempts } : {}),
+            last_error: jobErrorFor(ctx.auth.viewer, j.last_error),
             cancelled_at: j.cancelled_at ?? null,
             // Bulk batches are one site, many items; install batches are one
             // item, many sites. The payload label distinguishes them.

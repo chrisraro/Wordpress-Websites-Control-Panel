@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceSupabase } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/authz/server";
 import { canAccessSite } from "@/lib/authz/decide";
+import { jobErrorFor } from "@/lib/authz/job-detail";
 import { isUuidShaped } from "@/lib/uuid";
 import { allSettled } from "@/services/jobs/service";
 import type { JobStatus } from "@/services/jobs/types";
@@ -67,7 +68,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       id: r.id,
       status: r.status,
       keyword: typeof payload.keyword === "string" ? payload.keyword : "",
-      last_error: r.last_error,
+      // Raw worker output is for staff only; see src/lib/authz/job-detail.ts.
+      last_error: jobErrorFor(viewer, r.last_error),
     };
   });
   return NextResponse.json({ jobs, done: allSettled(rows) });
