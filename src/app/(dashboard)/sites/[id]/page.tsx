@@ -19,6 +19,9 @@ import { effectivePairId } from "@/services/sites/pairing";
 import { diffInventories, type InventoryDrift } from "@/services/sites/drift";
 import { PairingCard, StagingPairsLinks } from "./pairing-card";
 import { PairingForm } from "./pairing-form";
+import { MaintenanceWindowForm } from "./maintenance-window-form";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
+import { describeWindow, formatNextWindow } from "@/services/maintenance/window";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
@@ -112,6 +115,12 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const stagingPairs = pairsRepo && environment === "production"
     ? (await pairsRepo.listStagingPairs(id)).filter((p) => canAccessSite(viewer, p.id))
     : [];
+  // Maintenance window (0027): staff-only columns, same gate and client as
+  // the pairing above. Formatted here, in the window's own zone, so the page
+  // shows exactly what the scheduler will use.
+  const maintenanceWindow = canViewAdminUsers ? await supabaseMaintenanceRepo(db).getWindow(id) : null;
+  const windowSummary = maintenanceWindow ? describeWindow(maintenanceWindow) : null;
+  const nextWindow = maintenanceWindow ? formatNextWindow(maintenanceWindow, new Date()) : null;
   // setProductionPairAction needs a manage grant on both ends, so only
   // production sites this viewer can manage are offered.
   const pairOptions = pairsRepo && canManageConnection && environment === "staging"
@@ -383,6 +392,16 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               currentId={pairId}
               currentName={pairedProduction?.name ?? (pairId ? "A site you cannot open" : null)}
               options={pairOptions}
+            />
+          )}
+
+          {canViewAdminUsers && (
+            <MaintenanceWindowForm
+              siteId={id}
+              window={maintenanceWindow}
+              summary={windowSummary}
+              next={nextWindow}
+              canEdit={canManageConnection}
             />
           )}
 

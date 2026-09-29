@@ -79,10 +79,16 @@ export function splitEligible(
 
 export interface BulkDeps { jobs: JobsRepo; sites: SitesRepo }
 
-/** Enqueue one job per eligible item, all sharing a batch id. */
+/**
+ * Enqueue one job per eligible item, all sharing a batch id.
+ *
+ * `opts.scheduledFor` (ISO) holds the whole batch until the site's next
+ * maintenance window (src/services/maintenance/window.ts); omitted = now.
+ */
 export async function enqueueBulk(
   deps: BulkDeps, siteId: string, actorId: string,
   kind: BulkKind, scope: BulkScope, ids: string[],
+  opts: { scheduledFor?: string } = {},
 ): Promise<{ batchId: string | null; split: BulkSplit }> {
   const target = scope.target;
   const split = splitEligible(kind, scope, ids);
@@ -97,11 +103,15 @@ export async function enqueueBulk(
     await deps.jobs.insert({
       type: "bulk_manage", site_id: siteId, batch_id: batchId,
       payload: { kind, target, id: item.id, label: item.label, actor: actorId },
+      ...(opts.scheduledFor ? { scheduled_for: opts.scheduledFor } : {}),
     });
   }
   await deps.sites.insertActivity({
     actor: actorId, site_id: siteId, action: `site.bulk.${target}.${kind}`,
-    detail: { queued: split.included.length, skipped: split.excluded.length },
+    detail: {
+      queued: split.included.length, skipped: split.excluded.length,
+      ...(opts.scheduledFor ? { scheduled_for: opts.scheduledFor } : {}),
+    },
   });
   return { batchId, split };
 }

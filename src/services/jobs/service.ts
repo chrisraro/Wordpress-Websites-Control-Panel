@@ -161,13 +161,24 @@ async function settle(repo: JobsRepo, job: JobRow, outcome: Outcome): Promise<vo
   }
 }
 
+/**
+ * `opts.scheduledFor` holds a per-site start time (ISO) for work queued into
+ * each site's maintenance window (src/services/maintenance/schedule.ts).
+ * Sites absent from it get the column default -- now. claim_jobs never
+ * claims a job before its scheduled_for, so nothing else is needed.
+ */
 export async function enqueueBatch(
   repo: JobsRepo, type: JobType, siteIds: string[], payload: Record<string, unknown>,
+  opts: { scheduledFor?: ReadonlyMap<string, string> } = {},
 ): Promise<{ batchId: string; count: number }> {
   if (siteIds.length === 0) throw new Error("Select at least one site");
   const batchId = randomUUID();
   for (const siteId of siteIds) {
-    await repo.insert({ type, site_id: siteId, payload, batch_id: batchId });
+    const scheduledFor = opts.scheduledFor?.get(siteId);
+    await repo.insert({
+      type, site_id: siteId, payload, batch_id: batchId,
+      ...(scheduledFor ? { scheduled_for: scheduledFor } : {}),
+    });
   }
   return { batchId, count: siteIds.length };
 }

@@ -93,7 +93,7 @@ export function Modal({
  * an interruption that carries no decision is just friction.
  */
 export function ConfirmDialog({
-  open, title, description, confirmLabel = "Confirm", tone = "default", onConfirm, onCancel,
+  open, title, description, confirmLabel = "Confirm", tone = "default", onConfirm, onCancel, children,
 }: {
   open: boolean;
   title: string;
@@ -102,6 +102,8 @@ export function ConfirmDialog({
   tone?: "default" | "danger";
   onConfirm: () => void;
   onCancel: () => void;
+  /** Controls the decision needs (e.g. when to run), below the description. */
+  children?: ReactNode;
 }) {
   return (
     <Modal
@@ -109,6 +111,7 @@ export function ConfirmDialog({
       onClose={onCancel}
       title={title}
       description={description}
+      children={children}
       footer={
         <>
           <button type="button" onClick={onCancel} className={buttonClass("secondary")}>

@@ -20,6 +20,8 @@ import type { PluginInfo } from "@/services/inventory/types";
 import { ManageForm } from "../action-form";
 import { manageAction } from "../manage-actions";
 import { bulkAction } from "../bulk-actions";
+import { TimingChoice, windowHint } from "@/components/ui/timing-choice";
+import type { Timing } from "@/services/maintenance/schedule";
 
 // The exact consequence, used verbatim in every delete confirmation — single
 // vs. bulk, so the warning never drifts between the two paths.
@@ -36,8 +38,11 @@ const KIND_LABEL: Record<BulkKind, string> = {
 const BULK_KINDS: BulkKind[] = ["update", "activate", "deactivate", "delete"];
 
 export function PluginTable({
-  siteId, siteName, siteEnv, plugins, canManage,
+  siteId, siteName, siteEnv, plugins, canManage, nextWindow = null,
 }: {
+  /** "Sat 3 Oct, 01:00 (Asia/Manila)" when the site has a maintenance
+   *  window; bulk updates then offer to wait for it. */
+  nextWindow?: string | null;
   siteId: string;
   siteName: string;
   /** Rendered into every confirm title, so the environment is read before
@@ -52,6 +57,9 @@ export function PluginTable({
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
   const [confirmKind, setConfirmKind] = useState<BulkKind | null>(null);
+  const [timing, setTiming] = useState<Timing>("now");
+  // Only updates are offered the window; everything else runs now.
+  const offerWindow = confirmKind === "update" && nextWindow !== null;
 
   const ids = useMemo(() => plugins.map((p) => p.file), [plugins]);
   const { selected, isSelected, toggle, toggleAll, clear, allChecked, someChecked } =
@@ -64,12 +72,15 @@ export function PluginTable({
   function runBulk(kind: BulkKind) {
     setConfirmKind(null);
     startTransition(async () => {
-      const result = await bulkAction(siteId, kind, "plugin", selected);
+      const chosen: Timing = kind === "update" && nextWindow !== null ? timing : "now";
+      const result = await bulkAction(siteId, kind, "plugin", selected, { timing: chosen });
       if (result.ok && result.batchId) {
         const queued = result.queued ?? 0;
         toast({
           tone: "success",
-          title: `Queued ${queued} item${queued === 1 ? "" : "s"}`,
+          title: result.scheduledFor
+            ? `Scheduled ${queued} item${queued === 1 ? "" : "s"} for ${nextWindow}`
+            : `Queued ${queued} item${queued === 1 ? "" : "s"}`,
           // "ineligible" named the check, not the reason. The dialog already
           // lists each skipped item with its own reason; this is the count.
           description: result.skipped
@@ -251,6 +262,16 @@ export function PluginTable({
         confirmLabel={confirmKind ? KIND_LABEL[confirmKind] : "Confirm"}
         onCancel={() => setConfirmKind(null)}
         onConfirm={() => confirmKind && runBulk(confirmKind)}
+        children={
+          offerWindow ? (
+            <TimingChoice
+              value={timing}
+              onChange={setTiming}
+              windowLabel="In this site’s maintenance window"
+              windowHint={windowHint(nextWindow)}
+            />
+          ) : undefined
+        }
         description={
           confirmSplit && (
             <div className="space-y-2">

@@ -9,6 +9,7 @@ import { can, canAccessSite } from "@/lib/authz/decide";
 import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
 import { pendingUpdates, pendingPluginUpdates } from "@/services/inventory/types";
 import { gscStatus } from "@/services/gsc/types";
 import {
@@ -400,6 +401,28 @@ export default async function DashboardPage({
   const hardenFixCount = hardenTargets.reduce((n, r) => n + r.hardenFixes.length, 0);
   const canHardenFleet = can(viewer, "wp_toolkit.manage") && hardenTargets.length > 0;
   const hardenKinds = [...new Set(hardenTargets.flatMap((r) => r.hardenFixes))];
+
+  // Maintenance windows (0027) for the sites the two fleet writes would
+  // touch. Staff-only columns, read through the service-role `db` only on
+  // the same sites.view_all gate as the site page's other staff-only reads;
+  // without it the choice is simply not offered and everything runs now.
+  const windows = can(viewer, "sites.view_all") && (canUpdateAll || canHardenFleet)
+    ? await supabaseMaintenanceRepo(db).listWindows(
+        [...new Set([...updateTargets, ...hardenTargets].map((r) => r.site.id))],
+      )
+    : null;
+  const timingChoiceFor = (targets: { site: SiteRow }[]) => {
+    const withWindow = windows ? targets.filter((r) => windows.get(r.site.id)).length : 0;
+    if (withWindow === 0) return undefined;
+    return {
+      windowLabel: "In each site’s maintenance window",
+      windowHint:
+        withWindow === targets.length
+          ? `Every site waits for its own next window.`
+          : `${withWindow} of ${targets.length} sites wait for their own next window; ` +
+            `the ${targets.length - withWindow} without one run now.`,
+    };
+  };
   const otherEnv: SiteEnvironment = activeEnv === "production" ? "staging" : "production";
   const subtitle =
     total === 0
@@ -438,6 +461,7 @@ export default async function DashboardPage({
               {canUpdateAll && (
                 <ManageForm
                   action={updateAllPluginsAction.bind(null, activeEnv)}
+                  timingChoice={timingChoiceFor(updateTargets)}
                   label={`Update plugins on ${updateTargets.length} site${updateTargets.length === 1 ? "" : "s"}`}
                   pendingLabel="Queuing…"
                   variant="outline"
@@ -470,6 +494,7 @@ export default async function DashboardPage({
               {canHardenFleet && (
                 <ManageForm
                   action={hardenFleetAction.bind(null, activeEnv)}
+                  timingChoice={timingChoiceFor(hardenTargets)}
                   label={`Harden ${hardenTargets.length} site${hardenTargets.length === 1 ? "" : "s"}`}
                   pendingLabel="Queuing…"
                   variant="outline"

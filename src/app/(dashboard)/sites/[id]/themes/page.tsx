@@ -13,6 +13,8 @@ import { ManageForm } from "../action-form";
 import { refreshInventoryAction } from "../manage-actions";
 import { createChildThemeAction } from "../child-theme-actions";
 import { ThemeTable } from "./theme-table";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
+import { formatNextWindow } from "@/services/maintenance/window";
 import { InstallPanel } from "./install-panel";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, EmptyState } from "@/components/ui/primitives";
@@ -38,6 +40,12 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
   // refuses. Same fix as sites/[id]/page.tsx's canRefresh.
   const canRefresh = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
   const canManageToolkit = canRefresh;
+  // Maintenance window (0027): staff-only columns, read on the service-role
+  // client behind sites.view_all; offered to bulk updates in the table.
+  const maintenanceWindow = canManageToolkit && can(viewer, "sites.view_all")
+    ? await supabaseMaintenanceRepo(db).getWindow(id)
+    : null;
+  const nextWindow = maintenanceWindow ? formatNextWindow(maintenanceWindow, new Date()) : null;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const createChild = createChildThemeAction.bind(null, id, false);
@@ -94,7 +102,7 @@ export default async function ThemesPage({ params }: { params: Promise<{ id: str
           </EmptyState>
         </Card>
       ) : (
-        <ThemeTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} themes={themes} canManage={canManageToolkit} />
+        <ThemeTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} themes={themes} canManage={canManageToolkit} nextWindow={nextWindow} />
       )}
 
       {canManageToolkit && (

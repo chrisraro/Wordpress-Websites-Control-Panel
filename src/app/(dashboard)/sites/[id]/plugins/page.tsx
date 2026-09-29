@@ -13,6 +13,8 @@ import { SiteHeading, environmentSuffix } from "../site-heading";
 import { ManageForm } from "../action-form";
 import { manageAction, refreshInventoryAction } from "../manage-actions";
 import { PluginTable } from "./plugin-table";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
+import { formatNextWindow } from "@/services/maintenance/window";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, EmptyState } from "@/components/ui/primitives";
 import { buttonClass } from "@/components/ui/styles";
@@ -39,6 +41,12 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   // refuses. Same fix as sites/[id]/page.tsx's canRefresh.
   const canRefresh = can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
   const canManageToolkit = canRefresh;
+  // Maintenance window (0027): staff-only columns, read on the service-role
+  // client behind sites.view_all; offered to bulk updates in the table.
+  const maintenanceWindow = canManageToolkit && can(viewer, "sites.view_all")
+    ? await supabaseMaintenanceRepo(db).getWindow(id)
+    : null;
+  const nextWindow = maintenanceWindow ? formatNextWindow(maintenanceWindow, new Date()) : null;
 
   const refresh = refreshInventoryAction.bind(null, id);
   const updateAll = manageAction.bind(null, id, { kind: "update_all_plugins" as const });
@@ -114,7 +122,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           </EmptyState>
         </Card>
       ) : (
-        <PluginTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} plugins={plugins} canManage={canManageToolkit} />
+        <PluginTable siteId={id} siteName={site.name} siteEnv={environmentSuffix(site)} plugins={plugins} canManage={canManageToolkit} nextWindow={nextWindow} />
       )}
     </main>
   );

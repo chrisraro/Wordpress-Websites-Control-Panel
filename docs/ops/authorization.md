@@ -161,10 +161,15 @@ them through the service-role client on pages gated by `sites.view_all`:
 | `mcp_endpoint`, `wp_username`, `app_password_encrypted` | `0012` | Credential-adjacent. |
 | `origin_ip`, `origin_sni` | `0019` | A route to the origin past the CDN. |
 | `production_site_id` | `0026` | The id of another site the client may not be granted; the drift card it drives is a maintenance view. |
+| `maintenance_days`, `maintenance_start`, `maintenance_duration_minutes`, `maintenance_timezone` | `0027` | Internal scheduling detail; clients see neither the window nor "Next window". |
 
 Writing `production_site_id` (`setProductionPairAction`) needs
 `sites.manage` plus a `manage` grant on the staging site, on the production
 site it will point at, and on the production site it pointed at before.
+Writing the maintenance window (`setMaintenanceWindowAction`) needs
+`sites.manage` plus a `manage` grant on the site. Choosing "in each site's
+maintenance window" when queuing adds no new authority: the fleet and bulk
+actions keep their existing `wp_toolkit.manage` + per-site `manage` checks.
 
 ## The four roles and the default matrix
 
