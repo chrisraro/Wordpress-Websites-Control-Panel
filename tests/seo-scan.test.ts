@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { supabaseSeoRepo } from "@/services/seo/repo";
 import { randomBytes } from "node:crypto";
 import { seoScan, type SeoScanDeps } from "@/services/seo/scan";
 import type { SeoRepo, SeoSnapshotRow } from "@/services/seo/repo";
@@ -109,5 +111,49 @@ describe("seoScan", () => {
     const res = await seoScan(f.deps, "site-1");
     expect(res.results.filter((r) => r.status === "skipped")).toHaveLength(0);
     expect(res.results.filter((r) => r.status === "ok")).toHaveLength(6);
+  });
+
+  it("throws after persisting snapshots when no source ended ok, so the job retries", async () => {
+    // Every source failing used to return normally: the job was "done" and
+    // lastRunAt counted it, suppressing the weekly retry for a whole week.
+    const f = fakes({ abilities: [], psiFails: true });
+    f.setCreds(await encryptSecret("pass"));
+    await expect(seoScan(f.deps, "site-1")).rejects.toThrow(/no SEO source succeeded.*psi/i);
+    expect(f.inserted).toHaveLength(1);
+    expect(f.inserted[0].results.some((r) => r.status === "ok")).toBe(false);
+  });
+
+  it("logs a capability-discovery failure and records it in skipped reasons", async () => {
+    const f = fakes({ abilities: [] });
+    f.setCreds(await encryptSecret("pass"));
+    f.client.discoverAbilities = async () => { throw new Error("adapter 502"); };
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = await seoScan(f.deps, "site-1");
+      const skipped = res.results.filter((r) => r.status === "skipped");
+      expect(skipped).toHaveLength(5);
+      for (const r of skipped) expect(r.reason).toMatch(/discovery failed: adapter 502/);
+      expect(errSpy).toHaveBeenCalled();
+      expect(String(errSpy.mock.calls[0].join(" "))).toMatch(/adapter 502/);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+});
+
+describe("supabaseSeoRepo.lastRunAt", () => {
+  it("only counts runs where at least one source was ok", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const builder = {
+      select(...args: unknown[]) { calls.push({ method: "select", args }); return builder; },
+      eq(...args: unknown[]) { calls.push({ method: "eq", args }); return builder; },
+      order(...args: unknown[]) { calls.push({ method: "order", args }); return builder; },
+      limit(...args: unknown[]) { calls.push({ method: "limit", args }); return builder; },
+      maybeSingle() { return Promise.resolve({ data: { taken_at: "2026-09-01T00:00:00Z" }, error: null }); },
+    };
+    const db = { from() { return builder; } } as unknown as SupabaseClient;
+    const at = await supabaseSeoRepo(db).lastRunAt("site-1");
+    expect(at).toBe("2026-09-01T00:00:00Z");
+    expect(calls).toContainEqual({ method: "eq", args: ["payload->>status", "ok"] });
   });
 });

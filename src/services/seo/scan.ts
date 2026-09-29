@@ -51,11 +51,21 @@ export async function seoScan(
     // time, so a site that gained Rank Math afterwards would otherwise report
     // every source as "skipped" forever. Fall back to the stored list.
     let abilities = site.capabilities?.abilities ?? [];
+    let discoveryError: string | null = null;
     try {
       const discovered = await client.discoverAbilities();
       if (discovered.abilities.length > 0) abilities = discovered.abilities.map((a) => a.name);
-    } catch { /* keep the stored capability list */ }
+    } catch (e) {
+      // Keep the stored capability list, but say why a source may be skipped.
+      discoveryError = e instanceof Error ? e.message : String(e);
+      console.error(`[seo] capability discovery failed for site ${siteId}:`, e);
+    }
     results = await collectRankMath(client, abilities);
+    if (discoveryError) {
+      results = results.map((r) => r.status === "skipped"
+        ? { ...r, reason: `${r.reason ?? "skipped"}; discovery failed: ${discoveryError}` }
+        : r);
+    }
   } finally {
     await client.close();
   }
@@ -64,5 +74,11 @@ export async function seoScan(
 
   const takenAt = new Date().toISOString();
   await deps.seo.insertSnapshots(siteId, takenAt, results);
+  // Snapshots are kept so the SEO page shows why, but a run with no ok source
+  // must fail the job: it retries, and lastRunAt (ok-only) does not count it.
+  if (!results.some((r) => r.status === "ok")) {
+    const summary = results.map((r) => `${r.source}: ${r.status}${r.reason ? ` (${r.reason})` : ""}`).join("; ");
+    throw new Error(`No SEO source succeeded for site ${siteId}: ${summary}`);
+  }
   return { takenAt, results };
 }
