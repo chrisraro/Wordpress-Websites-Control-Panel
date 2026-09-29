@@ -6,6 +6,7 @@ import type { ToolCtx } from "../context";
 import { getSite, listSitesForViewer } from "@/services/sites/service";
 import type { SiteRow } from "@/services/sites/types";
 import { enqueueJob } from "@/services/jobs/service";
+import { shareLinkState } from "@/services/reports/share";
 import { parseSections } from "@/services/reports/types";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
@@ -79,8 +80,9 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         "Get the shareable link for one generated report, by the id from " +
         "list_reports. A report's share link is the only thing that " +
         "controls who can open it, so list_reports never includes it -- this " +
-        "is the deliberate second step. If the link was revoked, this says " +
-        `so instead of returning a broken URL. ${ENVIRONMENT_NOTE}`,
+        "is the deliberate second step. If there is no live link (revoked, " +
+          "expired, or never shared) this says so instead of returning a broken URL. " +
+        `${ENVIRONMENT_NOTE}`,
       inputSchema: {
         report_id: z.string().uuid().describe("The report's id, from list_reports."),
       },
@@ -91,20 +93,26 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (!report) return fail(REPORT_NOT_FOUND);
         if (!canAccessSite(ctx.auth.viewer, report.site_id, "read")) return fail(REPORT_NOT_FOUND);
         const site = await getSite(ctx.sites, report.site_id);
-        if (!report.share_token) {
+        const summary = site ? siteSummary(site) : null;
+        const state = shareLinkState(report);
+        if (state !== "active") {
           return ok({
             report_id: report.id,
-            site: site ? siteSummary(site) : null,
-            revoked: true,
+            site: summary,
+            state,
             path: null,
-            note: "This report's share link has been revoked. Generate a new report to get a fresh link.",
+            note: state === "expired"
+              ? "This report's share link has expired. Create a new link on the site's Reports tab."
+              : "This report has no share link (revoked, or a monthly report that was never shared). "
+                + "Create one on the site's Reports tab.",
           });
         }
         return ok({
           report_id: report.id,
-          site: site ? siteSummary(site) : null,
-          revoked: false,
+          site: summary,
+          state,
           path: `/r/${report.share_token}`,
+          expires_at: report.share_expires_at ?? null,
         });
       } catch (e) {
         return fail(friendlySiteError(e));
@@ -155,7 +163,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (!site) return fail(NOT_FOUND);
         const job = await enqueueJob(
           ctx.jobs, "report_generate", site_id,
-          { sections, period_days }, { dedupe: true },
+          { sections, period_days, manual: true }, { dedupe: true },
         );
         if (job === null) {
           return ok({

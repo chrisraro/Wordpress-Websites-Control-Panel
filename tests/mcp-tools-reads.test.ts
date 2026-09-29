@@ -323,7 +323,7 @@ describe("read tools", () => {
       const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
       expect((res as { isError?: boolean }).isError).toBeFalsy();
       const out = JSON.parse(textOf(res));
-      expect(out.revoked).toBe(false);
+      expect(out.state).toBe("active");
       expect(out.path).toBe("/r/shared-token-abc");
       expect(out.site.environment).toBe("production");
       await close();
@@ -340,9 +340,25 @@ describe("read tools", () => {
       const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
       expect((res as { isError?: boolean }).isError).toBeFalsy();
       const out = JSON.parse(textOf(res));
-      expect(out.revoked).toBe(true);
+      expect(out.state).toBe("none");
       expect(out.path).toBeNull();
       expect(out.note).toMatch(/revoked/i);
+      await close();
+    });
+
+    it("reports an expired link as expired, never returning its path", async () => {
+      const ctx = ctxFor({ permissions: ["sites.view_all"] });
+      (ctx as unknown as { reports: { getById: () => Promise<unknown> } }).reports.getById = async () => ({
+        id: REPORT_ID, site_id: SITE_ID, generated_at: "2026-09-01T00:00:00Z",
+        sections: [], period_start: null, period_end: null,
+        storage_path: "x.pdf", share_token: "old-token", share_expires_at: "2026-09-02T00:00:00Z", auto: false,
+      });
+      const { client, close } = await connectAll(ctx);
+      const res = await client.callTool({ name: "get_report_link", arguments: { report_id: REPORT_ID } });
+      const out = JSON.parse(textOf(res));
+      expect(out.state).toBe("expired");
+      expect(out.path).toBeNull();
+      expect(textOf(res)).not.toContain("old-token");
       await close();
     });
   });

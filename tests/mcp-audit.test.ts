@@ -241,7 +241,8 @@ describe("generate_report", () => {
     expect(ctx.enqueued).toHaveLength(1);
     // parseSections preserves REPORT_SECTIONS's canonical order regardless
     // of the order arguments arrived in.
-    expect(ctx.enqueued[0].payload).toEqual({ sections: ["security", "seo"], period_days: 45 });
+    // manual: a report someone asked for gets a share link; monthly ones do not.
+    expect(ctx.enqueued[0].payload).toEqual({ sections: ["security", "seo"], period_days: 45, manual: true });
     await close();
   });
 
@@ -253,6 +254,7 @@ describe("generate_report", () => {
     expect(ctx.enqueued[0].payload).toEqual({
       sections: ["security", "seo", "geogrid", "inventory"],
       period_days: 30,
+      manual: true,
     });
     await close();
   });
