@@ -34,7 +34,12 @@ a second, Vercel-side cron on the same endpoint is a bug, not a backstop.
 
 ## Background jobs
 
-- Every 5 min: `/api/cron/uptime` checks HTTP + SSL expiry for all sites.
+- Every 5 min: `/api/cron/uptime` checks HTTP + SSL expiry for all sites, then
+  emails the team (through an n8n workflow) about anything new: a site down for
+  two checks in a row or back up, an SSL certificate under 14 days, a new
+  critical vulnerability, or failed jobs. Each incident alerts once. Set
+  `N8N_ALERT_WEBHOOK_URL` and `N8N_ALERT_SECRET` to turn it on — see
+  `docs/ops/alerts.md`.
 - Every minute: `/api/cron/process` claims up to 3 due jobs and runs them.
 - Nightly: `/api/cron/enqueue` inserts `snapshot_refresh` per site, `security_scan`
   per site, and one `vuln_feed_refresh` (requires `WORDFENCE_API_KEY` — free key from
