@@ -51,6 +51,12 @@ vi.mock("@/services/jobs/service", () => ({
   enqueueBatch: (...args: unknown[]) => enqueueBatchMock(...args),
 }));
 
+// The skip message's lookup of the held job (tests/dashboard-held-jobs.test.ts).
+vi.mock("@/services/manage/held-jobs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/manage/held-jobs")>()),
+  supabaseHeldJobsDeps: () => ({ liveJob: async () => null, getWindow: async () => null }),
+}));
+
 import { updateAllPluginsAction } from "@/app/(dashboard)/dashboard/actions";
 
 const DENIED = { ok: false, error: "You do not have permission to do that." };

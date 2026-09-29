@@ -202,10 +202,12 @@ export function ThemeTable({
                               size="sm"
                               confirm={{
                                 title: `Update ${name} on ${siteName}${siteEnv}?`,
-                                description: `Version ${t.version} will be replaced with ${t.update_version ?? "the latest release"} on ${siteName}. If this theme has been edited directly, those changes will be lost — that is what child themes are for.`,
+                                description: `Version ${t.version} will be replaced with ${t.update_version ?? "the latest release"} on ${siteName}. If this theme has been edited directly, those changes will be lost — that is what child themes are for. It needs a successful UpdraftPlus backup from the last 6 hours; without one the update is refused, so use “Back up now” on the site’s overview first, or update without a backup.`,
                                 confirmLabel: "Update",
                               }}
-
+                              // Runs inline and cannot wait for a backup, so the
+                              // unbacked path is an explicit second button.
+                              secondaryConfirm={{ label: "Update without a backup", name: "backup", value: "skip" }}
                             />
                           )}
                           {!isActive && activateVerdict?.allowed && (

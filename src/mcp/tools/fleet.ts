@@ -7,6 +7,7 @@ import { siteSummary } from "./sites";
 import type { ToolCtx } from "../context";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { backupPayload } from "@/services/backup/choice";
+import { heldJobsMessage } from "@/services/manage/held-jobs";
 
 const PERMISSION = "wp_toolkit.manage" as const;
 
@@ -48,15 +49,18 @@ export function register(server: McpServer, ctx: ToolCtx): void {
 
       try {
         const plan = await ctx.planFleetPluginUpdate(
-          { sites: ctx.sites, snapshots: ctx.inventory, jobs: ctx.jobs },
+          { sites: ctx.sites, snapshots: ctx.inventory, jobs: ctx.jobs, held: ctx.heldJobs },
           ctx.auth.viewer,
           environment,
         );
+        // When each skipped site's run is (a maintenance-window hold can be
+        // days ahead), and the batch page to cancel it from.
+        const held = heldJobsMessage(plan.heldNotes);
 
         if (plan.eligible.length === 0) {
           return fail(
             plan.alreadyQueued.length > 0
-              ? "Already queued -- those sites have plugin updates pending from an earlier run."
+              ? `Not queued -- each site already has a plugin update run: ${held}.`
               : `No ${environment} site has a plugin update waiting.`,
           );
         }
@@ -64,7 +68,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         const names = plan.eligible.map((s) => `${s.name} (${environment})`).join(", ");
         const skips: string[] = [];
         if (plan.alreadyQueued.length > 0) {
-          skips.push(`${plan.alreadyQueued.length} already queued from an earlier run`);
+          skips.push(`${plan.alreadyQueued.length} that already have a run (${held})`);
         }
         if (plan.noUpdates.length > 0) {
           skips.push(`${plan.noUpdates.length} with nothing to update`);

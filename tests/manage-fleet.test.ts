@@ -4,6 +4,8 @@ import type { SiteRow, SiteEnvironment } from "@/services/sites/types";
 import type { Viewer } from "@/lib/authz/decide";
 import type { SitesDeps } from "@/services/sites/service";
 import type { JobsRepo } from "@/services/jobs/repo";
+import type { LiveJob } from "@/services/manage/held-jobs";
+import type { MaintenanceWindow } from "@/services/maintenance/window";
 
 /**
  * planFleetPluginUpdate is the shared eligibility logic behind
@@ -51,6 +53,8 @@ function makeDeps(opts: {
   sites: SiteRow[];
   snapshots: Record<string, ReturnType<typeof snapshot> | undefined>;
   pending?: Set<string>;
+  live?: Record<string, LiveJob>;
+  windows?: Record<string, MaintenanceWindow>;
 }): FleetPlanDeps {
   const sites = {
     repo: { listSites: async () => opts.sites },
@@ -62,6 +66,10 @@ function makeDeps(opts: {
     sites,
     jobs,
     snapshots: { latestSnapshot: async (id: string) => opts.snapshots[id] ?? null },
+    held: {
+      liveJob: async (_type, siteId) => opts.live?.[siteId] ?? null,
+      getWindow: async (siteId) => opts.windows?.[siteId] ?? null,
+    },
   };
 }
 
@@ -163,6 +171,33 @@ describe("planFleetPluginUpdate", () => {
     expect(plan.eligible).toEqual([]);
     expect(plan.alreadyQueued).toEqual([busy]);
     expect(plan.noUpdates).toEqual([]);
+  });
+
+  it("says when a skipped site's held run is scheduled, in its window's zone", async () => {
+    const busy = site("busy1", { name: "Acme Co" });
+    const deps = makeDeps({
+      sites: [busy],
+      snapshots: { busy1: snapshot(2) },
+      pending: new Set(["busy1"]),
+      live: { busy1: { id: "j1", status: "pending", scheduled_for: "2026-10-02T17:00:00Z", batch_id: "b1" } },
+      windows: { busy1: { days: [6], start: "01:00", durationMinutes: 120, timeZone: "Asia/Manila" } },
+    });
+    const plan = await planFleetPluginUpdate(
+      deps, viewer([["busy1", "manage"]]), PRODUCTION, new Date("2026-09-29T04:00:00Z"),
+    );
+    expect(plan.heldNotes).toEqual([{
+      siteName: "Acme Co", text: "already scheduled for Sat 3 Oct, 01:00 (Asia/Manila)",
+      cancellable: true, batchId: "b1",
+    }]);
+  });
+
+  it("looks nothing up when no site is skipped", async () => {
+    const deps = makeDeps({ sites: [site("good1")], snapshots: { good1: snapshot(1) } });
+    let lookups = 0;
+    deps.held = { liveJob: async () => { lookups++; return null; }, getWindow: async () => null };
+    const plan = await planFleetPluginUpdate(deps, viewer([["good1", "manage"]]), PRODUCTION);
+    expect(plan.heldNotes).toEqual([]);
+    expect(lookups).toBe(0);
   });
 
   it("puts a manageable, in-environment, enabled site with a waiting update and no pending run in eligible", async () => {

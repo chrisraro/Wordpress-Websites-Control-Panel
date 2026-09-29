@@ -100,10 +100,12 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
               variant="primary"
               confirm={{
                 title: `Update ${updatable.length} plugin${updatable.length === 1 ? "" : "s"} on ${site.name}${environmentSuffix(site)}?`,
-                description: `Every plugin with an available update on ${site.name} will be updated in one pass. Plugin updates can change how the site behaves — take a backup if you are unsure.`,
+                description: `Every plugin with an available update on ${site.name} will be updated in one pass. It needs a successful UpdraftPlus backup from the last 6 hours; without one the update is refused, so use “Back up now” on the site’s overview first, or update without a backup.`,
                 confirmLabel: "Update all",
               }}
-
+              // Runs inline and cannot wait for a backup, so the unbacked
+              // path is an explicit second button.
+              secondaryConfirm={{ label: "Update all without a backup", name: "backup", value: "skip" }}
             />
           )}
         </div>
