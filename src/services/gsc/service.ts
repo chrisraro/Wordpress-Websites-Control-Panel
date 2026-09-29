@@ -66,6 +66,7 @@ export async function installVerificationFile(
     const res = await fetchImpl(publicUrl, {
       headers: { "User-Agent": "Google-Site-Verification/1.0" },
       redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
     });
     const text = await res.text();
     if (!res.ok) {

@@ -73,7 +73,10 @@ export async function discoverMcpEndpoint(
   const index = `${base(url)}/wp-json/`;
   let res: Response;
   try {
-    res = await fetchImpl(index, { headers: { Accept: "application/json" }, redirect: "follow" });
+    res = await fetchImpl(index, {
+      headers: { Accept: "application/json" }, redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+    });
   } catch (e) {
     throw new McpNotInstalledError(
       `Could not reach ${index} (${e instanceof Error ? e.message : String(e)}). ` +

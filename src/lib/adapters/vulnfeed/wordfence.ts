@@ -109,6 +109,9 @@ export async function fetchWordfenceFeed(
 ): Promise<FeedEntry[]> {
   const res = await fetchImpl(WORDFENCE_FEED_URL, {
     headers: { Authorization: `Bearer ${apiKey}` },
+    // ~155MB download: generous, but bounded so a stalled transfer fails
+    // the job instead of hanging the worker until the platform kills it.
+    signal: AbortSignal.timeout(120_000),
   });
   if (res.status === 429) {
     // A 429 means the key is valid but the window is spent — retrying at the
