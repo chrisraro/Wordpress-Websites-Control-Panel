@@ -11,7 +11,9 @@ import { NextResponse, type NextRequest } from "next/server";
 // docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md §4.2.
 
 const PUBLIC_EXACT = ["/login"];
-const PUBLIC_PREFIXES = ["/r/", "/api/cron/", "/api/webhooks/"];
+// Routes here authenticate themselves (share token, CRON_SECRET, HMAC, or
+// a bearer API token for /api/mcp) and carry no Supabase session cookie.
+const PUBLIC_PREFIXES = ["/r/", "/api/cron/", "/api/webhooks/", "/api/mcp"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
