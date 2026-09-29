@@ -222,7 +222,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
             ? ` ${notPending} job(s) are already running, finished, or cancelled, and cannot be reached from here.`
             : "");
 
-        const gate = gateConfirm(ctx.auth, args, summary, {
+        const gate = gateConfirm(ctx.auth, "cancel_batch", args, summary, {
           batch_id, pending: pending.length, not_pending: notPending,
         });
         if (!gate.proceed) return gate.result;

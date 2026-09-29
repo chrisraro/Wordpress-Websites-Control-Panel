@@ -2,6 +2,7 @@ import { z } from "./schema";
 import { can } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 import { PERMISSION_KIND, type TokenAuth } from "@/lib/authz/token";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * Appended to every tool description. An LLM that cannot tell a client's
@@ -34,6 +35,15 @@ export const CONFIRM_SHAPE = {
       `Why this action is being taken, ${REASON_MIN}-${REASON_MAX} characters. ` +
       "Required when confirm is true. Recorded in the audit log.",
     ),
+  confirm_code: z
+    .string()
+    .max(200)
+    .optional()
+    .describe(
+      "Required when confirm is true. Returned by the dry run (the same call " +
+      "without confirm); valid for 10 minutes, for this token and these exact " +
+      "arguments only. Show the dry-run preview to the user before confirming.",
+    ),
 };
 
 export type ToolResult = {
@@ -49,16 +59,91 @@ export function fail(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
-export function preview(summary: string, details: unknown): ToolResult {
+export function preview(summary: string, details: unknown, confirmCode?: string): ToolResult {
+  const how = confirmCode
+    ? "To perform this, show this preview to the user, then call again with the " +
+      `same arguments plus confirm: true, a reason, and confirm_code: "${confirmCode}" ` +
+      "(valid for 10 minutes, for exactly this action)."
+    : "To perform this, call again with confirm: true and a reason.";
   return {
     content: [{
       type: "text",
       text:
         `DRY RUN — nothing has been changed.\n\n${summary}\n\n` +
-        `${JSON.stringify(details, null, 2)}\n\n` +
-        "To perform this, call again with confirm: true and a reason.",
+        `${JSON.stringify(details, null, 2)}\n\n${how}`,
     }],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Confirm codes
+// ---------------------------------------------------------------------------
+
+/** How long a dry run's confirm code stays valid. */
+export const CONFIRM_CODE_TTL_MS = 10 * 60_000;
+
+/** Arguments that steer the gate itself rather than the action. */
+const GATE_KEYS = new Set(["confirm", "reason", "confirm_code"]);
+
+/** JSON with object keys sorted at every level, so key order cannot matter. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (isPlainObject(v)) {
+    const keys = Object.keys(v).filter((k) => v[k] !== undefined).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+function actionArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(args).filter(([k]) => !GATE_KEYS.has(k)));
+}
+
+/**
+ * Key for confirm-code MACs, derived from APP_ENCRYPTION_KEY with a fixed
+ * label so it is never the encryption key itself. No new secret to manage.
+ */
+function confirmKey(): Buffer {
+  const base = process.env.APP_ENCRYPTION_KEY;
+  if (!base) throw new Error("Missing required env var: APP_ENCRYPTION_KEY");
+  return createHmac("sha256", Buffer.from(base, "base64")).update("mcp-confirm-code/v1").digest();
+}
+
+function confirmMac(auth: TokenAuth, tool: string, args: Record<string, unknown>, exp: number): string {
+  const siteId = typeof args.site_id === "string" ? args.site_id : "";
+  const payload = ["v1", auth.tokenId, auth.viewer.id, tool, siteId, canonical(actionArgs(args)), String(exp)]
+    .join("\n");
+  return createHmac("sha256", confirmKey()).update(payload).digest().subarray(0, 18).toString("base64url");
+}
+
+/**
+ * A code the dry run hands out and the real call must echo back:
+ * `<expiry unix seconds>.<mac>`, the MAC binding (token, user, tool, site,
+ * canonical arguments, expiry). Stateless on purpose -- nothing to store or
+ * clean up. Within its ten minutes the same code authorizes the identical
+ * action again, which for these idempotent-by-target actions (delete X,
+ * update Y) is harmless; any change of target or arguments needs a new
+ * dry run.
+ */
+export function mintConfirmCode(
+  auth: TokenAuth, tool: string, args: Record<string, unknown>, now: number = Date.now(),
+): string {
+  const exp = Math.floor((now + CONFIRM_CODE_TTL_MS) / 1000);
+  return `${exp}.${confirmMac(auth, tool, args, exp)}`;
+}
+
+function verifyConfirmCode(
+  auth: TokenAuth, tool: string, args: Record<string, unknown>, code: string, now: number,
+): boolean {
+  const m = /^(\d{1,12})\.([A-Za-z0-9_-]{1,64})$/.exec(code.trim());
+  if (!m) return false;
+  const exp = Number(m[1]);
+  if (!Number.isSafeInteger(exp) || exp * 1000 < now) return false;
+  // Codes are never minted further out than the TTL; a later expiry is forged.
+  if (exp * 1000 > now + CONFIRM_CODE_TTL_MS + 60_000) return false;
+  const expected = Buffer.from(confirmMac(auth, tool, args, exp));
+  const given = Buffer.from(m[2]);
+  return expected.length === given.length && timingSafeEqual(expected, given);
 }
 
 const SECRETISH = /password|secret|token|key/i;
@@ -160,15 +245,22 @@ export type ConfirmGate =
  * write permission in front of it. The read-only refusal names the token
  * rather than a permission -- the two have different fixes, and conflating
  * them sends the user to the wrong place.
+ *
+ * The preview carries a confirm code (mintConfirmCode) bound to `tool` and
+ * the action's arguments; a confirmed call proceeds only with a valid,
+ * unexpired code for exactly that call, after the reason checks.
  */
 export function gateConfirm(
   auth: TokenAuth,
-  args: { confirm?: boolean; reason?: string },
+  tool: string,
+  args: { confirm?: boolean; reason?: string; confirm_code?: string } & Record<string, unknown>,
   previewSummary: string,
   previewDetails: unknown,
+  now: number = Date.now(),
 ): ConfirmGate {
   if (!args.confirm) {
-    return { proceed: false, result: preview(previewSummary, previewDetails) };
+    const code = mintConfirmCode(auth, tool, args, now);
+    return { proceed: false, result: preview(previewSummary, previewDetails, code) };
   }
   const tokenDenied = requireWritableToken(auth);
   if (tokenDenied) return { proceed: false, result: tokenDenied };
@@ -185,6 +277,26 @@ export function gateConfirm(
   }
   if (reason.length > REASON_MAX) {
     return { proceed: false, result: fail(`The reason must be at most ${REASON_MAX} characters.`) };
+  }
+  // The code is what a model steered by site-controlled text cannot supply
+  // in a single step: only the dry run for this exact action produces it.
+  if (!args.confirm_code) {
+    return {
+      proceed: false,
+      result: fail(
+        "A confirm_code is required when confirm is true. Call this tool without " +
+        "confirm first to see the preview; it returns the code to pass back.",
+      ),
+    };
+  }
+  if (!verifyConfirmCode(auth, tool, args, args.confirm_code, now)) {
+    return {
+      proceed: false,
+      result: fail(
+        "The confirm_code does not match this action or has expired. Codes are tied " +
+        "to this token and these exact arguments, for 10 minutes. Run the dry run again.",
+      ),
+    };
   }
   return { proceed: true, reason };
 }

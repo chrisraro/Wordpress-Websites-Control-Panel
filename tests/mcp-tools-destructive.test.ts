@@ -99,7 +99,24 @@ async function connectAll(ctx: ToolCtx) {
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "1.0.0" });
   await Promise.all([server.connect(st), client.connect(ct)]);
-  return { client, close: async () => { await client.close(); await server.close(); } };
+  // Real calls need the confirm_code their dry run hands out (audit
+  // 2026-09-29, open 5). Most tests here are about what happens *after* the
+  // gate, so `client` performs the dry run first the way a well-behaved
+  // caller would; `raw` is the unassisted client, for the tests about the
+  // code itself.
+  const raw = client.callTool.bind(client);
+  const assisted = Object.create(client) as Client;
+  assisted.callTool = (async (params: { name: string; arguments?: Record<string, unknown> }, ...rest: unknown[]) => {
+    const args = params.arguments ?? {};
+    if (args.confirm === true && !("confirm_code" in args)) {
+      const { confirm: _c, reason: _r, ...base } = args;
+      const dry = await raw({ name: params.name, arguments: base });
+      const code = /confirm_code: "([^"]+)"/.exec(textOf(dry))?.[1];
+      if (code) return raw({ ...params, arguments: { ...args, confirm_code: code } }, ...(rest as []));
+    }
+    return raw(params, ...(rest as []));
+  }) as Client["callTool"];
+  return { client: assisted, raw, close: async () => { await client.close(); await server.close(); } };
 }
 
 const isError = (r: unknown) => Boolean((r as { isError?: boolean }).isError);
@@ -142,6 +159,44 @@ describe.each(DESTRUCTIVE_TOOLS)("%s", (name) => {
     expect(textOf(res)).toMatch(/dry run/i);
     expect(ctx.serviceCalls).toEqual([]);
     expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("refuses confirm + reason without the dry run's confirm_code", async () => {
+    const ctx = ctxFor();
+    const { raw, close } = await connectAll(ctx);
+    const res = await raw({ name, arguments: { ...ARGS[name], confirm: true, reason: REASON } });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toMatch(/confirm_code/);
+    expect(ctx.serviceCalls).toEqual([]);
+    expect(ctx.audited).toEqual([]);
+    await close();
+  });
+
+  it("refuses a confirm_code that was not minted for this call", async () => {
+    const ctx = ctxFor();
+    const { raw, close } = await connectAll(ctx);
+    const forged = `${Math.floor(Date.now() / 1000) + 300}.AAAAAAAAAAAAAAAAAAAAAAAA`;
+    const res = await raw({
+      name, arguments: { ...ARGS[name], confirm: true, reason: REASON, confirm_code: forged },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toMatch(/does not match|expired/i);
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("the dry run returns a confirm_code that authorizes exactly that call", async () => {
+    const ctx = ctxFor();
+    const { raw, close } = await connectAll(ctx);
+    const dry = await raw({ name, arguments: ARGS[name] });
+    const code = /confirm_code: "([^"]+)"/.exec(textOf(dry))?.[1];
+    expect(code).toBeTruthy();
+    const res = await raw({
+      name, arguments: { ...ARGS[name], confirm: true, reason: REASON, confirm_code: code },
+    });
+    expect(isError(res)).toBe(false);
+    expect(ctx.serviceCalls.length).toBe(1);
     await close();
   });
 
