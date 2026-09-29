@@ -317,6 +317,31 @@ describe("createInstallBatchAction", () => {
   });
 });
 
+// Security finding: the source was only validated when its kind was
+// "wporg" or "upload", so a forged { kind: "url", url } from a client call
+// fell through both checks and was stored in the job payload, letting a
+// wp_toolkit.manage holder install an arbitrary remote zip.
+describe("createInstallBatchAction source kind", () => {
+  it("rejects a forged url source before anything is enqueued", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockResolvedValue(FAKE_VIEWER);
+    const result = await createInstallBatchAction({
+      source: { kind: "url", url: "https://evil.example/x.zip", path: "x" } as never,
+      siteIds: ["site-1"], activate: true,
+    });
+    expect(result).toEqual({ ok: false, error: "Invalid install source" });
+  });
+
+  it("rejects a missing source", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockResolvedValue(FAKE_VIEWER);
+    const result = await createInstallBatchAction({
+      source: null as never, siteIds: ["site-1"], activate: true,
+    });
+    expect(result).toEqual({ ok: false, error: "Invalid install source" });
+  });
+});
+
 describe("prepareUploadAction", () => {
   it("is refused without wp_toolkit.manage (no siteId travels with this call)", async () => {
     checkPermissionMock.mockResolvedValue(DENIED);

@@ -25,7 +25,7 @@ import type { BulkJobPayload } from "@/services/bulk/types";
 import { hardenSite, hardeningPlan } from "@/services/security/harden";
 
 interface PluginInstallPayload {
-  source: InstallSource | { kind: "upload"; path: string };
+  source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
   activate: boolean;
   actor: string;
   /**
@@ -97,6 +97,11 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("plugin_install requires site_id");
       const p = job.payload as unknown as PluginInstallPayload;
       if (!p?.source || typeof p.actor !== "string") throw new Error("plugin_install payload malformed");
+      // Only wordpress.org slugs and our own signed uploads are installable;
+      // a url-kind payload would hand the site an arbitrary download URL.
+      if (p.source.kind !== "wporg" && p.source.kind !== "upload") {
+        throw new Error("plugin_install source kind not allowed");
+      }
       const { kind, bucket } = resolveInstallKind(p.target);
       const isTheme = kind === "theme";
       let source: InstallSource;
@@ -107,7 +112,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         }
         source = { kind: "url", url: data.signedUrl };
       } else {
-        source = p.source;
+        source = { kind: "wporg", slug: p.source.slug };
       }
       const result = isTheme
         ? await installTheme(
