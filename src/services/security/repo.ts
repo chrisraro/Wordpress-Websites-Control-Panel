@@ -82,11 +82,23 @@ export function supabaseSecurityRepo(db: SupabaseClient): SecurityRepo {
     async feedEntriesForSlugs(keys) {
       const slugs = [...new Set(keys.map((k) => k.slug))];
       const results: FeedEntry[] = [];
+      // PostgREST caps each response at max_rows (1000 on Supabase) and a
+      // popular plugin alone has hundreds of entries, so page every slug
+      // chunk under a stable order until a short page, or entries past row
+      // 1000 would be silently dropped and a vulnerable site graded clean.
+      const PAGE = 1000;
       for (let i = 0; i < slugs.length; i += 100) {
-        const { data, error } = await db.from("vuln_feed").select("*")
-          .in("software_slug", slugs.slice(i, i + 100));
-        if (error) throw new Error(`vuln_feed query failed: ${error.message}`, { cause: error });
-        results.push(...(data ?? []).map(fromFeedRow));
+        const chunk = slugs.slice(i, i + 100);
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await db.from("vuln_feed").select("*")
+            .in("software_slug", chunk)
+            .order("id", { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (error) throw new Error(`vuln_feed query failed: ${error.message}`, { cause: error });
+          const page = data ?? [];
+          results.push(...page.map(fromFeedRow));
+          if (page.length < PAGE) break;
+        }
       }
       const wanted = new Set(keys.map((k) => `${k.type}:${k.slug}`));
       return results.filter((e) => wanted.has(`${e.software_type}:${e.software_slug}`));
