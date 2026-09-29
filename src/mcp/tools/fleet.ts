@@ -9,6 +9,15 @@ import { friendlySiteError } from "@/lib/mcp/errors";
 
 const PERMISSION = "wp_toolkit.manage" as const;
 
+/** Writes the audit row; logs and swallows a failure so it never changes the result. */
+async function safeAudit(ctx: ToolCtx, detail: Record<string, unknown>): Promise<void> {
+  try {
+    await ctx.audit("mcp.update_all_plugins_fleet", null, detail);
+  } catch (e) {
+    console.error("[mcp] update_all_plugins_fleet audit write failed:", e);
+  }
+}
+
 export function register(server: McpServer, ctx: ToolCtx): void {
   server.registerTool(
     "update_all_plugins_fleet",
@@ -66,21 +75,25 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         if (!gate.proceed) return gate.result;
 
         const siteIds = plan.eligible.map((s) => s.id);
+        // Settle the action first; the audit write is separate so a logging
+        // failure after the batch is queued cannot report failure (and invite
+        // a duplicate retry) or record a second, contradictory audit row.
+        let batch: { batchId: string; count: number };
         try {
-          const { batchId, count } = await ctx.enqueueBatch(
+          batch = await ctx.enqueueBatch(
             ctx.jobs, "update_all_plugins", siteIds, { actor: ctx.auth.viewer.id },
           );
-          await ctx.audit("mcp.update_all_plugins_fleet", null, {
-            reason: gate.reason, args: redactArgs(args), ok: true, site_ids: siteIds,
-          });
-          return ok({ batch_id: batchId, count, sites: plan.eligible.map(siteSummary) });
         } catch (e) {
           const message = friendlySiteError(e);
-          await ctx.audit("mcp.update_all_plugins_fleet", null, {
+          await safeAudit(ctx, {
             reason: gate.reason, args: redactArgs(args), ok: false, error: message,
           });
           return fail(message);
         }
+        await safeAudit(ctx, {
+          reason: gate.reason, args: redactArgs(args), ok: true, site_ids: siteIds,
+        });
+        return ok({ batch_id: batch.batchId, count: batch.count, sites: plan.eligible.map(siteSummary) });
       } catch (e) {
         return fail(friendlySiteError(e));
       }

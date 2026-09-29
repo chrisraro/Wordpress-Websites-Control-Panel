@@ -25,6 +25,21 @@ function reportDeps(db: ReturnType<typeof createServiceSupabase>) {
   };
 }
 
+/**
+ * Records who did what. Awaited, but swallowed so a logging failure can never
+ * turn an action that already happened into a reported failure.
+ */
+async function logActivity(
+  db: ReturnType<typeof createServiceSupabase>, actor: string, siteId: string,
+  action: string, detail: unknown,
+): Promise<void> {
+  try {
+    await supabaseSitesRepo(db).insertActivity({ actor, site_id: siteId, action, detail });
+  } catch (e) {
+    console.error(`[reports] activity log write failed (${action}, site ${siteId}):`, e);
+  }
+}
+
 export async function generateReportAction(
   siteId: string,
   _prev: { ok: boolean; error?: string } | null,
@@ -48,13 +63,12 @@ export async function generateReportAction(
   const db = createServiceSupabase();
   try {
     await generateReport(reportDeps(db), siteId, sections, periodDays, false);
-    await supabaseSitesRepo(db).insertActivity({
-      actor: user.id, site_id: siteId, action: "site.report_generate",
-      detail: { sections, period_days: periodDays },
-    });
   } catch (e) {
     return { ok: false, error: friendlySiteError(e) || "Report generation failed" };
   }
+  // The report exists now: an activity-log failure must not report failure
+  // and invite a second, duplicate report.
+  await logActivity(db, user.id, siteId, "site.report_generate", { sections, period_days: periodDays });
   revalidatePath(`/sites/${siteId}/reports`);
   return { ok: true };
 }
@@ -73,12 +87,10 @@ export async function revokeReportAction(
   const db = createServiceSupabase();
   try {
     await supabaseReportsRepo(db).revoke(reportId, siteId);
-    await supabaseSitesRepo(db).insertActivity({
-      actor: user.id, site_id: siteId, action: "site.report_revoke", detail: { report_id: reportId },
-    });
   } catch (e) {
     return { ok: false, error: friendlySiteError(e) || "Could not revoke the link" };
   }
+  await logActivity(db, user.id, siteId, "site.report_revoke", { report_id: reportId });
   revalidatePath(`/sites/${siteId}/reports`);
   return { ok: true };
 }

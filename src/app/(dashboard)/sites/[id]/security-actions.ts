@@ -31,12 +31,12 @@ export async function runSecurityScanAction(
       },
       siteId,
     );
-    await supabaseSitesRepo(db).insertActivity({
-      actor: user.id, site_id: siteId, action: "site.security_scan", detail: { manual: true },
-    });
   } catch (e) {
     return { ok: false, error: friendlySiteError(e) || "Scan failed" };
   }
+  // The scan already ran: an activity-log failure is logged, never reported
+  // as a failed scan (which would invite a duplicate rerun).
+  await logActivity(db, user.id, siteId, "site.security_scan", { manual: true });
   revalidatePath(`/sites/${siteId}/security`);
   revalidatePath("/dashboard");
   return { ok: true };
@@ -78,6 +78,7 @@ export async function hardenSiteAction(
 
   // Grades are computed by the scanner; re-run it so the page reflects the
   // new state instead of waiting for 02:00.
+  let rescanError: string | null = null;
   try {
     await securityScan(
       {
@@ -86,8 +87,31 @@ export async function hardenSiteAction(
       },
       siteId,
     );
-  } catch { /* the hardening result is still worth reporting */ }
+  } catch (e) {
+    // The hardening result is still worth reporting, but say the grades are stale.
+    console.error(`[security] rescan after hardening failed for site ${siteId}:`, e);
+    rescanError = e instanceof Error ? e.message : String(e);
+  }
   revalidatePath(`/sites/${siteId}/security`);
   revalidatePath("/dashboard");
-  return { ok: out.ok, ...summarizeHardening(out) };
+  const summary = summarizeHardening(out);
+  if (rescanError) {
+    summary.message = [summary.message, `Security rescan failed: ${rescanError}`].filter(Boolean).join(" ");
+  }
+  return { ok: out.ok, ...summary };
+}
+
+/**
+ * Records who did what. Awaited, but swallowed so a logging failure can never
+ * turn an action that already happened into a reported failure.
+ */
+async function logActivity(
+  db: ReturnType<typeof createServiceSupabase>, actor: string, siteId: string,
+  action: string, detail: unknown,
+): Promise<void> {
+  try {
+    await supabaseSitesRepo(db).insertActivity({ actor, site_id: siteId, action, detail });
+  } catch (e) {
+    console.error(`[security] activity log write failed (${action}, site ${siteId}):`, e);
+  }
 }

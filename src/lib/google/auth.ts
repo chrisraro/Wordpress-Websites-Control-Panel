@@ -111,6 +111,7 @@ export async function getAccessToken(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await res.text();
   if (!res.ok) {

@@ -71,6 +71,7 @@ async function query(
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
   if (!res.ok) {

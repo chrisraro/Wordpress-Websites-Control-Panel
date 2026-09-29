@@ -53,8 +53,10 @@ export function supabaseSeoRepo(db: SupabaseClient): SeoRepo {
       return typeof score === "number" ? score : null;
     },
     async lastRunAt(siteId) {
+      // Only a run with at least one ok source counts: an all-error run must
+      // not suppress the weekly retry (seoScan throws for those).
       const { data, error } = await db.from("seo_snapshots")
-        .select("taken_at").eq("site_id", siteId)
+        .select("taken_at").eq("site_id", siteId).eq("payload->>status", "ok")
         .order("taken_at", { ascending: false }).limit(1).maybeSingle();
       if (error) throw new Error(`seo lastRunAt failed: ${error.message}`, { cause: error });
       return data?.taken_at ?? null;
