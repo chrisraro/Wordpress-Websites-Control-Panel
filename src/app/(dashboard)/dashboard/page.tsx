@@ -17,6 +17,8 @@ import {
 } from "@/services/sites/portfolio";
 import type { SiteEnvironment } from "@/services/sites/types";
 import { ClientHome } from "./client-home";
+import { loadClientEvidence } from "@/services/client/summary";
+import { clientEvidenceDeps } from "@/services/client/deps";
 import { LinkPending } from "@/components/shell/nav-progress";
 import { EnvTabs } from "./env-tabs";
 import type { SiteRow } from "@/services/sites/types";
@@ -246,12 +248,21 @@ export default async function DashboardPage({
   // audience by role, not by capability: "someone who does not work at OCS
   // and did not ask for a control panel."
   if (viewer.role === "client") {
+    const now = Date.now();
+    // Viewer-scoped reads go through `db` (RLS); only the aggregate
+    // maintenance count uses the service role, built and grant-gated in
+    // src/services/client (deps.ts, summary.ts).
+    const evidenceDeps = clientEvidenceDeps(db);
     const clientRows = await Promise.all(
       sites.map(async (site) => {
         const snap = await supabaseSnapshotsRepo(db).latestSnapshot(site.id);
         const updates = snap ? pendingUpdates(snap.payload) : undefined;
         const grade = (await supabaseSecurityRepo(db).latestGrade(site.id))?.grade;
+        const evidence = await loadClientEvidence(
+          evidenceDeps, viewer, site.id, { now, backup: snap?.payload.backup },
+        );
         return {
+          evidence,
           site,
           severity: siteAttention({ status: site.status, updates, grade }).severity,
           // null means never measured, and ClientHome must keep that
@@ -261,7 +272,7 @@ export default async function DashboardPage({
         };
       }),
     );
-    return <ClientHome rows={clientRows} now={Date.now()} />;
+    return <ClientHome rows={clientRows} now={now} />;
   }
 
   // refreshAllInventoryAction (./actions.ts) checks both wp_toolkit.manage
