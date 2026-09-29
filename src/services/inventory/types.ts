@@ -28,6 +28,13 @@ export interface ThemeInfo {
 }
 export interface AdminUser { ID: number; user_login: string; user_email: string }
 
+export interface BackupStatus {
+  plugin: "updraftplus";
+  /** Unix seconds of the last backup UpdraftPlus recorded, or null if none. */
+  last_backup_time: number | null;
+  success: boolean | null;
+}
+
 export interface InventoryPayload {
   collected_at: string;
   wp_version: string;
@@ -60,6 +67,12 @@ export interface InventoryPayload {
    * for sends them to fix something that may not be broken.
    */
   gsc?: GscVerification;
+  /**
+   * The site's backup plugin and its last run, or null when no supported
+   * backup plugin is active. Optional like `maintenance`: undefined means
+   * "not measured" (a snapshot from before this existed).
+   */
+  backup?: BackupStatus | null;
   plugins: PluginInfo[];
   themes: ThemeInfo[];
 }

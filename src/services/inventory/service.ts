@@ -99,6 +99,20 @@ if ($gsc_plugin === null) {
   }
 }
 
+// Backup plugin status, so the panel can say how recent the last backup is
+// before anyone runs an update. UpdraftPlus is the one supported for the
+// pre-update backup step (src/services/backup/updraft.ts); its own record of
+// the last run is the updraft_last_backup option.
+$backup = null;
+if (class_exists('UpdraftPlus')) {
+  $lb = get_option('updraft_last_backup');
+  $backup = array(
+    'plugin' => 'updraftplus',
+    'last_backup_time' => (is_array($lb) && isset($lb['backup_time'])) ? (int) $lb['backup_time'] : null,
+    'success' => (is_array($lb) && isset($lb['success'])) ? (bool) $lb['success'] : null,
+  );
+}
+
 $admins = array();
 foreach (get_users(array('role' => 'administrator', 'fields' => array('ID', 'user_login', 'user_email'))) as $u) {
   $admins[] = array('ID' => (int) $u->ID, 'user_login' => $u->user_login, 'user_email' => $u->user_email);
@@ -115,6 +129,7 @@ return json_encode(array(
   'maintenance' => file_exists(ABSPATH . '.maintenance'),
   'core_update' => $core,
   'gsc' => array('files' => $gsc_files, 'plugin' => $gsc_plugin),
+  'backup' => $backup,
   'plugins' => $plugins,
   'themes' => $themes,
   'admin_users' => $admins,
