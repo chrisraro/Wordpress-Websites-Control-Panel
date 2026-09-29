@@ -17,7 +17,10 @@ async function run(req: Request) {
   // Runs parked on a callback that never arrived rejoin the retry ladder.
   const stale = await recoverStaleAwaiting(jobsRepo, 30 * 60 * 1000);
   const result = await processJobs(jobsRepo, buildJobHandlers(db), { max: 3 });
-  return NextResponse.json({ ok: true, stale, ...result });
+  // HTTP stays 200 (the run itself completed); ok reports whether any job
+  // failed this tick, including stale awaiting jobs exhausted to failed.
+  const ok = result.failed === 0 && stale.failed === 0;
+  return NextResponse.json({ ok, stale, ...result });
 }
 
 export const POST = run;
