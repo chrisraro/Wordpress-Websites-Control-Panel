@@ -129,7 +129,7 @@ worked, test-first, in parallel streams (plan:
 `docs/superpowers/plans/2026-09-29-audit-followups.md`), then merged and put
 through a fresh cross-stream review whose HIGH finding is fixed.
 
-**State:** 2,197 unit tests + 26 Playwright checks green, `tsc` clean,
+**State:** 2,275 unit tests + 26 Playwright checks green, `tsc` clean,
 `next build` green on **Next 16.3.6**, `npm audit` **0 vulnerabilities**.
 Migrations 0022–0028 applied twice each against Postgres 16 (re-runnable);
 0025 and 0028 behaviour exercised with real rows / real `authenticated`
@@ -188,4 +188,4 @@ sessions.
 - Trim ECC's rules in the cloud setup script (move unused language rule
   folders out of `~/.claude/rules/ecc` after install).
 
-Routing (round 2): 0 haiku · 1 sonnet · 8 main · 0 escalated · Jev exec 5639
+Routing (round 2): 0 haiku · 1 sonnet · 9 main · 0 escalated · Jev exec 5639
