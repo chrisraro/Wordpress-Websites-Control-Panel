@@ -96,13 +96,51 @@ async function perform(
   }
 }
 
+/**
+ * The inline updates (update_plugins, update_themes, update_core) run
+ * immediately, so they cannot wait for a backup: each is refused unless the
+ * site's UpdraftPlus has a successful backup from the last 6 hours, unless
+ * the caller passed skip_backup: true. Checked on the dry run as well as the
+ * real call: a dry run for an update that would be refused must not hand out
+ * a confirm code, and the backup can go stale (or fail) between the two.
+ * Returns the refusal, or null to go ahead.
+ */
+async function inlineBackupRefusal(
+  ctx: ToolCtx, site_id: string, skip_backup: boolean, what: string,
+): Promise<ReturnType<typeof fail> | null> {
+  if (skip_backup) return null;
+  try {
+    const backup = await ctx.backupReadyForInlineUpdate(ctx.backup, site_id);
+    if (backup.ready) return null;
+    return fail(
+      `${backup.reason} To update ${what} without a backup, call again ` +
+      "with skip_backup: true (a new dry run is needed).",
+    );
+  } catch (e) {
+    return fail(friendlySiteError(e));
+  }
+}
+
+/** How a dry-run preview ends, per skip_backup. */
+function backupClause(skip_backup: boolean): string {
+  return skip_backup
+    ? "WITHOUT a backup (skip_backup: true)."
+    : "after confirming a successful UpdraftPlus backup from the last 6 hours.";
+}
+
+const INLINE_BACKUP_NOTE =
+  "Runs immediately, so it cannot wait for a backup: it is refused unless the " +
+  "site's UpdraftPlus has a successful backup from the last 6 hours. Pass " +
+  "skip_backup: true only when the user explicitly wants to update without " +
+  "a backup.";
+
 export function register(server: McpServer, ctx: ToolCtx): void {
   server.registerTool(
     "update_plugins",
     {
       description:
         "Update one plugin, or every plugin with an update available, on a " +
-        `site. ${ENVIRONMENT_NOTE}`,
+        `site. ${INLINE_BACKUP_NOTE} ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         plugin_file: z
@@ -114,23 +152,32 @@ export function register(server: McpServer, ctx: ToolCtx): void {
             "One plugin's file, e.g. akismet/akismet.php, from get_inventory. " +
             "Omit to update every plugin with an update available.",
           ),
+        ...SKIP_BACKUP_SHAPE,
         ...CONFIRM_SHAPE,
       },
     },
     async (args) => {
-      const { site_id, plugin_file } = args;
+      const { site_id, plugin_file, skip_backup } = args;
       const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
+
+      const refused = await inlineBackupRefusal(
+        ctx, site_id, skip_backup, plugin_file !== undefined ? `the plugin ${plugin_file}` : "the plugins",
+      );
+      if (refused) return refused;
 
       const action: ManageAction = plugin_file !== undefined
         ? { kind: "update_plugin", file: plugin_file }
         : { kind: "update_all_plugins" };
       const summary = plugin_file !== undefined
-        ? `Would update the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}).`
-        : `Would update every plugin with an update available on ${site.name} (${siteEnvironment(site)}).`;
+        ? `Would update the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}), `
+        : `Would update every plugin with an update available on ${site.name} (${siteEnvironment(site)}), `;
 
-      const gate = gateConfirm(ctx.auth, "update_plugins", args, summary, { site: siteSummary(site), plugin_file });
+      const gate = gateConfirm(
+        ctx.auth, "update_plugins", args, summary + backupClause(skip_backup),
+        { site: siteSummary(site), plugin_file, backup: skip_backup ? "skip" : "required" },
+      );
       if (!gate.proceed) return gate.result;
 
       try {
@@ -155,23 +202,28 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     {
       description:
         "Update one theme with an update available on a site. Updates a single " +
-        `theme per call; call once per theme to update several. ${ENVIRONMENT_NOTE}`,
+        "theme per call; call once per theme to update several. " +
+        `${INLINE_BACKUP_NOTE} ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         slug: z.string().regex(SLUG_RE).describe("The theme's stylesheet slug, e.g. twentytwentyfour, from get_inventory."),
+        ...SKIP_BACKUP_SHAPE,
         ...CONFIRM_SHAPE,
       },
     },
     async (args) => {
-      const { site_id, slug } = args;
+      const { site_id, slug, skip_backup } = args;
       const loaded = await loadSite(ctx, site_id, PERMISSION);
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
+      const refused = await inlineBackupRefusal(ctx, site_id, skip_backup, `the theme ${slug}`);
+      if (refused) return refused;
+
       const gate = gateConfirm(
         ctx.auth, "update_themes", args,
-        `Would update the theme ${slug} on ${site.name} (${siteEnvironment(site)}).`,
-        { site: siteSummary(site), slug },
+        `Would update the theme ${slug} on ${site.name} (${siteEnvironment(site)}), ${backupClause(skip_backup)}`,
+        { site: siteSummary(site), slug, backup: skip_backup ? "skip" : "required" },
       );
       if (!gate.proceed) return gate.result;
 
@@ -192,11 +244,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
     "update_core",
     {
       description:
-        "Update WordPress core on a site, including its database upgrade. Runs " +
-        "immediately, so it cannot wait for a backup: it is refused unless the " +
-        "site's UpdraftPlus has a successful backup from the last 6 hours. Pass " +
-        "skip_backup: true only when the user explicitly wants to update without " +
-        `a backup. ${ENVIRONMENT_NOTE}`,
+        "Update WordPress core on a site, including its database upgrade. " +
+        `${INLINE_BACKUP_NOTE} ${ENVIRONMENT_NOTE}`,
       inputSchema: {
         site_id: z.string().uuid().describe("The site's id, from list_sites."),
         ...SKIP_BACKUP_SHAPE,
@@ -209,29 +258,13 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       if ("result" in loaded) return loaded.result;
       const { site } = loaded;
 
-      // Checked on the dry run as well as the real call: a dry run for an
-      // update that would be refused must not hand out a confirm code, and
-      // the backup can go stale (or fail) between the two.
-      if (!skip_backup) {
-        try {
-          const backup = await ctx.backupReadyForInlineUpdate(ctx.backup, site_id);
-          if (!backup.ready) {
-            return fail(
-              `${backup.reason} To update WordPress core without a backup, call again ` +
-              "with skip_backup: true (a new dry run is needed).",
-            );
-          }
-        } catch (e) {
-          return fail(friendlySiteError(e));
-        }
-      }
+      const refused = await inlineBackupRefusal(ctx, site_id, skip_backup, "WordPress core");
+      if (refused) return refused;
 
       const gate = gateConfirm(
         ctx.auth, "update_core", args,
         `Would update WordPress core on ${site.name} (${siteEnvironment(site)}), including its database upgrade, ` +
-        (skip_backup
-          ? "WITHOUT a backup (skip_backup: true)."
-          : "after confirming a successful UpdraftPlus backup from the last 6 hours."),
+        backupClause(skip_backup),
         { site: siteSummary(site), backup: skip_backup ? "skip" : "required" },
       );
       if (!gate.proceed) return gate.result;

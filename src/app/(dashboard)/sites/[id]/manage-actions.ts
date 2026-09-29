@@ -24,12 +24,17 @@ function revalidateSite(siteId: string) {
 }
 
 /**
- * `update_core` runs inline, so unlike queued updates it cannot wait for a
- * backup: it goes ahead only when UpdraftPlus already has a successful backup
- * from the last 6 hours (backupReadyForInlineUpdate), and otherwise refuses
- * with the reason. The confirm dialog's "Update core without a backup"
- * button posts `backup=skip` to go ahead anyway.
+ * The inline updates (INLINE_UPDATE_KINDS) run immediately, so unlike queued
+ * updates they cannot wait for a backup: each goes ahead only when
+ * UpdraftPlus already has a successful backup from the last 6 hours
+ * (backupReadyForInlineUpdate), and otherwise refuses with the reason. The
+ * confirm dialog's "... without a backup" button posts `backup=skip` to go
+ * ahead anyway. Back up before core AND plugin/theme updates.
  */
+const INLINE_UPDATE_KINDS: ReadonlySet<ManageAction["kind"]> = new Set([
+  "update_core", "update_plugin", "update_all_plugins", "update_theme",
+]);
+
 export async function manageAction(
   siteId: string,
   action: ManageAction,
@@ -43,7 +48,7 @@ export async function manageAction(
   if (isDenied(site)) return site;
   const db = createServiceSupabase();
   try {
-    if (action.kind === "update_core" && parseBackupChoice(formData) !== "skip") {
+    if (INLINE_UPDATE_KINDS.has(action.kind) && parseBackupChoice(formData) !== "skip") {
       const backup = await backupReadyForInlineUpdate(
         { sites: supabaseSitesRepo(db), mcp: createSiteMcpClient }, siteId,
       );

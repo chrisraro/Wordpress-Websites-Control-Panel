@@ -222,3 +222,140 @@ describe("update_core backup check", () => {
     await close();
   });
 });
+
+// Plugin and theme updates over MCP run inline too, so they get the same
+// check as update_core: on the dry run and again when confirmed, skippable
+// only with skip_backup: true, which is bound into the confirm code.
+describe.each([
+  ["update_plugins", { plugin_file: "akismet/akismet.php" }, "update_plugin"],
+  ["update_plugins", {}, "update_all_plugins"],
+  ["update_themes", { slug: "twentytwentyfour" }, "update_theme"],
+] as const)("%s backup check (%j -> %s)", (tool, extra, kind) => {
+  const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
+  type Ready = { ready: true } | { ready: false; reason: string };
+  const base = () => ({ site_id: SITE_ID, ...extra });
+
+  function stubBackup(ctx: ReturnType<typeof ctxFor>, answer: () => Ready | Promise<Ready>) {
+    const checks: string[] = [];
+    (ctx as unknown as { backupReadyForInlineUpdate: unknown }).backupReadyForInlineUpdate = async (
+      _deps: unknown, siteId: string,
+    ) => {
+      checks.push(siteId);
+      return answer();
+    };
+    return checks;
+  }
+
+  function recordActions(ctx: ReturnType<typeof ctxFor>) {
+    const actions: { kind: string }[] = [];
+    (ctx as unknown as { manageSite: unknown }).manageSite = async (
+      _deps: unknown, _siteId: string, _actor: string, action: { kind: string },
+    ) => {
+      ctx.serviceCalls.push("manageSite");
+      actions.push(action);
+      return { ok: true, output: "Updated" };
+    };
+    return actions;
+  }
+
+  it("updates when a fresh backup exists, checking on dry run and confirm", async () => {
+    const ctx = ctxFor();
+    const checks = stubBackup(ctx, () => ({ ready: true }));
+    const actions = recordActions(ctx);
+    const { client, close } = await connect(ctx);
+    const res = await dryThenConfirm(client, tool, base());
+    expect(isError(res)).toBe(false);
+    expect(checks).toEqual([SITE_ID, SITE_ID]);
+    expect(actions.map((a) => a.kind)).toEqual([kind]);
+    await close();
+  });
+
+  it("refuses the dry run with the gate's reason and hands out no code", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => ({ ready: false, reason: "No successful backup in the last 6 hours." }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: tool, arguments: base() });
+    expect(isError(dry)).toBe(true);
+    expect(textOf(dry)).toContain("No successful backup in the last 6 hours.");
+    expect(textOf(dry)).toMatch(/skip_backup: true/);
+    expect(codeOf(dry)).toBeUndefined();
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("refuses the confirmed call when the backup went missing after the dry run", async () => {
+    let ready = true;
+    const ctx = ctxFor();
+    stubBackup(ctx, () => (ready ? { ready: true } : { ready: false, reason: "The last backup failed." }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: tool, arguments: base() });
+    ready = false;
+    const res = await client.callTool({
+      name: tool, arguments: { ...base(), confirm: true, reason: REASON, confirm_code: codeOf(dry) },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toContain("The last backup failed.");
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("with skip_backup: true, never checks, says so in the preview, and audits it", async () => {
+    const ctx = ctxFor();
+    const checks = stubBackup(ctx, () => ({ ready: false, reason: "No backup plugin" }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: tool, arguments: { ...base(), skip_backup: true } });
+    expect(textOf(dry)).toMatch(/WITHOUT a backup/);
+    const res = await dryThenConfirm(client, tool, { ...base(), skip_backup: true });
+    expect(isError(res)).toBe(false);
+    expect(checks).toEqual([]);
+    expect(ctx.serviceCalls).toEqual(["manageSite"]);
+    expect(ctx.audited[0].detail.args).toMatchObject({ skip_backup: true });
+    await close();
+  });
+
+  it("cannot replay a backed-up dry run as a skip_backup call", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => ({ ready: true }));
+    const { client, close } = await connect(ctx);
+    const dry = await client.callTool({ name: tool, arguments: base() });
+    const res = await client.callTool({
+      name: tool,
+      arguments: { ...base(), skip_backup: true, confirm: true, reason: REASON, confirm_code: codeOf(dry) },
+    });
+    expect(isError(res)).toBe(true);
+    expect(textOf(res)).toMatch(/does not match/i);
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("reports an unreachable site as a failure, not a crash", async () => {
+    const ctx = ctxFor();
+    stubBackup(ctx, () => { throw new Error("fetch failed"); });
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({ name: tool, arguments: base() });
+    expect(isError(res)).toBe(true);
+    expect(ctx.serviceCalls).toEqual([]);
+    await close();
+  });
+
+  it("checks nothing for a caller without access to the site", async () => {
+    const ctx = ctxFor({ grants: [], permissions: ["wp_toolkit.manage"] });
+    const checks = stubBackup(ctx, () => ({ ready: true }));
+    const { client, close } = await connect(ctx);
+    const res = await client.callTool({ name: tool, arguments: base() });
+    expect(textOf(res)).toMatch(/not found/i);
+    expect(checks).toEqual([]);
+    await close();
+  });
+
+  it("documents skip_backup", async () => {
+    const ctx = ctxFor();
+    const { client, close } = await connect(ctx);
+    const { tools } = await client.listTools();
+    const t = tools.find((x) => x.name === tool)!;
+    expect(t.description).toMatch(/skip_backup/);
+    expect(t.description).toMatch(/UpdraftPlus/);
+    expect(Object.keys(t.inputSchema.properties ?? {})).toContain("skip_backup");
+    await close();
+  });
+});

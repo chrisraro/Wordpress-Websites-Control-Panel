@@ -109,7 +109,8 @@ export interface ToolCtx {
    */
   planFleetPluginUpdate: typeof planFleetPluginUpdate;
   /**
-   * The seam `update_core` calls before an inline core update to ask whether
+   * The seam `update_core`, `update_plugins` and `update_themes` call before
+   * an inline update to ask whether
    * the site has a fresh successful UpdraftPlus backup (a live read of the
    * site, never a backup request). Injectable for the same reason as
    * `manageSite`; `backup` carries its deps, as `gsc.deps` does.

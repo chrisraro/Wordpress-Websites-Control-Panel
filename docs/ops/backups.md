@@ -1,8 +1,8 @@
 # Pre-update backups (UpdraftPlus)
 
-Queued plugin and theme updates, and the core update, are preceded by a
-backup taken by the site's own **UpdraftPlus**. (Single-row updates and the
-Plugins tab's inline "Update all" are not gated yet.) The panel never takes a backup
+Every plugin, theme and core update — queued or inline, from the panel or
+over MCP — is preceded by a backup taken by the site's own **UpdraftPlus**
+(the rule: back up before core AND plugin updates). The panel never takes a backup
 itself: shared hosting and serverless time limits rule that out. It asks
 UpdraftPlus to run one (scheduled on WP-Cron, so it runs in the site's PHP)
 and checks back until UpdraftPlus records a finished run.
@@ -40,21 +40,30 @@ the reasons above. Nothing was updated on a job that
 failed at the backup step, so re-running it (after fixing UpdraftPlus, or
 choosing to skip the backup) is safe.
 
-## Inline core update
+## Inline updates (core, single plugin or theme, Plugins tab "Update all")
 
-**Update core** on a site's overview runs immediately and cannot wait, so
-it only goes ahead when there is already a successful backup from the last
-6 hours; otherwise it is refused with the reason. Use **Back up now**, wait
-for it to finish, refresh the inventory, and update. The MCP `update_core`
-tool behaves the same way (checked on the dry run and again when
-confirmed).
+These run immediately and cannot wait for a backup:
+
+- **Update core** on a site's overview;
+- a single row's **Update** on the Plugins and Themes tabs;
+- the Plugins tab's **Update all (N)** button (all plugins in one pass);
+- the MCP tools `update_core`, `update_plugins` (one plugin or all) and
+  `update_themes`.
+
+Each only goes ahead when there is already a successful backup from the
+last 6 hours; otherwise it is refused with the reason. Use **Back up now**,
+wait for it to finish, refresh the inventory, and update. The MCP tools
+check on the dry run (no confirm code is handed out when it would be
+refused) and again when confirmed.
 
 ## Skipping the backup
 
 Every dialog that queues updates has an unticked **Update without a
-backup** checkbox; the core update dialog has a separate **Update core
-without a backup** button. Choosing either sets `backup: "skip"` on the
-jobs (or skips the check for core) — nothing else changes. Over MCP the
+backup** checkbox; every inline update dialog has a separate
+**… without a backup** button (**Update core without a backup**,
+**Update without a backup**, **Update all without a backup**). Choosing
+either sets `backup: "skip"` on the jobs (or skips the check for the
+inline update) — nothing else changes. Over MCP the
 same choice is `skip_backup: true`, which is part of the confirm code, so
 a dry run without it cannot be confirmed with it. Bulk skips are recorded
 in the activity log entry's `detail.backup`; MCP calls record their
