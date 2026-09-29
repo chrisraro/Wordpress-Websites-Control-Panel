@@ -27,7 +27,9 @@ MCP client -> POST /api/mcp -> authenticateToken            |
 - Pages read through `readDbFor(viewer)` (`src/lib/authz/db.ts`), a user-scoped client, so RLS is the backstop. Services that write use the service-role client from `src/lib/supabase/server.ts`.
 - `src/middleware.ts` only refreshes the session and redirects anonymous users. It does no authorization. Public prefixes: `/login`, `/r/`, `/api/cron/`, `/api/webhooks/`.
 - MCP tokens resolve to a user, then `loadViewer` (`src/lib/authz/server.ts`) builds the same Viewer as a cookie session. `read_only` tokens drop every permission marked "write" in `PERMISSION_KIND` (`src/lib/authz/token.ts`).
-- Destructive MCP tools are dry-run unless `confirm: true` plus a `reason` (`src/mcp/confirm.ts`).
+- Destructive MCP tools are dry-run by default; the dry run returns a one-time `confirm_code` (HMAC over user, tool, site and arguments, 10-minute expiry) that the real call must echo with a `reason` (`src/mcp/confirm.ts`).
+- Queued jobs re-check the enqueuing user's authority when they run; update jobs pass the pre-update backup gate (`src/services/backup/gate.ts`) and may defer themselves (`DeferJob`) while UpdraftPlus runs.
+- Outbound requests to sites go through `src/lib/net-guard.ts` (public addresses only, re-checked on every redirect and at connect time).
 
 ## Job flow
 
