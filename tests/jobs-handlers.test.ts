@@ -36,6 +36,17 @@ vi.mock("@/services/security/scan", async (importOriginal) => {
   return { ...actual, refreshVulnFeed: (...args: unknown[]) => refreshVulnFeedMock(...args) };
 });
 
+// The handlers re-check the queued actor's authority before acting
+// (tests/jobs-handlers-actor-authority.test.ts); these tests are about what
+// happens after that check, so the actor is still fully authorized.
+const STILL_AUTHORIZED = {
+  loadActor: async (id: string) => ({
+    id, email: null, role: "admin" as const,
+    permissions: new Set(["wp_toolkit.manage" as const, "sites.view_all" as const]),
+    grants: new Map(),
+  }),
+};
+
 function fakeDb(signedUrl = "https://signed.example/pkg.zip") {
   const storageCalls: string[] = [];
   const db = {
@@ -89,7 +100,7 @@ describe("plugin_install handler dispatch", () => {
 
   it("routes a theme payload to installTheme, not installPlugin", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({
       source: { kind: "wporg", slug: "storefront" }, activate: true, actor: "user-1", target: "theme",
     });
@@ -103,7 +114,7 @@ describe("plugin_install handler dispatch", () => {
 
   it("routes a plugin payload to installPlugin, not installTheme", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({
       source: { kind: "wporg", slug: "akismet" }, activate: false, actor: "user-1", target: "plugin",
     });
@@ -114,7 +125,7 @@ describe("plugin_install handler dispatch", () => {
 
   it("with NO target field at all, still behaves exactly as a plugin install", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     // Simulates a job enqueued before the `target` field existed.
     const job = jobRow({ source: { kind: "wporg", slug: "akismet" }, activate: true, actor: "user-1" });
     await handlers.plugin_install!({ job });
@@ -124,7 +135,7 @@ describe("plugin_install handler dispatch", () => {
 
   it("signs an uploaded theme package from the themes bucket", async () => {
     const { db, storageCalls } = fakeDb("https://signed.example/theme.zip");
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({
       source: { kind: "upload", path: "uploads/u1/theme.zip" }, activate: false, actor: "user-1", target: "theme",
     });
@@ -136,7 +147,7 @@ describe("plugin_install handler dispatch", () => {
 
   it("signs an uploaded plugin package from the plugins bucket when target is omitted", async () => {
     const { db, storageCalls } = fakeDb("https://signed.example/plugin.zip");
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({ source: { kind: "upload", path: "uploads/u1/plugin.zip" }, activate: false, actor: "user-1" });
     await handlers.plugin_install!({ job });
     expect(storageCalls).toEqual(["plugins"]);
@@ -156,7 +167,7 @@ describe("plugin_install handler source allow-list", () => {
 
   it("throws on a url-kind source and installs nothing", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({ source: { kind: "url", url: "https://evil.example/x.zip" }, activate: true, actor: "user-1" });
     await expect(handlers.plugin_install!({ job })).rejects.toThrow("plugin_install source kind not allowed");
     expect(installPluginMock).not.toHaveBeenCalled();
@@ -178,7 +189,7 @@ describe("vuln_feed_refresh handler dispatch", () => {
   for (const attempts of [1, 2, 3]) {
     it(`refetches unconditionally on attempt ${attempts}`, async () => {
       const { db } = fakeDb();
-      const handlers = buildJobHandlers(db);
+      const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
       const job = jobRow({}, { type: "vuln_feed_refresh", site_id: null, attempts });
       await handlers.vuln_feed_refresh!({ job });
       expect(refreshVulnFeedMock).toHaveBeenCalledTimes(1);
@@ -201,7 +212,7 @@ describe("bulk_manage handler", () => {
 
   it("throws on a malformed payload (missing kind/target/id/actor)", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow({ kind: "delete", target: "plugin" }, { type: "bulk_manage" }); // no id, no actor
     await expect(handlers.bulk_manage!({ job })).rejects.toThrow("bulk_manage payload malformed");
     expect(manageSiteMock).not.toHaveBeenCalled();
@@ -209,7 +220,7 @@ describe("bulk_manage handler", () => {
 
   it("throws when the job has no site_id", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
       { type: "bulk_manage", site_id: null },
@@ -220,7 +231,7 @@ describe("bulk_manage handler", () => {
 
   it("propagates toManageAction's throw for an invalid kind/target combination", async () => {
     const { db } = fakeDb();
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     // Themes are switched, never deactivated — toManageAction rejects this
     // combination before manageSite is ever reached.
     const job = jobRow(
@@ -234,7 +245,7 @@ describe("bulk_manage handler", () => {
   it("throws with the underlying error when manageSite reports !ok, so the job retries", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Deactivate the plugin before deleting it" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
       { type: "bulk_manage" },
@@ -245,7 +256,7 @@ describe("bulk_manage handler", () => {
   it("treats a retried plugin delete that reports 'Plugin is not installed' as idempotent success", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
       { type: "bulk_manage" },
@@ -256,7 +267,7 @@ describe("bulk_manage handler", () => {
   it("treats a retried theme delete that reports 'Theme is not installed' as idempotent success", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Theme is not installed" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "theme", id: "storefront", actor: "user-1" },
       { type: "bulk_manage" },
@@ -267,7 +278,7 @@ describe("bulk_manage handler", () => {
   it("still fails a non-delete kind that reports 'not installed' (genuine failure, not a retry)", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
       { type: "bulk_manage" },
@@ -278,7 +289,7 @@ describe("bulk_manage handler", () => {
   it("does not treat a mismatched target's 'not installed' text as idempotent (theme id, plugin error text)", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "theme", id: "storefront", actor: "user-1" },
       { type: "bulk_manage" },
@@ -289,7 +300,7 @@ describe("bulk_manage handler", () => {
   it("routes a successful plugin delete to the delete_plugin ManageAction", async () => {
     const { db } = fakeDb();
     manageSiteMock.mockResolvedValueOnce({ ok: true, output: "Plugin deleted" });
-    const handlers = buildJobHandlers(db);
+    const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
       { kind: "delete", target: "plugin", id: "akismet/akismet.php", label: "Akismet", actor: "user-1" },
       { type: "bulk_manage", site_id: "site-1" },

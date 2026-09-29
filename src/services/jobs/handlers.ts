@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { JobHandlers } from "@/services/jobs/service";
+import { NonRetryableError, type JobHandlers } from "@/services/jobs/service";
+import { can, canAccessSite, type Viewer } from "@/lib/authz/decide";
+import type { AppPermission } from "@/lib/authz/types";
 import { refreshSnapshot } from "@/services/inventory/service";
 import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
@@ -66,7 +68,55 @@ export function resolveInstallKind(target: PluginInstallPayload["target"]): {
   return { kind, bucket: kind === "theme" ? "themes" : "plugins" };
 }
 
-export function buildJobHandlers(db: SupabaseClient): JobHandlers {
+/** Loads a user's current authority; null when they have none (or it cannot be read). */
+export type ActorLoader = (userId: string) => Promise<Viewer | null>;
+
+/**
+ * Imported lazily: src/lib/authz/server.ts is `server-only` and pulls in
+ * Next.js, which this module's other importers (and tests) should not need.
+ */
+const defaultLoadActor: ActorLoader = async (userId) => {
+  const { loadViewer } = await import("@/lib/authz/server");
+  return loadViewer(userId, null);
+};
+
+/**
+ * What every enqueuing path for plugin_install, bulk_manage,
+ * update_all_plugins and harden requires: the marketplace install, bulk and
+ * fleet actions in src/app/(dashboard) and the MCP fleet tool all check
+ * wp_toolkit.manage plus a manage grant on each site.
+ */
+const ACT_PERMISSION: AppPermission = "wp_toolkit.manage";
+
+/**
+ * Re-checks, at run time, that the user who queued a job may still do it.
+ *
+ * A job can wait minutes (or, on the retry ladder, longer) between enqueue
+ * and run; authority checked only at enqueue would let a revoked user's
+ * queued work still act on a live site. Refusal is NonRetryableError: a
+ * retry a minute later would be refused the same way. A viewer that cannot
+ * be loaded (user gone, no role, or a read error -- loadViewer fails closed
+ * on all three) is refused too.
+ */
+export async function assertActorAuthorized(
+  loadActor: ActorLoader, actor: string, siteId: string, jobType: string,
+): Promise<void> {
+  const viewer = await loadActor(actor);
+  if (!viewer || !can(viewer, ACT_PERMISSION) || !canAccessSite(viewer, siteId, "manage")) {
+    throw new NonRetryableError(
+      `actor no longer authorized to run ${jobType} on this site ` +
+      `(requires ${ACT_PERMISSION} and a manage grant); the job was not run`,
+    );
+  }
+}
+
+export interface JobHandlerOptions {
+  /** How the queued actor's current authority is read; injectable for tests. */
+  loadActor?: ActorLoader;
+}
+
+export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {}): JobHandlers {
+  const loadActor = opts.loadActor ?? defaultLoadActor;
   const sites = supabaseSitesRepo(db);
   const snapshots = supabaseSnapshotsRepo(db);
   const adminUsers = supabaseAdminUsersRepo(db);
@@ -102,6 +152,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (p.source.kind !== "wporg" && p.source.kind !== "upload") {
         throw new Error("plugin_install source kind not allowed");
       }
+      await assertActorAuthorized(loadActor, p.actor, job.site_id, "plugin_install");
       const { kind, bucket } = resolveInstallKind(p.target);
       const isTheme = kind === "theme";
       let source: InstallSource;
@@ -160,6 +211,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
         throw new Error("bulk_manage payload malformed");
       }
       const action = toManageAction(p.kind, p.target, p.id);
+      await assertActorAuthorized(loadActor, p.actor, job.site_id, "bulk_manage");
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, action,
       );
@@ -204,6 +256,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (typeof p?.actor !== "string") {
         throw new Error("update_all_plugins payload malformed");
       }
+      await assertActorAuthorized(loadActor, p.actor, job.site_id, "update_all_plugins");
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor,
         { kind: "update_all_plugins" },
@@ -216,6 +269,7 @@ export function buildJobHandlers(db: SupabaseClient): JobHandlers {
       if (!job.site_id) throw new Error("harden requires a site_id");
       const p = job.payload as { actor?: unknown };
       if (typeof p?.actor !== "string") throw new Error("harden payload malformed");
+      await assertActorAuthorized(loadActor, p.actor, job.site_id, "harden");
       const latest = await security.latestChecks(job.site_id);
       const plan = latest ? hardeningPlan(latest.checks) : [];
       // A site with nothing to fix is a success, not a failure: the fleet

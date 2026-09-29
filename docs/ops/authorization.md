@@ -344,6 +344,21 @@ permission matrix editor still lets them grant any permission (including
 including who holds it — treat it with the same care as direct database
 access, because it is functionally equivalent to it.
 
+## Queued jobs re-check the actor when they run
+
+`plugin_install`, `bulk_manage`, `update_all_plugins` and `harden` jobs carry
+the id of the user who queued them (`payload.actor`). Their handlers
+(`src/services/jobs/handlers.ts`, `assertActorAuthorized`) reload that user's
+viewer immediately before touching the live site and require what every
+enqueuing path required: `wp_toolkit.manage` plus a `manage`-level grant on
+the job's site (or `sites.view_all`). If the permission or grant has been
+revoked since the job was queued -- or the user no longer has a role -- the
+job fails with "actor no longer authorized …" and is **not** retried.
+
+So revoking someone's access also stops their queued work. System jobs that
+carry no actor (nightly `snapshot_refresh`, `security_scan`, `seo_scan`,
+`vuln_feed_refresh`, reports, GeoGrid runs) are unaffected.
+
 ## Per-user overrides stay SQL-only
 
 `user_permission_overrides` exists (`0006_rbac_schema.sql`) and `getViewer()`
