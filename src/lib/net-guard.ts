@@ -1,6 +1,6 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 
 /**
  * Refuses hosts that point back into private address space.
@@ -215,8 +215,16 @@ function publicOnlyAgent(): Agent {
 }
 
 export interface GuardedFetchOptions {
-  /** Underlying fetch; defaults to the global one, looked up per call. */
+  /**
+   * Underlying fetch. Defaults to undici's own fetch -- NOT the global one:
+   * the dispatcher below is an Agent from the `undici` package, and Node's
+   * built-in fetch bundles a different undici that rejects it ("invalid
+   * onRequestStart method"), which failed every request and reported every
+   * site down. The fetch and the dispatcher must come from the same undici.
+   */
   fetchImpl?: typeof fetch;
+  /** Dispatcher for connections; defaults to the public-only Agent. For tests. */
+  dispatcher?: Dispatcher;
   resolve?: Resolver;
   /** Redirect hops to follow; 0 returns a redirect response as-is. */
   maxRedirects?: number;
@@ -261,11 +269,11 @@ export function createGuardedFetch(opts: GuardedFetchOptions = {}): typeof fetch
   const resolve = opts.resolve ?? defaultResolver;
   const maxRedirects = opts.maxRedirects ?? MAX_REDIRECTS;
   return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const doFetch = opts.fetchImpl ?? globalThis.fetch;
+    const doFetch = opts.fetchImpl ?? (undiciFetch as unknown as typeof fetch);
     const start = toUrl(input);
     let url = start;
     let hopInit: HopInit = { ...init };
-    if (!opts.fetchImpl && !("dispatcher" in hopInit)) hopInit.dispatcher = publicOnlyAgent();
+    if (!opts.fetchImpl && !("dispatcher" in hopInit)) hopInit.dispatcher = opts.dispatcher ?? publicOnlyAgent();
     for (let hop = 0; ; hop++) {
       await assertPublicHttpUrl(url, resolve);
       const res = await doFetch(url.href, { ...hopInit, redirect: "manual" } as RequestInit);
