@@ -56,10 +56,11 @@ function memoryJobsRepo() {
       if (!matches(r, guard)) return;
       r.status = "failed"; r.last_error = error;
     },
-    async defer(id, retryAtIso, payload, guard) {
+    async defer(id, retryAtIso, payload, guard, note) {
       const r = rows.find((x) => x.id === id)!;
       if (!matches(r, guard)) return;
       r.status = "pending"; r.scheduled_for = retryAtIso; r.payload = payload;
+      if (note) r.last_error = note;
       r.attempts = guard.attempts - 1;
     },
     async batchJobs(batchId) {
@@ -293,6 +294,7 @@ describe("processJobs deferral", () => {
     expect(rows[0].status).toBe("pending");
     expect(rows[0].attempts).toBe(0);
     expect(rows[0].payload).toEqual({ actor: "u1", backup_requested_at: 123 });
+    expect(rows[0].last_error).toBe("waiting for the pre-update backup");
     expect(new Date(rows[0].scheduled_for).getTime()).toBeGreaterThan(Date.now() + 100_000);
   });
 });

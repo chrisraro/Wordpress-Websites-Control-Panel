@@ -186,7 +186,7 @@ async function settle(repo: JobsRepo, job: JobRow, outcome: Outcome): Promise<vo
       case "deferred": {
         const at = new Date(Date.now() + outcome.delayMs).toISOString();
         if (!repo.defer) return await repo.retry(job.id, outcome.msg, at, guard);
-        return await repo.defer(job.id, at, { ...job.payload, ...outcome.payloadPatch }, guard);
+        return await repo.defer(job.id, at, { ...job.payload, ...outcome.payloadPatch }, guard, outcome.msg);
       }
     }
   } catch (e) {

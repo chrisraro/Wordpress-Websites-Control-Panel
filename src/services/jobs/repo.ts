@@ -34,7 +34,11 @@ export interface JobsRepo {
    * waiting on something (see DeferJob), not failing. Optional only so test
    * doubles need not implement it; the Supabase repo always does.
    */
-  defer?(id: string, retryAtIso: string, payload: Record<string, unknown>, guard: JobTransitionGuard): Promise<void>;
+  defer?(
+    id: string, retryAtIso: string, payload: Record<string, unknown>, guard: JobTransitionGuard,
+    /** Why it is waiting; stored in last_error so the batch page can say so. */
+    note?: string,
+  ): Promise<void>;
   batchJobs(batchId: string): Promise<JobRow[]>;
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
@@ -148,10 +152,11 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
       const { error } = await guarded(q, guard);
       if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
     },
-    async defer(id, retryAtIso, payload, guard) {
+    async defer(id, retryAtIso, payload, guard, note) {
       const q = db.from("jobs")
         .update({
           status: "pending", scheduled_for: retryAtIso, payload,
+          ...(note ? { last_error: note } : {}),
           attempts: Math.max(0, guard.attempts - 1),
         })
         .eq("id", id);
