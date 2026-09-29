@@ -108,3 +108,22 @@ rate limit on a duplicate request it didn't need. If you need "reliability",
 add monitoring on `cron.job_run_details` in Supabase, or a health check that
 alerts when `wp-panel-enqueue` hasn't fired — not a second scheduler hitting
 the same endpoint.
+
+## Maintenance windows (per-site `scheduled_for`)
+
+Each site may carry a weekly maintenance window
+(`0027_site_maintenance_window.sql`: weekdays, local start time, duration,
+IANA zone, default `Asia/Manila`), edited in the Connection card on the site
+page by staff with `sites.manage` and a `manage` grant.
+
+The dashboard's "Update plugins on N sites" and "Harden N sites", and the
+bulk **Update** on a site's Plugins and Themes tabs, ask "Run now" or "In each
+site's maintenance window" when at least one target site has a window. The
+second choice sets each job's `scheduled_for` to that site's next window start
+(`nextWindowStart` in `src/services/maintenance/window.ts`); a site without a
+window, or whose window is open right now, runs now. No new scheduler is
+involved: the per-minute `/api/cron/process` drain already skips jobs whose
+`scheduled_for` is in the future (`claim_jobs`, `0022`). The batch page shows
+those jobs as pending until then; cancelling the batch calls them off.
+
+The MCP `update_all_plugins_fleet` tool still always runs now.

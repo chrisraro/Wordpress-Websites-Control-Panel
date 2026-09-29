@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "@/components/ui/styles";
 import { IconSpinner } from "@/components/ui/icons";
+import { TimingChoice } from "@/components/ui/timing-choice";
 
 export type ManageResult = {
   ok: boolean;
@@ -47,12 +48,18 @@ export interface ConfirmSpec {
  */
 export function ManageForm({
   action, label, pendingLabel, confirm, success, variant = "outline", size = "md",
-  icon, className, buttonClassName, showInlineError = true,
+  icon, className, buttonClassName, showInlineError = true, timingChoice,
 }: {
   action: ManageFormAction;
   label: string;
   pendingLabel?: string;
   confirm?: ConfirmSpec;
+  /**
+   * Offers "Run now" vs "In each site's maintenance window" inside the
+   * confirmation, posted as the `timing` form field. Only meaningful with
+   * `confirm`; omit it when no target site has a window.
+   */
+  timingChoice?: { windowLabel: string; windowHint: string };
   /** Toast title on success. Defaults to the button's own label. */
   success?: string;
   variant?: ButtonVariant;
@@ -120,7 +127,11 @@ export function ManageForm({
             setOpen(false);
             formRef.current?.requestSubmit();
           }}
-        />
+        >
+          {timingChoice && (
+            <TimingChoice windowLabel={timingChoice.windowLabel} windowHint={timingChoice.windowHint} />
+          )}
+        </ConfirmDialog>
       )}
     </form>
   );

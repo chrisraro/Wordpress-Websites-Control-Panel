@@ -9,12 +9,22 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
+import { planTiming, type Timing } from "@/services/maintenance/schedule";
 
+/**
+ * `opts.timing === "window"` holds the batch until this site's next
+ * maintenance window (0027); a site with no window, or whose window is open
+ * right now, runs now either way.
+ */
 export async function bulkAction(
   siteId: string, kind: BulkKind, target: BulkTarget, ids: string[],
-  _prevState?: { ok: boolean; error?: string } | null,
-  _formData?: FormData,
-): Promise<{ ok: boolean; batchId?: string; queued?: number; skipped?: number; error?: string }> {
+  opts: { timing?: Timing } = {},
+): Promise<{
+  ok: boolean; batchId?: string; queued?: number; skipped?: number; error?: string;
+  /** Set when the batch waits for the maintenance window. */
+  scheduledFor?: string;
+}> {
   const user = await requireUser();
   const gate = await checkPermission("wp_toolkit.manage");
   if (isDenied(gate)) return gate;
@@ -33,15 +43,25 @@ export async function bulkAction(
     const scope: BulkScope = target === "plugin"
       ? { target: "plugin", plugins: snapshot.payload.plugins }
       : { target: "theme", themes: snapshot.payload.themes };
+    // Anything but the literal "window" runs now (see parseTiming).
+    const timing: Timing = opts.timing === "window" ? "window" : "now";
+    const { scheduledFor } = await planTiming(
+      supabaseMaintenanceRepo(db), [siteId], timing, new Date(),
+    );
+    const at = scheduledFor.get(siteId);
     const { batchId, split } = await enqueueBulk(
       { jobs: supabaseJobsRepo(db), sites: supabaseSitesRepo(db) },
       siteId, user.id, kind, scope, ids,
+      at ? { scheduledFor: at } : {},
     );
     revalidatePath(`/sites/${siteId}/${target === "plugin" ? "plugins" : "themes"}`);
     if (!batchId) {
       return { ok: false, error: `Nothing eligible — ${split.excluded[0]?.reason ?? "all items skipped"}` };
     }
-    return { ok: true, batchId, queued: split.included.length, skipped: split.excluded.length };
+    return {
+      ok: true, batchId, queued: split.included.length, skipped: split.excluded.length,
+      ...(at ? { scheduledFor: at } : {}),
+    };
   } catch (e) {
     return { ok: false, error: friendlySiteError(e) || "Could not queue the bulk action" };
   }

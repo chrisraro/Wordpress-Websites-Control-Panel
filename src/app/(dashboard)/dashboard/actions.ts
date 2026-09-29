@@ -17,7 +17,19 @@ import { siteEnvironment } from "@/services/sites/portfolio";
 import type { SiteEnvironment } from "@/services/sites/types";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import type { JobType } from "@/services/jobs/types";
+import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
+import { parseTiming, planTiming, timingNote } from "@/services/maintenance/schedule";
 import type { ManageResult } from "../sites/[id]/action-form";
+
+/**
+ * enqueueBatch's trailing options, only when something is actually held for
+ * a window -- a "now" run calls enqueueBatch exactly as it always has.
+ */
+function scheduleArg(
+  scheduledFor: Map<string, string>,
+): [] | [{ scheduledFor: Map<string, string> }] {
+  return scheduledFor.size > 0 ? [{ scheduledFor }] : [];
+}
 
 /**
  * Enqueues a snapshot_refresh for every site the caller may see and manage —
@@ -143,11 +155,15 @@ export async function dismissGlobalFailedJobsAction(
  * WordPress installs is minutes of work; it cannot happen inside a request,
  * and pretending otherwise is how you get a half-updated fleet and a
  * timed-out browser tab.
+ *
+ * The form's `timing` field chooses "now" (default) or "window": each site's
+ * job is then held until its own maintenance window (0027); sites without a
+ * window run now.
  */
 export async function updateAllPluginsAction(
   env: SiteEnvironment,
   _prevState?: unknown,
-  _formData?: FormData,
+  formData?: FormData,
 ): Promise<ManageResult> {
   const user = await requireUser();
   const gate = await checkPermission("wp_toolkit.manage");
@@ -196,17 +212,21 @@ export async function updateAllPluginsAction(
     };
   }
 
+  const timing = parseTiming(formData);
+  const { scheduledFor, windowed } = await planTiming(
+    supabaseMaintenanceRepo(db), withUpdates, timing, new Date(),
+  );
   const { batchId, count } = await enqueueBatch(
-    jobs, "update_all_plugins", withUpdates, { actor: user.id },
+    jobs, "update_all_plugins", withUpdates, { actor: user.id }, ...scheduleArg(scheduledFor),
   );
   revalidatePath("/dashboard");
   const siteWord = (n: number) => `${n} site${n === 1 ? "" : "s"}`;
   return {
     ok: true,
     // "Queued", never "updated": nothing has run yet.
-    message: alreadyQueued > 0
+    message: (alreadyQueued > 0
       ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
-      : `Queued plugin updates for ${siteWord(count)}.`,
+      : `Queued plugin updates for ${siteWord(count)}.`) + timingNote(count, windowed, timing),
     href: `/marketplace/batches/${batchId}`,
   };
 }
@@ -224,7 +244,7 @@ export async function updateAllPluginsAction(
 export async function hardenFleetAction(
   env: SiteEnvironment,
   _prevState?: unknown,
-  _formData?: FormData,
+  formData?: FormData,
 ): Promise<ManageResult> {
   const user = await requireUser();
   const gate = await checkPermission("wp_toolkit.manage");
@@ -263,14 +283,21 @@ export async function hardenFleetAction(
     };
   }
 
-  const { batchId, count } = await enqueueBatch(jobs, "harden", targets, { actor: user.id });
+  // Same "now" / "window" choice as updateAllPluginsAction.
+  const timing = parseTiming(formData);
+  const { scheduledFor, windowed } = await planTiming(
+    supabaseMaintenanceRepo(db), targets, timing, new Date(),
+  );
+  const { batchId, count } = await enqueueBatch(
+    jobs, "harden", targets, { actor: user.id }, ...scheduleArg(scheduledFor),
+  );
   revalidatePath("/dashboard");
   const siteWord = (n: number) => `${n} site${n === 1 ? "" : "s"}`;
   return {
     ok: true,
-    message: alreadyQueued > 0
+    message: (alreadyQueued > 0
       ? `Queued hardening for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
-      : `Queued hardening for ${siteWord(count)}.`,
+      : `Queued hardening for ${siteWord(count)}.`) + timingNote(count, windowed, timing),
     href: `/marketplace/batches/${batchId}`,
   };
 }
