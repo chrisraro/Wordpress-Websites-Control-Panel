@@ -96,6 +96,14 @@ describe.each(Object.keys(PAYLOADS))("%s handler re-checks the actor", (type) =>
     expect(err).toBeInstanceOf(NonRetryableError);
     expect(acted()).toBe(0);
   });
+
+  it("retries, rather than fails, when the actor's access cannot be read", async () => {
+    const err = await run(async () => { throw new Error("could not read the queuing user's access"); })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(NonRetryableError);
+    expect(acted()).toBe(0);
+  });
 });
 
 describe("system jobs without an actor are unaffected", () => {

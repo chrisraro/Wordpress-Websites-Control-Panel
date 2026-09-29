@@ -7,7 +7,7 @@ import { supabaseAdminUsersRepo, supabaseSnapshotsRepo } from "@/services/invent
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
-import { securityScan, refreshVulnFeed } from "@/services/security/scan";
+import { securityScan, refreshVulnFeed, isFinalScanAttempt } from "@/services/security/scan";
 import { installPlugin, type InstallSource } from "@/services/marketplace/install";
 import { installTheme } from "@/services/themes/install";
 import { createSiteMcpClient } from "@/lib/mcp/client";
@@ -68,17 +68,31 @@ export function resolveInstallKind(target: PluginInstallPayload["target"]): {
   return { kind, bucket: kind === "theme" ? "themes" : "plugins" };
 }
 
-/** Loads a user's current authority; null when they have none (or it cannot be read). */
+/**
+ * Loads a user's current authority; null when they have none. Throws a
+ * plain (retryable) Error when it cannot tell -- a database blip must put
+ * the job back on the retry ladder, not fail it as if access were revoked.
+ */
 export type ActorLoader = (userId: string) => Promise<Viewer | null>;
 
 /**
- * Imported lazily: src/lib/authz/server.ts is `server-only` and pulls in
- * Next.js, which this module's other importers (and tests) should not need.
+ * loadViewer fails closed (null) on a read error as well as on "no role",
+ * which is right for a page but would turn a transient outage into a
+ * permanent job failure here. So probe the role row first on the same
+ * client and throw on an error; only then ask loadViewer. Imported lazily:
+ * src/lib/authz/server.ts is `server-only` and pulls in Next.js, which this
+ * module's other importers (and tests) should not need.
  */
-const defaultLoadActor: ActorLoader = async (userId) => {
-  const { loadViewer } = await import("@/lib/authz/server");
-  return loadViewer(userId, null);
-};
+function defaultActorLoader(db: SupabaseClient): ActorLoader {
+  return async (userId) => {
+    const probe = await db.from("user_roles").select("role").eq("user_id", userId).maybeSingle();
+    if (probe.error) {
+      throw new Error(`could not read the queuing user's access (${probe.error.message}); will retry`);
+    }
+    const { loadViewer } = await import("@/lib/authz/server");
+    return loadViewer(userId, null);
+  };
+}
 
 /**
  * What every enqueuing path for plugin_install, bulk_manage,
@@ -94,9 +108,9 @@ const ACT_PERMISSION: AppPermission = "wp_toolkit.manage";
  * A job can wait minutes (or, on the retry ladder, longer) between enqueue
  * and run; authority checked only at enqueue would let a revoked user's
  * queued work still act on a live site. Refusal is NonRetryableError: a
- * retry a minute later would be refused the same way. A viewer that cannot
- * be loaded (user gone, no role, or a read error -- loadViewer fails closed
- * on all three) is refused too.
+ * retry a minute later would be refused the same way. A user who is gone or
+ * has no role is refused too. A loader that throws (it could not read the
+ * user's access) propagates as an ordinary, retryable error.
  */
 export async function assertActorAuthorized(
   loadActor: ActorLoader, actor: string, siteId: string, jobType: string,
@@ -116,7 +130,7 @@ export interface JobHandlerOptions {
 }
 
 export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {}): JobHandlers {
-  const loadActor = opts.loadActor ?? defaultLoadActor;
+  const loadActor = opts.loadActor ?? defaultActorLoader(db);
   const sites = supabaseSitesRepo(db);
   const snapshots = supabaseSnapshotsRepo(db);
   const adminUsers = supabaseAdminUsersRepo(db);
@@ -131,7 +145,11 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
     },
     security_scan: async ({ job }) => {
       if (!job.site_id) throw new Error("security_scan requires site_id");
-      await securityScan({ sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id);
+      await securityScan(
+        { sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id,
+        // Only the ladder's last attempt counts toward 'degraded' (see isFinalScanAttempt).
+        { recordFailure: isFinalScanAttempt(job.attempts) },
+      );
     },
     vuln_feed_refresh: async () => {
       // Always refetches. The freshness guard that used to live behind
@@ -189,7 +207,7 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
     },
     report_generate: async ({ job }) => {
       if (!job.site_id) throw new Error("report_generate requires site_id");
-      const p = job.payload as { sections?: unknown; period_days?: unknown };
+      const p = job.payload as { sections?: unknown; period_days?: unknown; manual?: unknown };
       const sections = parseSections(p.sections);
       await generateReport(
         {
@@ -201,7 +219,9 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
         job.site_id,
         sections.length > 0 ? sections : REPORT_SECTIONS,
         Number(p.period_days) > 0 ? Number(p.period_days) : 30,
-        true,
+        // Monthly runs are auto (no share link until asked for); a report
+        // someone queued by hand (the MCP tool marks it manual) gets one.
+        p.manual !== true,
       );
     },
     bulk_manage: async ({ job }) => {
@@ -278,7 +298,11 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
       if (plan.length === 0) return;
       const out = await hardenSite({ sites, mcp: createSiteMcpClient }, job.site_id, p.actor, plan);
       // Rescan so the grade reflects the new state without waiting for 02:00.
-      await securityScan({ sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id);
+      await securityScan(
+        { sites, snapshots, adminUsers, security, mcp: createSiteMcpClient }, job.site_id,
+        // Only the ladder's last attempt counts toward 'degraded' (see isFinalScanAttempt).
+        { recordFailure: isFinalScanAttempt(job.attempts) },
+      );
       const failed = out.results.filter((r) => r.outcome === "failed");
       if (out.error || failed.length) {
         throw new Error(out.error ?? failed.map((f) => `${f.fix}: ${f.reason ?? "failed"}`).join("; "));
