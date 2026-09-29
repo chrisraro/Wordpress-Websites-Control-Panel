@@ -119,3 +119,73 @@ Baseline → now: 1,479 → 1,664 tests, `tsc` clean, production build green.
   that import modules dynamically; the check caught it.
 
 Routing: 2 haiku · 1 sonnet · 9 main · 0 escalated · Jev exec 5622, 5623
+
+---
+
+# Round 2 — open items and features (same day)
+
+Every "Still open" item and every "Features worth adding" item above was
+worked, test-first, in parallel streams (plan:
+`docs/superpowers/plans/2026-09-29-audit-followups.md`), then merged and put
+through a fresh cross-stream review whose HIGH finding is fixed.
+
+**State:** 2,197 unit tests + 26 Playwright checks green, `tsc` clean,
+`next build` green on **Next 16.3.6**, `npm audit` **0 vulnerabilities**.
+Migrations 0022–0028 applied twice each against Postgres 16 (re-runnable);
+0025 and 0028 behaviour exercised with real rows / real `authenticated`
+sessions.
+
+## Deploy checklist (round 2) — do these in order
+
+1. Apply migrations **0024 → 0028** (0022/0023 from round 1 first if not
+   yet applied). 0024 must be applied before the code deploys (reports
+   queries select its columns). 0025 schedules itself on pg_cron.
+2. Set env vars in Vercel:
+   - `N8N_ALERT_WEBHOOK_URL=https://n8n-ocs.onrender.com/webhook/wp-panel-alerts`
+   - `N8N_ALERT_SECRET` = the value in the n8n workflow **"OCS — WP Panel
+     Alerts"** → node *Verify Shared Secret* (not stored in this repo).
+3. Deploy. Existing report share links keep working with no expiry; new
+   manual ones expire after 30 days; monthly reports get a link on request.
+4. For pre-update backups, install and configure **UpdraftPlus** on each
+   site (with remote storage). Sites without it will refuse updates unless
+   the operator chooses "Update without a backup".
+
+## Open items — resolved
+
+| # | Item | Resolution |
+|---|---|---|
+| 1 | Next 16 | Upgraded to 16.3.6; last advisory cleared; CI audit gate raised to `high`. `middleware.ts` kept (deprecated name, still works). |
+| 2 | Partial security grade | Coverage tracked per scan; grade capped at C and marked "incomplete" in UI, dashboard, PDF and share page. |
+| 3 | Retries → "degraded" | Only the retry ladder's final attempt counts. |
+| 4 | Connect-time SSRF | `net-guard` checks every hop, at connect time (DNS-rebinding), and on redirects (`redirect: "manual"`). |
+| 5 | Destructive MCP confirm | Dry run issues a 10-minute HMAC `confirm_code` bound to user, tool, site and arguments; site strings stripped/capped in tool output. |
+| 6 | Retention | Nightly `prune_history()` with the approved windows; newest row per site always kept. |
+| 7 | Share links | 30-day expiry for manual reports; monthly reports unshared until asked; MCP link tool state-aware. |
+| 8 | Enqueue-time authority | Handlers re-check the actor when the job runs; unreadable access retries, revoked access fails. |
+| 9 | Matrix self-elevation | Admin-only in the app **and** RLS (0028), which also closes direct `user_roles`/overrides writes. |
+| 10 | Test gaps / CI | Route-handler and rootfiles tests; GitHub Actions: tests, tsc, build, Playwright, audit. |
+
+## Features — shipped
+
+- **Email alerts** via n8n (site down/recovered, SSL < 14 days, new critical
+  vulnerability, failed jobs), once per incident — `docs/ops/alerts.md`.
+- **Pre-update backups** through UpdraftPlus for queued and inline updates,
+  one backup shared per site, "Back up now" and last-backup status on the
+  site page — `docs/ops/backups.md`.
+- **Staging ↔ production pairing** with a drift card (0026).
+- **Maintenance windows** per site; bulk updates can wait for them (0027).
+- **Client home**: uptime %, SSL, last backup, maintenance this month, latest
+  report — no staff vocabulary, grant-scoped.
+- **Playwright E2E** smoke suite (desktop + phone) in CI.
+
+## Still worth doing
+
+- Rename `middleware.ts` → `proxy.ts` (Next 16 convention; needs your OK
+  since it removes the old file).
+- The MCP fleet tool cannot yet choose a maintenance window.
+- Playwright covers anonymous/machine boundaries only; signed-in flows need
+  a seeded Supabase test project.
+- Trim ECC's rules in the cloud setup script (move unused language rule
+  folders out of `~/.claude/rules/ecc` after install).
+
+Routing (round 2): 0 haiku · 1 sonnet · 8 main · 0 escalated · Jev exec 5639
