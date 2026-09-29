@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   allSettled, computeRetryDelayMs, enqueueJob, isOpenJobStatus, processJobs,
-  recoverStaleAwaiting, NonRetryableError,
+  recoverStaleAwaiting, NonRetryableError, DeferJob,
 } from "@/services/jobs/service";
 import type { JobsRepo, JobTransitionGuard } from "@/services/jobs/repo";
 import type { JobRow, JobType } from "@/services/jobs/types";
@@ -55,6 +55,12 @@ function memoryJobsRepo() {
       const r = rows.find((x) => x.id === id)!;
       if (!matches(r, guard)) return;
       r.status = "failed"; r.last_error = error;
+    },
+    async defer(id, retryAtIso, payload, guard) {
+      const r = rows.find((x) => x.id === id)!;
+      if (!matches(r, guard)) return;
+      r.status = "pending"; r.scheduled_for = retryAtIso; r.payload = payload;
+      r.attempts = guard.attempts - 1;
     },
     async batchJobs(batchId) {
       return rows.filter((r) => r.batch_id === batchId);
@@ -271,6 +277,23 @@ describe("processJobs bookkeeping and time budget", () => {
     });
     expect(res.done).toBe(1);
     expect(rows[0].status).toBe("running");
+  });
+});
+
+describe("processJobs deferral", () => {
+  it("defers a job without spending an attempt and keeps its payload changes", async () => {
+    const { repo, rows } = memoryJobsRepo();
+    await enqueueJob(repo, "update_all_plugins", "site-1", { actor: "u1" });
+    const res = await processJobs(repo, {
+      update_all_plugins: async () => {
+        throw new DeferJob(120_000, "waiting for the pre-update backup", { backup_requested_at: 123 });
+      },
+    });
+    expect(res).toMatchObject({ claimed: 1, deferred: 1, retried: 0, failed: 0 });
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].attempts).toBe(0);
+    expect(rows[0].payload).toEqual({ actor: "u1", backup_requested_at: 123 });
+    expect(new Date(rows[0].scheduled_for).getTime()).toBeGreaterThan(Date.now() + 100_000);
   });
 });
 

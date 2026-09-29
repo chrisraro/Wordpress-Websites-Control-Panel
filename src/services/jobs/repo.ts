@@ -28,6 +28,13 @@ export interface JobsRepo {
   markDone(id: string, guard?: JobTransitionGuard): Promise<void>;
   retry(id: string, error: string, retryAtIso: string, guard?: JobTransitionGuard): Promise<void>;
   markFailed(id: string, error: string, guard?: JobTransitionGuard): Promise<void>;
+  /**
+   * Back to pending at `retryAtIso` with `payload`, giving back the attempt
+   * the claim spent (attempts = guard.attempts - 1). For a handler that is
+   * waiting on something (see DeferJob), not failing. Optional only so test
+   * doubles need not implement it; the Supabase repo always does.
+   */
+  defer?(id: string, retryAtIso: string, payload: Record<string, unknown>, guard: JobTransitionGuard): Promise<void>;
   batchJobs(batchId: string): Promise<JobRow[]>;
   markAwaiting(id: string): Promise<void>;
   getJob(id: string): Promise<JobRow | null>;
@@ -140,6 +147,16 @@ export function supabaseJobsRepo(db: SupabaseClient): JobsRepo {
         .eq("id", id);
       const { error } = await guarded(q, guard);
       if (error) throw new Error(`jobs.markFailed failed: ${error.message}`, { cause: error });
+    },
+    async defer(id, retryAtIso, payload, guard) {
+      const q = db.from("jobs")
+        .update({
+          status: "pending", scheduled_for: retryAtIso, payload,
+          attempts: Math.max(0, guard.attempts - 1),
+        })
+        .eq("id", id);
+      const { error } = await guarded(q, guard);
+      if (error) throw new Error(`jobs.defer failed: ${error.message}`, { cause: error });
     },
     async cancelBatch(batchId) {
       const { data, error } = await db.from("jobs")

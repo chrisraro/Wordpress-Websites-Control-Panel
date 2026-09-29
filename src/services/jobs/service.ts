@@ -50,6 +50,24 @@ export class NonRetryableError extends Error {
   }
 }
 
+/**
+ * Thrown by a handler that cannot act yet but is not failing — e.g. an
+ * update waiting for the site's pre-update backup to finish. The job goes
+ * back to pending after `delayMs` WITHOUT spending an attempt, with
+ * `payloadPatch` merged into its payload so the next run knows where it got
+ * to. A handler bounds its own waiting (it knows its deadline); this only
+ * reschedules.
+ */
+export class DeferJob extends Error {
+  constructor(
+    readonly delayMs: number, reason: string,
+    readonly payloadPatch: Record<string, unknown> = {},
+  ) {
+    super(reason);
+    this.name = "DeferJob";
+  }
+}
+
 export function computeRetryDelayMs(attemptsAfterClaim: number): number | null {
   if (attemptsAfterClaim <= 1) return 60_000;
   if (attemptsAfterClaim === 2) return 300_000;
@@ -100,17 +118,24 @@ const DEFAULT_BUDGET_MS = 120_000;
 
 type Outcome =
   | { kind: "done" } | { kind: "awaiting" }
-  | { kind: "failed"; msg: string } | { kind: "retry"; msg: string; delayMs: number };
+  | { kind: "failed"; msg: string } | { kind: "retry"; msg: string; delayMs: number }
+  | { kind: "deferred"; msg: string; delayMs: number; payloadPatch: Record<string, unknown> };
+
+const OUTCOME_COUNTER = {
+  done: "done", awaiting: "awaiting", failed: "failed", retry: "retried", deferred: "deferred",
+} as const;
 
 export async function processJobs(
   repo: JobsRepo, handlers: JobHandlers,
   opts: { max?: number; budgetMs?: number; now?: () => number } = {},
-): Promise<{ claimed: number; done: number; failed: number; retried: number; awaiting: number }> {
+): Promise<{
+  claimed: number; done: number; failed: number; retried: number; awaiting: number; deferred: number;
+}> {
   const max = opts.max ?? 3;
   const now = opts.now ?? Date.now;
   const started = now();
   const budget = opts.budgetMs ?? DEFAULT_BUDGET_MS;
-  const result = { claimed: 0, done: 0, failed: 0, retried: 0, awaiting: 0 };
+  const result = { claimed: 0, done: 0, failed: 0, retried: 0, awaiting: 0, deferred: 0 };
 
   // One claim per job, so nothing is claimed that this invocation will not run.
   while (result.claimed < max && now() - started < budget) {
@@ -118,7 +143,7 @@ export async function processJobs(
     if (!job) break;
     result.claimed++;
     const outcome = await runHandler(handlers, job);
-    result[outcome.kind === "retry" ? "retried" : outcome.kind]++;
+    result[OUTCOME_COUNTER[outcome.kind]]++;
     await settle(repo, job, outcome);
   }
   return result;
@@ -132,6 +157,9 @@ async function runHandler(handlers: JobHandlers, job: JobRow): Promise<Outcome> 
     return out && typeof out === "object" && out.awaitingCallback ? { kind: "awaiting" } : { kind: "done" };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (e instanceof DeferJob) {
+      return { kind: "deferred", msg, delayMs: e.delayMs, payloadPatch: e.payloadPatch };
+    }
     if (e instanceof NonRetryableError) return { kind: "failed", msg };
     const delayMs = computeRetryDelayMs(job.attempts);
     return delayMs === null ? { kind: "failed", msg } : { kind: "retry", msg, delayMs };
@@ -155,6 +183,11 @@ async function settle(repo: JobsRepo, job: JobRow, outcome: Outcome): Promise<vo
       case "failed": return await repo.markFailed(job.id, outcome.msg, guard);
       case "retry":
         return await repo.retry(job.id, outcome.msg, new Date(Date.now() + outcome.delayMs).toISOString(), guard);
+      case "deferred": {
+        const at = new Date(Date.now() + outcome.delayMs).toISOString();
+        if (!repo.defer) return await repo.retry(job.id, outcome.msg, at, guard);
+        return await repo.defer(job.id, at, { ...job.payload, ...outcome.payloadPatch }, guard);
+      }
     }
   } catch (e) {
     console.error(`jobs: could not record ${outcome.kind} for job ${job.id} (${job.type})`, e);
