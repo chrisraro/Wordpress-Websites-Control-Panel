@@ -1,5 +1,6 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { Agent } from "undici";
 
 /**
  * Refuses hosts that point back into private address space.
@@ -10,9 +11,10 @@ import { isIP } from "node:net";
  * those requests at loopback, the VPC, or the cloud metadata endpoint
  * (169.254.169.254) and use the panel as an SSRF proxy.
  *
- * This is a check at the moment a site record is written. It does not stop
- * DNS rebinding (a name that resolves publicly now and privately later);
- * that needs enforcement at connect time.
+ * Enforced twice: when a site record is written (checkPublicHttpsUrl), and
+ * again at connect time (createGuardedFetch / publicOnlyLookup), because a
+ * name that resolved publicly when saved can resolve privately later (DNS
+ * rebinding), and a public site can redirect a probe into private space.
  */
 
 type Cidr4 = [number, number]; // [network as uint32, prefix length]
@@ -96,7 +98,7 @@ export function isPrivateAddress(ip: string): boolean {
 
 export type HostCheck = { ok: true } | { ok: false; error: string };
 
-type Resolver = (host: string) => Promise<{ address: string }[]>;
+export type Resolver = (host: string) => Promise<{ address: string }[]>;
 const defaultResolver: Resolver = (host) => dnsLookup(host, { all: true });
 
 /**
@@ -143,3 +145,147 @@ export async function checkPublicHttpsUrl(raw: string, resolve?: Resolver): Prom
   }
   return checkPublicHost(url.hostname, resolve);
 }
+
+// ---------------------------------------------------------------------------
+// Connect-time enforcement
+// ---------------------------------------------------------------------------
+
+/** Redirect hops followed by createGuardedFetch before giving up. */
+export const MAX_REDIRECTS = 5;
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Thrown when a request is refused because of where it would go. */
+export class BlockedAddressError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BlockedAddressError";
+  }
+}
+
+async function assertPublicHttpUrl(url: URL, resolve: Resolver): Promise<void> {
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new BlockedAddressError(`Refused a redirect to a non-web address (${url.protocol}).`);
+  }
+  const check = await checkPublicHost(url.hostname, resolve);
+  if (!check.ok) throw new BlockedAddressError(check.error);
+}
+
+export type LookupFn = (
+  hostname: string,
+  options: { all?: boolean } | undefined,
+  callback: (err: Error | null, ...rest: unknown[]) => void,
+) => void;
+
+/**
+ * A `lookup` for net/tls/undici connect options that resolves the name and
+ * refuses to hand back any private address. This is the check at the moment
+ * of connecting, so a record that flips between the pre-check and the socket
+ * (DNS rebinding) is still refused. Literal-IP hosts never reach a lookup;
+ * those are judged by the pre-check in createGuardedFetch.
+ */
+export function publicOnlyLookup(resolve: Resolver = defaultResolver): LookupFn {
+  return (hostname, options, callback) => {
+    resolve(hostname).then(
+      (addresses) => {
+        if (addresses.length === 0) {
+          callback(new BlockedAddressError(`Could not resolve “${hostname}”.`));
+          return;
+        }
+        if (addresses.some((a) => isPrivateAddress(a.address))) {
+          callback(new BlockedAddressError(
+            `“${hostname}” points at a private or local network address, which is not allowed.`,
+          ));
+          return;
+        }
+        const withFamily = addresses.map((a) => ({ address: a.address, family: isIP(a.address) || 4 }));
+        if (options?.all) callback(null, withFamily);
+        else callback(null, withFamily[0].address, withFamily[0].family);
+      },
+      (e: unknown) => callback(e instanceof Error ? e : new Error(String(e))),
+    );
+  };
+}
+
+let sharedAgent: Agent | undefined;
+/** Process-wide dispatcher whose every connection goes through publicOnlyLookup. */
+function publicOnlyAgent(): Agent {
+  sharedAgent ??= new Agent({ connect: { lookup: publicOnlyLookup() as never } });
+  return sharedAgent;
+}
+
+export interface GuardedFetchOptions {
+  /** Underlying fetch; defaults to the global one, looked up per call. */
+  fetchImpl?: typeof fetch;
+  resolve?: Resolver;
+  /** Redirect hops to follow; 0 returns a redirect response as-is. */
+  maxRedirects?: number;
+}
+
+function toUrl(input: RequestInfo | URL): URL {
+  if (input instanceof URL) return new URL(input.href);
+  if (typeof input === "string") return new URL(input);
+  return new URL(input.url);
+}
+
+type HopInit = RequestInit & { dispatcher?: unknown };
+
+/** The request to make for the next hop, per the fetch spec's redirect rules. */
+function nextHopInit(prev: HopInit, status: number, crossOrigin: boolean): HopInit {
+  let next = prev;
+  const method = (prev.method ?? "GET").toUpperCase();
+  if (status === 303 || ((status === 301 || status === 302) && method === "POST")) {
+    const { body: _dropped, ...rest } = prev;
+    next = { ...rest, method: "GET" };
+  }
+  if (crossOrigin && next.headers) {
+    const headers = new Headers(next.headers);
+    headers.delete("authorization");
+    next = { ...next, headers };
+  }
+  return next;
+}
+
+/**
+ * A fetch that refuses private destinations at connect time.
+ *
+ * Every hop is checked with checkPublicHost before it is requested; redirects
+ * are taken with `redirect: "manual"` and followed here (at most
+ * `maxRedirects`), each re-validated the same way. Semantics follow the fetch
+ * spec where it matters: 303 (and 301/302 after a POST) become a body-less
+ * GET, 307/308 keep method and body, and Authorization is dropped when a hop
+ * changes origin. With the real global fetch, connections also go through
+ * publicOnlyLookup, closing the gap between the pre-check and the socket.
+ */
+export function createGuardedFetch(opts: GuardedFetchOptions = {}): typeof fetch {
+  const resolve = opts.resolve ?? defaultResolver;
+  const maxRedirects = opts.maxRedirects ?? MAX_REDIRECTS;
+  return (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const doFetch = opts.fetchImpl ?? globalThis.fetch;
+    const start = toUrl(input);
+    let url = start;
+    let hopInit: HopInit = { ...init };
+    if (!opts.fetchImpl && !("dispatcher" in hopInit)) hopInit.dispatcher = publicOnlyAgent();
+    for (let hop = 0; ; hop++) {
+      await assertPublicHttpUrl(url, resolve);
+      const res = await doFetch(url.href, { ...hopInit, redirect: "manual" } as RequestInit);
+      const location = res.headers.get("location");
+      if (!REDIRECT_STATUSES.has(res.status) || !location || maxRedirects === 0) return res;
+      if (hop >= maxRedirects) {
+        throw new BlockedAddressError(`Too many redirects (more than ${maxRedirects}) from ${start.host}.`);
+      }
+      try { await res.body?.cancel(); } catch { /* best effort */ }
+      let next: URL;
+      try {
+        next = new URL(location, url);
+      } catch {
+        throw new BlockedAddressError("The site answered with a redirect that is not a valid address.");
+      }
+      hopInit = nextHopInit(hopInit, res.status, next.origin !== url.origin);
+      url = next;
+    }
+  }) as typeof fetch;
+}
+
+/** The default outbound fetch for probes that contact a site. */
+export const guardedFetch: typeof fetch = createGuardedFetch();

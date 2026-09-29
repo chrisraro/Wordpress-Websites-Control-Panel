@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Agent } from "undici";
-import { mapConnectError, McpConnectionError, McpToolError } from "./errors";
+import { checkPublicHost, createGuardedFetch } from "@/lib/net-guard";
+import { mapConnectError, McpConnectionError, McpError, McpToolError } from "./errors";
 
 export interface DiscoveredAbility { name: string; label?: string; description?: string }
 export interface DiscoveredAbilities { abilities: DiscoveredAbility[]; instructions?: string }
@@ -128,11 +129,36 @@ export const createSiteMcpClient: McpFactory = async (opts) => {
       "This site has a partial direct-origin configuration: set both the origin IP and the certificate name, or neither.",
     );
   }
+
+  // Connect-time SSRF guard. The site record was checked when it was saved,
+  // but a name can resolve differently now (DNS rebinding), and this
+  // connection carries the application password. With an origin override
+  // the socket goes to that IP whatever DNS says, so the IP is what is
+  // judged; otherwise the endpoint's host, resolved now.
+  let endpointUrl: URL;
+  try {
+    endpointUrl = new URL(opts.endpoint);
+  } catch {
+    throw new McpError("This site's MCP endpoint is not a valid URL. Reconnect the site.");
+  }
+  const target = hasIp ? opts.originIp! : endpointUrl.hostname;
+  const targetCheck = await checkPublicHost(target);
+  if (!targetCheck.ok) throw new McpError(targetCheck.error);
+
   const dispatcher =
     hasIp && hasSni ? originDispatcher(opts.originIp!, opts.originSni!) : undefined;
+  // Every request the transport makes -- redirect hops included -- is
+  // re-checked. Under an override every hostname connects to the pinned IP,
+  // so hops are judged against that IP rather than public DNS; literal-IP
+  // hops are judged directly either way. Without an override the guarded
+  // fetch also pins each socket through publicOnlyLookup.
+  const guardedTransportFetch = createGuardedFetch(
+    hasIp ? { resolve: async () => [{ address: opts.originIp! }] } : {},
+  );
 
   const connectOnce = async () => {
     const transport = new StreamableHTTPClientTransport(new URL(opts.endpoint), {
+      fetch: guardedTransportFetch,
       requestInit: {
         // `dispatcher` is Node's undici extension to RequestInit; it is
         // absent from the DOM RequestInit type, hence the cast.

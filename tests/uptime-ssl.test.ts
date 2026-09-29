@@ -39,6 +39,12 @@ describe("sslDaysRemaining", () => {
     expect(days).toBe(-4);
   });
 
+  it("connects through the public-only lookup (connect-time SSRF guard)", async () => {
+    validTo = new Date(Date.now() + 86_400_000).toUTCString();
+    await sslDaysRemaining("ok.test");
+    expect(typeof connectOpts[0].lookup).toBe("function");
+  });
+
   it("reports the remaining days for a valid certificate", async () => {
     validTo = new Date(Date.now() + 30 * 86_400_000 + 60_000).toUTCString();
     expect(await sslDaysRemaining("ok.test")).toBe(30);

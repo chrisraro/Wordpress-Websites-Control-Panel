@@ -1,4 +1,5 @@
 import { putRootFile, deleteRootFile, type RootFilesDeps } from "@/services/rootfiles/service";
+import { guardedFetch } from "@/lib/net-guard";
 import { expectedFileBody, validateVerificationFileName } from "./types";
 
 /**
@@ -45,7 +46,7 @@ export interface InstallResult {
  */
 export async function installVerificationFile(
   deps: GscDeps, siteId: string, fileName: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = guardedFetch,
 ): Promise<InstallResult> {
   const nameError = validateVerificationFileName(fileName);
   if (nameError) throw new Error(nameError);
@@ -65,7 +66,9 @@ export async function installVerificationFile(
   try {
     const res = await fetchImpl(publicUrl, {
       headers: { "User-Agent": "Google-Site-Verification/1.0" },
-      redirect: "follow",
+      // guardedFetch follows redirects itself, re-checking every hop
+      // against private address space.
+      redirect: "manual",
       signal: AbortSignal.timeout(20_000),
     });
     const text = await res.text();
