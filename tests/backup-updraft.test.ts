@@ -52,6 +52,22 @@ describe("decideBackup", () => {
     if (d.kind === "fail") expect(d.reason).toMatch(/did not finish/);
   });
 
+  it("waits for a backup that is already queued instead of requesting a second one", () => {
+    const status = { plugin: "updraftplus" as const, last_backup_time: sec(NOW - BACKUP_FRESH_MS - 60_000), success: true, pending: true };
+    expect(decideBackup({ policy: "required", status, now: NOW }).kind).toBe("wait");
+  });
+
+  it("does not proceed while a newer backup is still queued, even on a fresh older one", () => {
+    const status = { plugin: "updraftplus" as const, last_backup_time: sec(NOW - 60_000), success: true, pending: true };
+    expect(decideBackup({ policy: "required", status, now: NOW, requestedAt: NOW - 120_000 }).kind).toBe("wait");
+  });
+
+  it("keeps waiting while the requested backup runs (no longer queued, not yet recorded)", () => {
+    const requestedAt = NOW - 5 * 60_000;
+    const status = { plugin: "updraftplus" as const, last_backup_time: sec(NOW - 86_400_000), success: true, pending: false };
+    expect(decideBackup({ policy: "required", status, now: NOW, requestedAt }).kind).toBe("wait");
+  });
+
   it("fails when a requested backup finished with errors", () => {
     const requestedAt = NOW - 10 * 60_000;
     const status = { plugin: "updraftplus" as const, last_backup_time: sec(requestedAt + 60_000), success: false, pending: false };

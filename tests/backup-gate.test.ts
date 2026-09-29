@@ -70,7 +70,25 @@ describe("gateOnBackup (queued updates)", () => {
     const { mock, requested } = site({ plugin: "updraftplus", last: sec(NOW - 86_400_000), success: true, pending: true });
     const err = await gateOnBackup(deps(mock), "site-1", { backup_requested_at: NOW - 5 * 60_000 }, NOW).catch((e) => e);
     expect(err).toBeInstanceOf(DeferJob);
-    expect(err.payloadPatch).toEqual({});
+    expect(err.payloadPatch).toEqual({ backup_requested_at: NOW - 5 * 60_000 });
+    expect(requested).toHaveLength(0);
+  });
+
+  it("shares one backup across a bulk action's jobs: a sibling's request is adopted, not repeated", async () => {
+    const { mock, requested } = site({ plugin: "updraftplus", last: sec(NOW - BACKUP_FRESH_MS - 1000), success: true, pending: false });
+    const siblingAt = NOW - 90_000;
+    const d = { ...deps(mock), siteBackupRequestedAt: async () => siblingAt };
+    const err = await gateOnBackup(d, "site-1", {}, NOW).catch((e) => e);
+    expect(err).toBeInstanceOf(DeferJob);
+    expect(err.payloadPatch).toEqual({ backup_requested_at: siblingAt });
+    expect(requested).toHaveLength(0);
+  });
+
+  it("waits for an already-queued backup without asking again, and starts its own timeout", async () => {
+    const { mock, requested } = site({ plugin: "updraftplus", last: sec(NOW - BACKUP_FRESH_MS - 1000), success: true, pending: true });
+    const err = await gateOnBackup(deps(mock), "site-1", {}, NOW).catch((e) => e);
+    expect(err).toBeInstanceOf(DeferJob);
+    expect(err.payloadPatch).toEqual({ backup_requested_at: NOW });
     expect(requested).toHaveLength(0);
   });
 

@@ -10,6 +10,13 @@ import {
 export interface BackupGateDeps {
   sites: Pick<SitesRepo, "getSiteCredentials">;
   mcp: McpFactory;
+  /**
+   * The newest backup_requested_at among this site's other live update jobs
+   * (within the timeout), so the jobs of one bulk action share one backup
+   * instead of each asking for its own. Optional: without it each job
+   * tracks its own request.
+   */
+  siteBackupRequestedAt?: (siteId: string) => Promise<number | null>;
 }
 
 /** What an update job carries about its pre-update backup. */
@@ -26,7 +33,7 @@ export function backupPolicyOf(payload: BackupJobFields): BackupPolicy {
 
 async function liveDecision(
   deps: BackupGateDeps, siteId: string, policy: BackupPolicy, now: number, requestedAt?: number,
-): Promise<{ decision: BackupDecision; request: () => Promise<void> }> {
+): Promise<{ decision: BackupDecision; request: () => Promise<boolean> }> {
   const creds = await deps.sites.getSiteCredentials(siteId);
   if (!creds) throw new NonRetryableError("Site not found");
   const client = await connectToSite(deps.mcp, creds);
@@ -37,7 +44,7 @@ async function liveDecision(
       decision,
       request: async () => {
         const c = await connectToSite(deps.mcp, creds);
-        try { await requestBackup(c); } finally { await c.close(); }
+        try { return await requestBackup(c); } finally { await c.close(); }
       },
     };
   } finally {
@@ -57,16 +64,25 @@ export async function gateOnBackup(
 ): Promise<void> {
   const policy = backupPolicyOf(payload);
   if (policy === "skip") return;
-  const requestedAt = typeof payload.backup_requested_at === "number" ? payload.backup_requested_at : undefined;
+  const own = typeof payload.backup_requested_at === "number" ? payload.backup_requested_at : undefined;
+  const sibling = own === undefined && deps.siteBackupRequestedAt
+    ? (await deps.siteBackupRequestedAt(siteId)) ?? undefined
+    : undefined;
+  const requestedAt = own ?? sibling;
   const { decision, request } = await liveDecision(deps, siteId, policy, now, requestedAt);
   switch (decision.kind) {
     case "proceed":
       return;
     case "request":
+      // false = WP-Cron already holds an identical event: that is the backup
+      // to wait for, so wait either way.
       await request();
       throw new DeferJob(BACKUP_POLL_MS, "Waiting for the pre-update backup to finish", { backup_requested_at: now });
     case "wait":
-      throw new DeferJob(BACKUP_POLL_MS, "Waiting for the pre-update backup to finish");
+      // Always record a marker, so the 60-minute timeout bounds a job that
+      // adopted a sibling's (or UpdraftPlus's own) backup too.
+      throw new DeferJob(BACKUP_POLL_MS, "Waiting for the pre-update backup to finish",
+        { backup_requested_at: requestedAt ?? now });
     case "fail":
       throw new NonRetryableError(decision.reason);
   }
@@ -92,5 +108,5 @@ export async function backupReadyForInlineUpdate(
 /** Starts a backup on the site now (the "Back up now" button). */
 export async function startBackup(deps: BackupGateDeps, siteId: string): Promise<void> {
   const { request } = await liveDecision(deps, siteId, "required", Date.now());
-  await request();
+  await request(); // false = one is already queued, which is what was asked for
 }

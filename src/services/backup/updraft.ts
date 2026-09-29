@@ -48,21 +48,25 @@ export function decideBackup(input: {
     };
   }
   const lastMs = status.last_backup_time === null ? null : status.last_backup_time * 1000;
+  const fresh = lastMs !== null && status.success === true && now - lastMs <= BACKUP_FRESH_MS;
+  const overdue = requestedAt !== undefined && now - requestedAt > BACKUP_TIMEOUT_MS;
+  const OVERDUE = { kind: "fail", reason: "The pre-update backup did not finish within 60 minutes; the update was not run." } as const;
 
-  if (requestedAt === undefined) {
-    const fresh = lastMs !== null && status.success === true && now - lastMs <= BACKUP_FRESH_MS;
-    return fresh ? { kind: "proceed" } : { kind: "request" };
-  }
+  // A backup queued on WP-Cron is ours or a sibling job's: wait for it,
+  // never queue a second one (several update jobs for one site arrive
+  // together from a bulk action).
+  if (status.pending) return overdue ? OVERDUE : { kind: "wait" };
+  if (fresh) return { kind: "proceed" };
+  if (requestedAt === undefined) return { kind: "request" };
 
-  if (lastMs !== null && lastMs >= requestedAt - 60_000) {
-    return status.success === true
-      ? { kind: "proceed" }
-      : { kind: "fail", reason: "The pre-update backup finished with errors; the update was not run. Check UpdraftPlus on the site." };
+  // UpdraftPlus records its start time; a finished run from around the
+  // request (or later) that failed is this update's backup failing.
+  if (lastMs !== null && lastMs >= requestedAt - 5 * 60_000 && status.success === false) {
+    return { kind: "fail", reason: "The pre-update backup finished with errors; the update was not run. Check UpdraftPlus on the site." };
   }
-  if (now - requestedAt > BACKUP_TIMEOUT_MS) {
-    return { kind: "fail", reason: "The pre-update backup did not finish within 60 minutes; the update was not run." };
-  }
-  return { kind: "wait" };
+  // Requested and no longer queued: it is running (or WP-Cron has not
+  // spawned it yet). Wait, up to the timeout.
+  return overdue ? OVERDUE : { kind: "wait" };
 }
 
 export const BACKUP_STATUS_PHP = `
@@ -96,7 +100,14 @@ export async function readBackupStatus(client: SiteMcpClient): Promise<LiveBacku
   return runPhp<LiveBackupStatus>(client, BACKUP_STATUS_PHP, 30_000);
 }
 
-export async function requestBackup(client: SiteMcpClient): Promise<void> {
+/**
+ * Queues a backup. `false` means WP-Cron refused the event -- in practice
+ * because an identical one is already queued, which is the backup this
+ * update would have waited for anyway -- so the caller waits either way.
+ * Throws only when UpdraftPlus is not active.
+ */
+export async function requestBackup(client: SiteMcpClient): Promise<boolean> {
   const res = await runPhp<{ ok: boolean; error?: string }>(client, REQUEST_BACKUP_PHP, 30_000);
-  if (!res.ok) throw new Error(`Could not start the pre-update backup: ${res.error ?? "WP-Cron refused the event"}`);
+  if (res.error) throw new Error(`Could not start the pre-update backup: ${res.error}`);
+  return res.ok;
 }

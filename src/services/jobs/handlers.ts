@@ -25,7 +25,8 @@ import { manageSite } from "@/services/manage/service";
 import { toManageAction } from "@/services/bulk/service";
 import type { BulkJobPayload } from "@/services/bulk/types";
 import { hardenSite, hardeningPlan } from "@/services/security/harden";
-import { gateOnBackup, type BackupJobFields } from "@/services/backup/gate";
+import { backupPolicyOf, gateOnBackup, type BackupJobFields } from "@/services/backup/gate";
+import { BACKUP_TIMEOUT_MS } from "@/services/backup/updraft";
 
 interface PluginInstallPayload {
   source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
@@ -86,9 +87,15 @@ export type ActorLoader = (userId: string) => Promise<Viewer | null>;
  */
 function defaultActorLoader(db: SupabaseClient): ActorLoader {
   return async (userId) => {
-    const probe = await db.from("user_roles").select("role").eq("user_id", userId).maybeSingle();
-    if (probe.error) {
-      throw new Error(`could not read the queuing user's access (${probe.error.message}); will retry`);
+    // Same three reads loadViewer makes; any error means "cannot tell".
+    const probes = await Promise.all([
+      db.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
+      db.from("user_permission_overrides").select("permission").eq("user_id", userId).limit(1),
+      db.from("user_site_access").select("site_id").eq("user_id", userId).limit(1),
+    ]);
+    const failed = probes.find((p) => p.error);
+    if (failed?.error) {
+      throw new Error(`could not read the queuing user's access (${failed.error.message}); will retry`);
     }
     const { loadViewer } = await import("@/lib/authz/server");
     return loadViewer(userId, null);
@@ -125,6 +132,22 @@ export async function assertActorAuthorized(
   }
 }
 
+/**
+ * Newest backup_requested_at among the site's live update jobs within the
+ * backup timeout, so every job of one bulk action waits on the same backup.
+ */
+async function latestSiteBackupRequest(db: SupabaseClient, siteId: string): Promise<number | null> {
+  const { data, error } = await db.from("jobs").select("payload")
+    .eq("site_id", siteId).in("status", ["pending", "running"]).is("cancelled_at", null)
+    .not("payload->backup_requested_at", "is", null);
+  if (error) throw new Error(`could not read sibling backup requests (${error.message}); will retry`);
+  const cutoff = Date.now() - BACKUP_TIMEOUT_MS;
+  const times = (data ?? [])
+    .map((r) => Number((r.payload as { backup_requested_at?: unknown }).backup_requested_at))
+    .filter((t) => Number.isFinite(t) && t >= cutoff);
+  return times.length ? Math.max(...times) : null;
+}
+
 export interface JobHandlerOptions {
   /** How the queued actor's current authority is read; injectable for tests. */
   loadActor?: ActorLoader;
@@ -138,6 +161,10 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
   const security = supabaseSecurityRepo(db);
   const jobs = supabaseJobsRepo(db);
   const seo = supabaseSeoRepo(db);
+  const backupGate = {
+    sites, mcp: createSiteMcpClient,
+    siteBackupRequestedAt: (siteId: string) => latestSiteBackupRequest(db, siteId),
+  };
 
   return {
     snapshot_refresh: async ({ job }) => {
@@ -236,7 +263,7 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
       // Updates wait for a pre-update backup (or the operator's explicit
       // "without a backup"); activate/deactivate/delete do not.
       if (p.kind === "update") {
-        await gateOnBackup({ sites, mcp: createSiteMcpClient }, job.site_id, job.payload as BackupJobFields);
+        await gateOnBackup(backupGate, job.site_id, job.payload as BackupJobFields);
       }
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, action,
@@ -283,7 +310,14 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
         throw new Error("update_all_plugins payload malformed");
       }
       await assertActorAuthorized(loadActor, p.actor, job.site_id, "update_all_plugins");
-      await gateOnBackup({ sites, mcp: createSiteMcpClient }, job.site_id, job.payload as BackupJobFields);
+      // No update pending per the latest inventory: nothing will change, so
+      // do not ask the site for a backup first. manageSite still checks live.
+      const fields = job.payload as BackupJobFields;
+      if (backupPolicyOf(fields) === "required") {
+        const latest = await snapshots.latestSnapshot(job.site_id);
+        const nothingToUpdate = latest !== null && latest.payload.plugins.every((pl) => pl.update !== "available");
+        if (!nothingToUpdate) await gateOnBackup(backupGate, job.site_id, fields);
+      }
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor,
         { kind: "update_all_plugins" },
