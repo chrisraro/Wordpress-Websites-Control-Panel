@@ -12,7 +12,7 @@ import { IconSpinner } from "@/components/ui/icons";
 
 interface BatchJob {
   id: string; site_id: string | null; site_name: string; label: string;
-  status: string; attempts: number; last_error: string | null; cancelled_at?: string | null;
+  status: string; attempts?: number; last_error: string | null; cancelled_at?: string | null;
   type: string; kind?: string; target?: string; activate?: boolean;
 }
 
@@ -351,7 +351,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
                       </StatusBadge>
                     )}
                   </td>
-                  <td className={`${tableCellClass} text-mid-gray`}>{j.attempts}</td>
+                  <td className={`${tableCellClass} text-mid-gray`}>{j.attempts ?? "—"}</td>
                   {/* Wraps rather than truncating. The reason a job failed
                       was previously readable only by hovering for a `title`
                       tooltip -- not focusable, not announced, and unreachable

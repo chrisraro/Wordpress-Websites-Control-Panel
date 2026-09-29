@@ -29,6 +29,9 @@ export async function runSeoScanAction(
       actor: user.id, site_id: siteId, action: "site.seo_scan", detail: { manual: true },
     });
   } catch (e) {
+    // seoScan stores each source's snapshot before it throws for "no source
+    // succeeded", so the page has new reasons to show even on failure.
+    revalidatePath(`/sites/${siteId}/seo`);
     return { ok: false, error: friendlySiteError(e) || "SEO scan failed" };
   }
   revalidatePath(`/sites/${siteId}/seo`);

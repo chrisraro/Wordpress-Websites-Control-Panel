@@ -277,6 +277,29 @@ describe("inviteUserAction — invite rules", () => {
     expect(deleteUser).toHaveBeenCalledWith("new-user-id");
   });
 
+  it("tells a non-admin inviter why an admin invite was refused, and keeps nothing", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    const inviteUser = vi.fn(async () => ({ id: "new-user-id", inviteLink: null }));
+    const deleteUser = vi.fn(async () => {});
+    currentRepo = fakeRepo({
+      inviteUser,
+      listUsers: async () => [managedUser("new-user-id", null), managedUser("actor-1", "developer")],
+      getUser: async (id: string) => (id === "actor-1" ? managedUser("actor-1", "developer") : null),
+      deleteUser,
+    });
+
+    const result = await inviteUserAction(
+      undefined,
+      formData({ email: "new@example.com", role: "admin" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Could not create the account: Only an administrator can assign the admin role. Nothing was kept.",
+    });
+    expect(deleteUser).toHaveBeenCalledWith("new-user-id");
+  });
+
   it("rolls back a failed invite even when the guarded delete would refuse", async () => {
     // Reproduces the trace from the Phase 9b review: changeUserRole commits
     // the new account's role to "admin" (its role was still null when the

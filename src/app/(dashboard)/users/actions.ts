@@ -92,12 +92,15 @@ export async function inviteUserAction(
   // no explanation. Role and grants go through the guarded service
   // functions, exactly like every other mutation in this module — an
   // invite is not a special case that gets to skip the lockout guards.
+  // A guard refusal (e.g. only an administrator may assign admin) is our own
+  // message and safe to show; it is kept so the actor learns why.
+  let refusal: string | null = null;
   try {
     const roleResult = await changeUserRole(users, user.id, invited.id, role);
-    if (!roleResult.ok) throw new Error(roleResult.error);
+    if (!roleResult.ok) { refusal = roleResult.error ?? null; throw new Error(roleResult.error); }
     for (const siteId of siteIds) {
       const grantResult = await grantSiteAccess(users, invited.id, siteId, "read", user.id);
-      if (!grantResult.ok) throw new Error(grantResult.error);
+      if (!grantResult.ok) { refusal = grantResult.error ?? null; throw new Error(grantResult.error); }
     }
   } catch (failure) {
     // Undo the just-created account. This must use rollbackFailedInvite, not
@@ -123,7 +126,12 @@ export async function inviteUserAction(
           `user list manually. (Setup error: ${failureReason}. Cleanup error: ${rollbackReason})`,
       };
     }
-    return { ok: false, error: "Could not finish creating the account — nothing was kept." };
+    return {
+      ok: false,
+      error: refusal
+        ? `Could not create the account: ${refusal} Nothing was kept.`
+        : "Could not finish creating the account — nothing was kept.",
+    };
   }
 
   revalidatePath("/users");
