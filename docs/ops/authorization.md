@@ -17,6 +17,7 @@ permissions, RLS) and `docs/superpowers/specs/2026-08-29-phase9b-user-management
 | `0012_revoke_site_credential_columns.sql` | Applied | Revokes `mcp_endpoint`/`wp_username`/`app_password_encrypted` from `authenticated`. Apply **after** deploying this branch. |
 | `0013_snapshot_no_admin_users.sql` | Applied | Permanent check-constraint backstop for `0011`. Apply **after** deploying this branch. |
 | `0014_require_one_admin.sql` | Applied | Row-level `AFTER UPDATE OR DELETE` trigger backstop against the last-admin race two concurrent demotions can cause (see its header). No ordering dependency on `0010`–`0013` or this branch's deploy — safe to apply any time. |
+| `0028_rbac_write_guards.sql` | **Pending** | Admin-only writes to `role_permissions` and `user_permission_overrides`; no self role change and admin-only `admin` rows in `user_roles`, at the RLS layer. Safe to apply any time. |
 
 **`0006`–`0014` are all applied to the live database, and the code that
 depends on them is deployed.** The runbook below was followed in order:
@@ -353,16 +354,15 @@ admins, or change what any role may do. It is still a powerful permission --
 site grants and invitations are authorization facts -- so give it only to
 people you would trust with those.
 
-**Open gap -- needs a migration.** The app enforces this; the database does
-not yet. `0008_rls_scoped.sql`'s `role_permissions_manage` policy still
-allows any authenticated session holding `users.manage` to write
-`role_permissions` directly over PostgREST (with the public anon key and
-their own JWT), bypassing the server action. Until a new migration narrows
-that policy to admins (e.g. `using`/`with check` on
-`exists (select 1 from user_roles where user_id = auth.uid() and role = 'admin')`),
-the admin-only rule holds for the UI and server actions only. The app itself
-never writes this table from a user session, so the narrower policy breaks
-nothing.
+**The database agrees (migration `0028`).** `0028_rbac_write_guards.sql`
+narrows the `0008` write policies so a session holding `users.manage` cannot
+go around the server actions over PostgREST: `role_permissions` and
+`user_permission_overrides` are writable by admins only (no app path writes
+overrides at all), and `user_roles` rows are writable by `users.manage` except
+the caller's own row, and a row naming `admin` only by an admin. The app
+writes these tables through the service role, which bypasses RLS, so nothing
+in the app changes. Verified against Postgres 16 with real `authenticated`
+sessions.
 
 ## Queued jobs re-check the actor when they run
 
