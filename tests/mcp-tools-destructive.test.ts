@@ -399,6 +399,33 @@ describe("update_all_plugins_fleet", () => {
     expect(ctx.audited).toEqual([]);
     await close();
   });
+
+  it("still reports the enqueued batch when the audit write throws afterwards", async () => {
+    // The batch is already queued by the time audit runs: reporting failure
+    // (and writing a second ok:false audit) invites a duplicate retry.
+    const ctx = ctxFor();
+    let auditCalls = 0;
+    (ctx as unknown as { audit: () => Promise<never> }).audit = async () => {
+      auditCalls++;
+      throw new Error("audit insert failed");
+    };
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { client, close } = await connectAll(ctx);
+    try {
+      const res = await client.callTool({
+        name: "update_all_plugins_fleet",
+        arguments: { environment: "staging", confirm: true, reason: REASON },
+      });
+      expect(isError(res)).toBe(false);
+      expect(JSON.parse(textOf(res)).batch_id).toBe("b1");
+      expect(ctx.serviceCalls).toEqual(["enqueueBatch"]);
+      expect(auditCalls).toBe(1);
+      expect(errSpy).toHaveBeenCalled();
+    } finally {
+      errSpy.mockRestore();
+      await close();
+    }
+  });
 });
 
 describe("cancel_batch", () => {
