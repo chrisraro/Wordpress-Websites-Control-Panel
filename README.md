@@ -42,7 +42,7 @@ a second, Vercel-side cron on the same endpoint is a bug, not a backstop.
 - Weekly per site: `seo_scan` (Rank Math audit, page scores, links, Search Console
   keywords, AI Visibility) plus PageSpeed Insights for mobile and desktop. Set
   `GOOGLE_PSI_API_KEY` (optional) to raise PageSpeed rate limits.
-- Monthly (1st): `report_generate` per site — a full PDF report, stored with a share link.
+- Monthly (1st): `report_generate` per site — a full PDF report, stored without a share link (create one on demand from the Reports tab).
 - Manual: every "Refresh inventory" button runs the same code path inline.
 
 ## Marketplace
@@ -86,14 +86,27 @@ The Reports tab builds a branded PDF from data already collected by scans —
 security grade and vulnerabilities, SEO/AEO scores and issues, GeoGrid rankings,
 and site inventory. Generating a report never contacts the website.
 
-Each report gets a revocable share link (`/r/<token>`) you can send to a client:
-the page shows what the report covers and serves the PDF through a token-checked
-route, so the storage bucket itself stays private. Revoking a link makes both the
-page and the file 404 immediately.
+A report generated from the Reports tab gets a revocable share link
+(`/r/<token>`) you can send to a client: the page shows what the report covers
+and serves the PDF through a token-checked route, so the storage bucket itself
+stays private. **Links expire after 30 days.** Revoking a link, or its expiry
+passing, makes both the page and the file 404 immediately — the same response
+as an unknown token.
 
 On the 1st of each month the nightly enqueue queues one report per site
-automatically (marked "Monthly" in the table). Requires migration
-`0004_storage_reports.sql` for the private `reports` bucket.
+automatically (marked "Monthly" in the table). Monthly reports are filed
+**without** a share link; use "Create share link" on the row when you want to
+send one. The same button re-shares an expired or revoked report with a new
+link (an old link never comes back).
+
+**Links created before migration 0024 have no expiry and keep working.** They
+were deliberately left valid rather than cut off without warning; the Reports
+tab shows them as "No expiry". Revoke any that should stop working.
+
+Requires migrations `0004_storage_reports.sql` (the private `reports` bucket)
+and `0024_report_share_expiry_and_coverage.sql` (apply 0024 **before**
+deploying the code that reads `share_expires_at`, or the Reports tab and
+`/r/<token>` fail).
 
 ## Authorization and user management
 

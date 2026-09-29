@@ -1,13 +1,13 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { gatherReportData, type GatherDeps } from "./gather";
 import { ReportDocument } from "./document";
+import { newShareToken, shareLinkExpiry } from "./share";
 import type { ReportsRepo, ReportRow, ReportStorage } from "./repo";
 import type { ReportData, ReportSection } from "./types";
 
-export function newShareToken(): string {
-  return randomBytes(16).toString("hex");
-}
+// Re-exported: lives in ./share so the link flow does not pull in the PDF renderer.
+export { newShareToken };
 
 export interface GenerateDeps extends GatherDeps {
   reports: ReportsRepo;
@@ -40,7 +40,11 @@ export async function generateReport(
     period_start: data.meta.periodStart,
     period_end: data.meta.periodEnd,
     storage_path: path,
-    share_token: newShareToken(),
+    // A monthly auto report is filed, not sent: it gets no public link until
+    // someone chooses to share it (Reports tab, "Create share link"). A
+    // manual one is generated to be sent, so it gets a link that expires.
+    share_token: auto ? null : newShareToken(),
+    share_expires_at: auto ? null : shareLinkExpiry(),
     auto,
     // Kept on the row for /r/<token>, which cannot re-derive it: the site's
     // grade may have changed since this PDF was rendered.

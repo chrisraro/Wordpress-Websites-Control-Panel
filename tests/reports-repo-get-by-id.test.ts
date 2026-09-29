@@ -50,7 +50,7 @@ describe("supabaseReportsRepo.getById", () => {
       expect.arrayContaining([
         {
           method: "select",
-          args: ["id,site_id,generated_at,sections,period_start,period_end,storage_path,share_token,auto,security_incomplete"],
+          args: ["id,site_id,generated_at,sections,period_start,period_end,storage_path,share_token,share_expires_at,auto,security_incomplete"],
         },
         { method: "eq", args: ["id", ROW.id] },
       ]),

@@ -98,6 +98,8 @@ export default async function SharedReportPage({
 
       <p className="mt-12 border-t border-hairline pt-4 text-caption tracking-normal text-mid-gray">
         This link was shared with you by OCS and can be revoked at any time.
+        {report.share_expires_at &&
+          ` It stops working on ${new Date(report.share_expires_at).toLocaleDateString()}.`}
       </p>
     </main>
   );

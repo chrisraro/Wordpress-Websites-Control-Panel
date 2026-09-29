@@ -9,6 +9,15 @@
 -- when it names an unknown column, so the Reports tab and /r/<token> would
 -- 404 until it is applied.
 
+-- When the report's share link stops working. The app sets it to 30 days
+-- after a manual report is generated or a link is (re)created, and
+-- getByToken treats a past expiry exactly like a revoked link (uniform 404).
+-- Null = no expiry: links minted before this migration are deliberately left
+-- valid, so no existing row is updated here. Revoke one from the Reports tab
+-- if it should stop working.
+alter table reports
+  add column if not exists share_expires_at timestamptz;
+
 -- What the report's security section could not check, copied from the grade
 -- row (security_checks.details.incomplete) at generation time. The share page
 -- reads it from here because the site's grade may have changed since.

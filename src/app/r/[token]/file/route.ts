@@ -12,7 +12,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
 
   const db = createServiceSupabase();
   const report = await supabaseReportsRepo(db).getByToken(token);
-  // A revoked report has share_token = null, so getByToken cannot return it.
+  // A revoked report has share_token = null, and getByToken returns null for
+  // an expired link too, so both land on the same 404 as an unknown token.
   if (!report) return new Response("Not found", { status: 404 });
 
   let pdf: Uint8Array;
