@@ -118,8 +118,8 @@ describe("the site overview page never unconditionally renders credentials-adjac
     expect(occurrences).toBe(4);
     expect(source).toContain('connection ? [{ term: "WP user", value: connection.wp_username');
     expect(source).toContain("{connection && (");
-    expect(source).toContain('canTestConnection && connection && site.status === "reconnect_needed"');
-    expect(source).toContain('canTestConnection && connection && site.status !== "reconnect_needed"');
+    expect(source).toContain('canManageConnection && connection && site.status === "reconnect_needed"');
+    expect(source).toContain('canManageConnection && connection && site.status !== "reconnect_needed"');
     // And no optional-chained variant anywhere, which is how the audit stays
     // honest rather than merely passing.
     expect(source).not.toContain("connection?.wp_username");

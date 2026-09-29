@@ -38,6 +38,12 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   if (!site) notFound();
 
   const canTestConnection = can(viewer, "sites.manage");
+  // reconnectSiteAction and setOriginAction (manage-actions.ts) check
+  // sites.manage *and* a "manage" grant on this site. runConnectionTest only
+  // needs the permission plus site visibility, so canTestConnection is not
+  // enough for the credential/origin forms: a viewer with sites.manage but a
+  // view-only grant here would get a form the action then refuses.
+  const canManageConnection = canTestConnection && canAccessSite(viewer, id, "manage");
   // refreshInventoryAction (manage-actions.ts) checks both wp_toolkit.manage
   // and a "manage" site grant -- a `manage` grant alone (the level a
   // client's own dashboard offers) is not enough. canRefresh has to mirror
@@ -184,7 +190,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
           acted on while the credential is rejected, so offering an update or
           a maintenance toggle above it would be offering something that
           cannot work. */}
-      {canTestConnection && connection && site.status === "reconnect_needed" && (
+      {canManageConnection && connection && site.status === "reconnect_needed" && (
         <ReconnectCard
           siteId={id}
           siteName={site.name}
@@ -326,7 +332,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               from a banner. The banner form of this same component is at the
               top of the page, and only when the credential has actually
               failed. */}
-          {canTestConnection && connection && site.status !== "reconnect_needed" && (
+          {canManageConnection && connection && site.status !== "reconnect_needed" && (
             <ReconnectCard
               siteId={id}
               siteName={site.name}
@@ -342,7 +348,7 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               record, and only when the credential-adjacent connection block
               is visible -- these two values describe a route past the CDN
               and belong with mcp_endpoint, not on a page a client can see. */}
-          {canTestConnection && connection && (
+          {canManageConnection && connection && (
             <OriginOverrideForm
               siteId={id}
               siteName={site.name}
