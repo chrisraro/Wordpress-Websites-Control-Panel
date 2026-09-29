@@ -132,10 +132,18 @@ export function BatchPoller({ batchId }: { batchId: string }) {
     startTransition(async () => {
       const res = await processQueueNowAction();
       if (!res.ok) {
+        // processQueueNowAction reports ok:false both when the run itself
+        // broke and when it ran but some jobs failed; only the first is an
+        // outage. Failed jobs are listed in the table below.
+        const failed = res.failed ?? 0;
         toast({
           tone: "error",
-          title: "Could not process the queue",
-          description: res.error ?? "Queue processing failed.",
+          title: failed > 0
+            ? `${failed} job${failed === 1 ? "" : "s"} failed`
+            : "Could not process the queue",
+          description: failed > 0
+            ? "See the failed rows below; you can retry them from here."
+            : res.error ?? "Queue processing failed.",
         });
       }
     });

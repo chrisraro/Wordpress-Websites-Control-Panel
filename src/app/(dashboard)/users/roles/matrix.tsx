@@ -188,8 +188,9 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
         </p>
         <p className="flex items-start gap-2 text-body text-ink">
           <IconInfo size={16} className="mt-0.5 shrink-0 text-mid-gray" />
-          Manage users is self-elevating: anyone holding it can grant themselves Admin. That is
-          what the permission means, not a defect.
+          Manage users is close to Admin. Holders cannot change their own role or make anyone
+          an Admin, but they can edit this matrix, including their own role&apos;s permissions.
+          Give it only to people you would trust with Admin.
         </p>
       </div>
 

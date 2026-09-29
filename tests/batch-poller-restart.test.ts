@@ -68,6 +68,13 @@ describe("BatchPoller restarts polling after retry/cancel", () => {
   it("processNow surfaces a failed result instead of dropping it", () => {
     const body = handler("processNow");
     expect(body).toContain("const res = await processQueueNowAction()");
-    expect(body).toMatch(/if \(!res\.ok\) \{\s*toast\(\{\s*tone: "error"/);
+    expect(body).toMatch(/if \(!res\.ok\) \{[\s\S]*toast\(\{\s*tone: "error"/);
+  });
+
+  it("processNow names failed jobs as failed jobs, not a queue outage", () => {
+    const body = handler("processNow");
+    expect(body).toContain("const failed = res.failed ?? 0");
+    expect(body).toMatch(/failed > 0\s*\?\s*`\$\{failed\} job/);
+    expect(body).toContain('"Could not process the queue"');
   });
 });

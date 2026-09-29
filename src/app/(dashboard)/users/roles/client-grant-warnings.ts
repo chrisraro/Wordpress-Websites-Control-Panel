@@ -111,9 +111,8 @@ export const CLIENT_GRANT_WARNINGS: Partial<Record<AppPermission, ClientGrantWar
     description:
       "Every account with the Client role -- an external customer, not staff -- would see the " +
       "full account list for the agency and be able to invite people, change anyone's role, and " +
-      "edit this very matrix. Manage users is self-elevating, so any one of those client " +
-      "accounts could then grant itself Admin. This takes effect on each affected client's " +
-      "next request.",
+      "edit this very matrix, so any one of those client accounts could then give the Client " +
+      "role any permission it likes. This takes effect on each affected client's next request.",
   },
 };
 

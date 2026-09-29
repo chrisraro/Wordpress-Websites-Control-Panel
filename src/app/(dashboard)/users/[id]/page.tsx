@@ -92,8 +92,15 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
   // re-checks against a freshly read list (and grants) at the moment it
   // runs regardless; this is only what the control displays.
   const probeRole: AppRole = person.role === "admin" ? "developer" : "admin";
-  const roleVerdict = canChangeRole(users, id, probeRole);
-  const clientRoleVerdict = canChangeRole(users, id, "client", grants);
+  // changeUserRole refuses every change to the actor's own role; say so up
+  // front rather than letting Save fail.
+  const selfRefusal = {
+    allowed: false,
+    reason: "You can't change your own role. Ask another administrator.",
+  };
+  const isSelf = id === viewer.id;
+  const roleVerdict = isSelf ? selfRefusal : canChangeRole(users, id, probeRole);
+  const clientRoleVerdict = isSelf ? selfRefusal : canChangeRole(users, id, "client", grants);
   const deleteVerdict = canDeleteUser(users, viewer.id, id);
 
   const siteNameById = new Map(allSites.map((s) => [s.id, s.name] as const));
