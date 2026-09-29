@@ -3,6 +3,11 @@ import { Card, EmptyState, StatusBadge } from "@/components/ui/primitives";
 import { IconChevronRight, IconReport } from "@/components/ui/icons";
 import type { Severity } from "@/services/sites/portfolio";
 import type { SiteRow } from "@/services/sites/types";
+import {
+  backupItem, careItem, relativeDays, reportLink, sslItem, uptimeItem,
+  type EvidenceItem, type EvidenceTone,
+} from "@/services/client/format";
+import type { ClientEvidence } from "@/services/client/summary";
 
 /**
  * The landing screen for a client.
@@ -39,6 +44,61 @@ export interface ClientSiteRow {
   severity: Severity;
   /** When the last successful check ran; null when there has never been one. */
   lastCheckedIso: string | null;
+  /**
+   * The proof behind the sentence: uptime, SSL, backups, maintenance done and
+   * the latest report. Optional so a card with nothing loaded still renders
+   * the plain health line and the reports link.
+   */
+  evidence?: ClientEvidence;
+}
+
+/**
+ * The evidence lines for one card, in reading order, with every line whose
+ * honest answer is "unknown" left out. Each formatter is unit-tested on its
+ * own (tests/client-evidence-format.test.ts); this only orders them.
+ */
+export function evidenceItems(row: ClientSiteRow, now: number): EvidenceItem[] {
+  const e = row.evidence;
+  if (!e) return [];
+  return [
+    uptimeItem(e.uptime, now),
+    sslItem(e.ssl, now),
+    backupItem(e.backup, now),
+    careItem(e.care, row.lastCheckedIso, now),
+  ].filter((x): x is EvidenceItem => x !== null);
+}
+
+const TONE_DOT: Record<EvidenceTone, string> = {
+  good: "bg-status-good",
+  warn: "bg-status-warn",
+  bad: "bg-status-bad",
+  idle: "bg-mid-gray",
+};
+
+/**
+ * Quiet facts under the headline sentence -- DESIGN.md's Stat Block at card
+ * scale: a caption label, the value in ink, colour only as a 6px mark (the
+ * value's words carry the meaning on their own). One column on a narrow
+ * phone, two from ~420px, so no value ever truncates.
+ */
+function EvidenceList({ items }: { items: EvidenceItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <dl className="mt-4 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+      {items.map((item) => (
+        <div key={item.label} className="rounded-2xl border border-hairline px-3.5 py-3">
+          <dt className="text-caption font-medium uppercase text-mid-gray">{item.label}</dt>
+          <dd data-tabular className="mt-1 flex items-center gap-2 text-body font-medium text-ink">
+            <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${TONE_DOT[item.tone]}`} />
+            {item.value}
+          </dd>
+          {item.detail && (
+            <dd className="mt-0.5 text-caption tracking-normal text-mid-gray">{item.detail}</dd>
+          )}
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 /**
@@ -68,16 +128,6 @@ export function clientHealth(row: ClientSiteRow): { tone: "good" | "warn" | "idl
   return { tone: "good", line: "Everything looks healthy." };
 }
 
-/** "2 days ago" beats a raw locale timestamp for a once-a-month visitor. */
-function relativeDays(iso: string, now: number): string {
-  const days = Math.floor((now - new Date(iso).getTime()) / 86_400_000);
-  if (days <= 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.floor(days / 30);
-  return months === 1 ? "last month" : `${months} months ago`;
-}
-
 export function ClientHome({
   rows,
   now,
@@ -103,6 +153,7 @@ export function ClientHome({
         <ul className="space-y-4">
           {rows.map((row) => {
             const { tone, line } = clientHealth(row);
+            const report = reportLink(row.site.id, row.evidence?.latestReport ?? null, now);
             return (
               <li key={row.site.id}>
                 <Card className="p-5">
@@ -125,18 +176,22 @@ export function ClientHome({
                     </p>
                   )}
 
+                  <EvidenceList items={evidenceItems(row, now)} />
+
                   {/* The only action, because it is the only one that is
                       theirs. Everything else this product does is work the
-                      agency performs on their behalf. */}
+                      agency performs on their behalf. When the newest report
+                      has a live share link this opens that report itself --
+                      the page they can read and forward -- not a list. */}
                   <Link
-                    href={`/sites/${row.site.id}/reports`}
+                    href={report.href}
                     className="group mt-4 inline-flex min-h-10 items-center gap-2 rounded-2xl
                       bg-canvas px-3 text-body font-medium text-ink transition-colors duration-150
                       hover:bg-surface-alt focus-visible:outline-2 focus-visible:outline-offset-2
                       focus-visible:outline-ink pointer-coarse:min-h-11"
                   >
                     <IconReport size={16} className="shrink-0" />
-                    Reports for this site
+                    {report.label}
                     <IconChevronRight
                       size={16}
                       className="shrink-0 text-mid-gray transition-transform duration-150

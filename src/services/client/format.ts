@@ -136,7 +136,7 @@ export function careItem(
   completed: number | null, lastCheckedIso: string | null, now: number,
 ): EvidenceItem | null {
   if (completed === null) return null;
-  const label = "Care this month";
+  const label = "Maintenance";
   if (completed > 0) {
     const noun = completed === 1 ? "maintenance update" : "maintenance updates";
     return { label, value: `${completed} ${noun} this month`, tone: "good" };
