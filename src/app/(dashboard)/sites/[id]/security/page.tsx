@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/primitives";
 import { cardClass, tableCellClass, tableHeadClass, tableRowClass } from "@/components/ui/styles";
 import { IconExternal, IconShield } from "@/components/ui/icons";
-import type { Severity } from "@/services/security/types";
+import { incompleteGradeNotice, type Severity } from "@/services/security/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -65,6 +65,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   const informational = vulns.filter((v) => v.informational);
   const checks = (latest?.checks ?? []).filter((c) => c.check_id !== "grade");
   const failing = checks.filter((c) => c.result === "fail").length;
+  const incompleteNotice = incompleteGradeNotice(grade?.incomplete);
   const scan = runSecurityScanAction.bind(null, id);
   const canRunScan = can(viewer, "security.run");
 
@@ -136,9 +137,12 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
               {grade.grade}
             </p>
             <div>
-              <p className="text-body font-medium text-ink">
-                Security grade {grade.grade}
-                <span className="font-normal text-mid-gray"> · {grade.score}/100</span>
+              <p className="flex flex-wrap items-center gap-2 text-body font-medium text-ink">
+                <span>
+                  Security grade {grade.grade}
+                  <span className="font-normal text-mid-gray"> · {grade.score}/100</span>
+                </span>
+                {incompleteNotice && <StatusBadge tone="warn">Incomplete</StatusBadge>}
               </p>
               <p className="mt-0.5 text-body text-mid-gray">
                 {failing > 0
@@ -146,6 +150,9 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
                   : "All hardening checks passing"}
                 {latest && ` · scanned ${new Date(latest.runAt).toLocaleString()}`}
               </p>
+              {incompleteNotice && (
+                <p className="mt-1 max-w-prose text-body text-mid-gray">{incompleteNotice}</p>
+              )}
             </div>
           </div>
         ) : (

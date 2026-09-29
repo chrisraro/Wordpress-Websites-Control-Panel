@@ -8,8 +8,9 @@ import { refreshSnapshot } from "@/services/inventory/service";
 import { matchInventory } from "./vulns";
 import { runPhpHardening, runHttpHardening } from "./hardening";
 import { runChecksums } from "./checksums";
-import { computeGrade, type Grade, type SecurityCheck, type Severity } from "./types";
+import { computeGrade, scanCoverage, type Grade, type SecurityCheck, type Severity } from "./types";
 import type { SecurityRepo } from "./repo";
+import { computeRetryDelayMs } from "@/services/jobs/service";
 
 // A scan grading against a feed this old is grading against data that is
 // meaningfully out of date: the nightly job should touch the feed at least
@@ -81,84 +82,134 @@ export interface ScanDeps {
   fetchImpl?: typeof fetch;
 }
 
+export interface ScanOptions {
+  /**
+   * Whether a failure here counts toward the site's consecutive failures
+   * (three make it `degraded`). Default true: a one-shot caller -- the scan
+   * button, the rescan after hardening -- is its own final attempt.
+   *
+   * The security_scan job passes `isFinalScanAttempt(job.attempts)`, so the
+   * retry ladder's earlier attempts do not count: otherwise one outage
+   * spanning the ~6-minute ladder marked a site degraded on its own.
+   */
+  recordFailure?: boolean;
+}
+
+/**
+ * True when a job on its `attempts`-th claim will not be retried after a
+ * failure, i.e. this failure is terminal. Mirrors the ladder in
+ * computeRetryDelayMs so the two cannot drift.
+ */
+export function isFinalScanAttempt(attempts: number): boolean {
+  return computeRetryDelayMs(attempts) === null;
+}
+
 export async function securityScan(
-  deps: ScanDeps, siteId: string,
+  deps: ScanDeps, siteId: string, opts: ScanOptions = {},
 ): Promise<{ grade: Grade; vulnCount: number }> {
+  let result: { grade: Grade; vulnCount: number };
   try {
-    const site = await deps.sites.getSite(siteId);
-    if (!site) throw new Error(`Site not found: ${siteId}`);
-
-    let snapshot = (await deps.snapshots.latestSnapshot(siteId))?.payload ?? null;
-    if (!snapshot) snapshot = await refreshSnapshot(deps, siteId);
-
-    const checks: SecurityCheck[] = [];
-    let vulnSeverities: (Severity | null)[] = [];
-    let vulnCount = 0;
-
-    if (await deps.security.hasFeedEntries()) {
-      const keys = [
-        { type: "core", slug: "wordpress" },
-        ...snapshot.plugins.map((p) => ({ type: "plugin", slug: p.name })),
-        ...snapshot.themes.map((t) => ({ type: "theme", slug: t.name })),
-      ];
-      const entries = await deps.security.feedEntriesForSlugs(keys);
-      const matches = matchInventory(entries, snapshot);
-      await deps.security.syncSiteVulns(siteId, matches);
-      const open = await deps.security.openVulns(siteId);
-      // Universal, unfixable advisories stay listed but neither move the
-      // grade nor count toward "N vulnerabilities" -- a number every site
-      // shares says nothing about any of them. See isInformationalAdvisory.
-      const actionable = open.filter((v) => !v.informational);
-      vulnSeverities = actionable.map((v) => v.severity);
-      vulnCount = actionable.length;
-
-      // The feed existing isn't enough: a scan against a feed that stopped
-      // refreshing days ago produces a confidently-wrong grade, checked
-      // against vulnerabilities the feed doesn't know about yet.
-      const newest = await deps.security.newestFeedUpdatedAt();
-      const ageMs = newest ? Date.now() - new Date(newest).getTime() : null;
-      if (ageMs !== null && ageMs > VULN_FEED_STALE_WARN_MS) {
-        // A distinct check_id from the absent-feed case below: "never set up"
-        // and "was working, now four days dead" need different remediation,
-        // and the security page renders check_id -> label with no access to
-        // `details`, so collapsing them into one id makes them indistinguishable
-        // on screen and unqueryable apart in security_checks.
-        checks.push({
-          check_id: "wordfence_feed_stale", result: "warn",
-          details: { message: `Vulnerability feed is stale — last refreshed ${formatAge(ageMs)} ago.` },
-        });
-      }
-    } else {
-      checks.push({
-        check_id: "wordfence_feed", result: "warn",
-        details: { message: "Vulnerability feed not cached — set WORDFENCE_API_KEY and wait for the nightly refresh." },
-      });
-    }
-
-    const creds = await deps.sites.getSiteCredentials(siteId);
-    if (!creds) throw new Error(`Credentials missing for site: ${siteId}`);
-    const client = await connectToSite(deps.mcp, creds);
-    try {
-      checks.push(...(await runPhpHardening(client)));
-      checks.push(await runChecksums(client));
-    } finally {
-      await client.close();
-    }
-    checks.push(...(await runHttpHardening(site.url, deps.fetchImpl)));
-
-    const { uptime24h } = await deps.security.uptimeSummary(siteId);
-    const grade = computeGrade({ vulnSeverities, checks, uptime24h });
-    const runAt = new Date().toISOString();
-    await deps.security.insertChecks(siteId, runAt, [
-      ...checks,
-      { check_id: "grade", result: "pass", details: { grade: grade.grade, score: grade.score, vulns: vulnCount } },
-    ]);
-    await deps.sites.recordScanResult(siteId, true);
-    return { grade, vulnCount };
+    result = await runScan(deps, siteId);
   } catch (e) {
-    await deps.sites.recordScanResult(siteId, false).catch(() => {});
+    if (opts.recordFailure ?? true) {
+      await deps.sites.recordScanResult(siteId, false).catch(() => {});
+    }
     throw e;
   }
+  // Outside the try on purpose: the scan has already run and its results
+  // are stored. A failed bookkeeping write must not be reported -- or
+  // counted -- as a failed scan (which would also put a job back on the
+  // retry ladder to rescan a site that was just scanned).
+  try {
+    await deps.sites.recordScanResult(siteId, true);
+  } catch (e) {
+    console.error(`[security] could not record scan success for site ${siteId}:`,
+      e instanceof Error ? e.message : String(e));
+  }
+  return result;
+}
+
+async function runScan(
+  deps: ScanDeps, siteId: string,
+): Promise<{ grade: Grade; vulnCount: number }> {
+  const site = await deps.sites.getSite(siteId);
+  if (!site) throw new Error(`Site not found: ${siteId}`);
+
+  let snapshot = (await deps.snapshots.latestSnapshot(siteId))?.payload ?? null;
+  if (!snapshot) snapshot = await refreshSnapshot(deps, siteId);
+
+  const checks: SecurityCheck[] = [];
+  let vulnSeverities: (Severity | null)[] = [];
+  let vulnCount = 0;
+
+  if (await deps.security.hasFeedEntries()) {
+    const keys = [
+      { type: "core", slug: "wordpress" },
+      ...snapshot.plugins.map((p) => ({ type: "plugin", slug: p.name })),
+      ...snapshot.themes.map((t) => ({ type: "theme", slug: t.name })),
+    ];
+    const entries = await deps.security.feedEntriesForSlugs(keys);
+    const matches = matchInventory(entries, snapshot);
+    await deps.security.syncSiteVulns(siteId, matches);
+    const open = await deps.security.openVulns(siteId);
+    // Universal, unfixable advisories stay listed but neither move the
+    // grade nor count toward "N vulnerabilities" -- a number every site
+    // shares says nothing about any of them. See isInformationalAdvisory.
+    const actionable = open.filter((v) => !v.informational);
+    vulnSeverities = actionable.map((v) => v.severity);
+    vulnCount = actionable.length;
+
+    // The feed existing isn't enough: a scan against a feed that stopped
+    // refreshing days ago produces a confidently-wrong grade, checked
+    // against vulnerabilities the feed doesn't know about yet.
+    const newest = await deps.security.newestFeedUpdatedAt();
+    const ageMs = newest ? Date.now() - new Date(newest).getTime() : null;
+    if (ageMs !== null && ageMs > VULN_FEED_STALE_WARN_MS) {
+      // A distinct check_id from the absent-feed case below: "never set up"
+      // and "was working, now four days dead" need different remediation,
+      // and the security page renders check_id -> label with no access to
+      // `details`, so collapsing them into one id makes them indistinguishable
+      // on screen and unqueryable apart in security_checks.
+      checks.push({
+        check_id: "wordfence_feed_stale", result: "warn",
+        details: { message: `Vulnerability feed is stale — last refreshed ${formatAge(ageMs)} ago.` },
+      });
+    }
+  } else {
+    checks.push({
+      check_id: "wordfence_feed", result: "warn",
+      details: { message: "Vulnerability feed not cached — set WORDFENCE_API_KEY and wait for the nightly refresh." },
+    });
+  }
+
+  const creds = await deps.sites.getSiteCredentials(siteId);
+  if (!creds) throw new Error(`Credentials missing for site: ${siteId}`);
+  const client = await connectToSite(deps.mcp, creds);
+  try {
+    checks.push(...(await runPhpHardening(client)));
+    checks.push(await runChecksums(client));
+  } finally {
+    await client.close();
+  }
+  checks.push(...(await runHttpHardening(site.url, deps.fetchImpl)));
+
+  const { uptime24h } = await deps.security.uptimeSummary(siteId);
+  const coverage = scanCoverage(checks);
+  const grade = computeGrade({ vulnSeverities, checks, uptime24h, coverage });
+  const runAt = new Date().toISOString();
+  await deps.security.insertChecks(siteId, runAt, [
+    ...checks,
+    // Coverage rides on the grade row's jsonb `details`: no migration, and
+    // whoever reads a grade gets what it was based on from the same row.
+    {
+      check_id: "grade", result: "pass",
+      details: {
+        grade: grade.grade, score: grade.score, vulns: vulnCount,
+        coverage, incomplete: grade.incomplete ?? [],
+      },
+    },
+  ]);
+  return { grade, vulnCount };
 }
 
 /**

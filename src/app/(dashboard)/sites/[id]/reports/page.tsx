@@ -10,7 +10,8 @@ import { supabaseReportsRepo } from "@/services/reports/repo";
 import { SiteTabs } from "../tabs";
 import { SiteHeading } from "../site-heading";
 import { ManageForm } from "../action-form";
-import { revokeReportAction } from "../reports-actions";
+import { createShareLinkAction, revokeReportAction } from "../reports-actions";
+import { SHARE_LINK_TTL_DAYS, shareLinkState } from "@/services/reports/share";
 import { GenerateReportForm } from "./generate-form";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, EmptyState, StatusBadge } from "@/components/ui/primitives";
@@ -35,6 +36,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
   const reports = await supabaseReportsRepo(db).listForSite(id, 20);
   const canManageReports = can(viewer, "reports.manage");
   const canGenerateReports = can(viewer, "reports.generate");
+  const now = Date.now();
 
   return (
     <main>
@@ -84,6 +86,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
               <tbody>
                 {reports.map((r) => {
                   const revoke = revokeReportAction.bind(null, id, r.id);
+                  const link = shareLinkState(r, now);
                   return (
                     <tr key={r.id} className={tableRowClass}>
                       <td className={`${tableCellClass} text-ink`}>
@@ -96,24 +99,50 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
                         <StatusBadge tone="idle">{r.auto ? "Monthly" : "Manual"}</StatusBadge>
                       </td>
                       <td className={tableCellClass}>
-                        {r.share_token ? (
-                          <a
-                            href={`/r/${r.share_token}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-ink underline
-                              transition-colors duration-150 hover:text-mid-gray"
-                          >
-                            Open
-                            <IconExternal size={14} />
-                          </a>
+                        {link === "active" && r.share_token ? (
+                          <>
+                            <a
+                              href={`/r/${r.share_token}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-ink underline
+                                transition-colors duration-150 hover:text-mid-gray"
+                            >
+                              Open
+                              <IconExternal size={14} />
+                            </a>
+                            <p className="mt-0.5 text-caption tracking-normal text-mid-gray">
+                              {r.share_expires_at
+                                ? `Expires ${new Date(r.share_expires_at).toLocaleDateString()}`
+                                : "No expiry"}
+                            </p>
+                          </>
+                        ) : link === "expired" ? (
+                          <StatusBadge tone="idle">Expired</StatusBadge>
                         ) : (
-                          <StatusBadge tone="idle">Revoked</StatusBadge>
+                          <StatusBadge tone="idle">Not shared</StatusBadge>
                         )}
                       </td>
                       <td className={tableCellClass}>
                         <div className="flex flex-wrap items-start justify-end gap-2">
-                          {r.share_token && (
+                          {link !== "active" && canGenerateReports && (
+                            <ManageForm
+                              action={createShareLinkAction.bind(null, id, r.id)}
+                              label="Create share link"
+                              pendingLabel="Creating…"
+                              success="Share link created"
+                              size="sm"
+                              variant="outline"
+                              confirm={{
+                                title: "Create a share link for this report?",
+                                description:
+                                  `Anyone holding the link can open this report, without logging in, for ${SHARE_LINK_TTL_DAYS} days. ` +
+                                  "You can revoke it sooner at any time. An earlier link for this report stays dead.",
+                                confirmLabel: "Create link",
+                              }}
+                            />
+                          )}
+                          {link === "active" && r.share_token && (
                             <>
                               {/* secret: this URL is a revocable bearer credential for the
                                   report — the toast must never echo it back (see docs/superpowers/
@@ -130,7 +159,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
                                   confirm={{
                                     title: "Revoke this share link?",
                                     description:
-                                      "Anyone holding the link loses access immediately, and the PDF stops being served. This cannot be undone — generate a new report to share again.",
+                                      "Anyone holding the link loses access immediately, and the PDF stops being served. This link cannot be restored — create a new one to share the report again.",
                                     confirmLabel: "Revoke link",
                                     tone: "danger",
                                   }}
@@ -151,7 +180,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
 
       <p className="mt-4 max-w-prose text-caption tracking-normal text-mid-gray">
         Share links are unguessable and carry no login, so anyone holding one can read the
-        report. Revoke any that circulate further than you intended.
+        report. New links expire after {SHARE_LINK_TTL_DAYS} days; monthly reports are filed
+        without one until you create it. Revoke any that circulate further than you intended.
       </p>
     </main>
   );

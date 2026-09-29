@@ -34,6 +34,7 @@ async function buildSecurity(deps: GatherDeps, siteId: string): Promise<Security
   return {
     grade: grade?.grade ?? null,
     score: grade?.score ?? null,
+    incomplete: grade?.incomplete ?? null,
     openVulns: vulns.length,
     criticalVulns: vulns.filter((v) => v.severity === "critical").length,
     failedChecks: (checks?.checks ?? [])

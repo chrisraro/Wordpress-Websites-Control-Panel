@@ -4,6 +4,7 @@ import { supabaseReportsRepo } from "@/services/reports/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
 import { IconExternal, IconReport } from "@/components/ui/icons";
+import { incompleteGradeNotice } from "@/services/security/types";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,11 @@ export default async function SharedReportPage({
     report.period_start && report.period_end
       ? `${new Date(report.period_start).toLocaleDateString()} – ${new Date(report.period_end).toLocaleDateString()}`
       : null;
+  // From the report row, not the site's current grade: this page describes
+  // the PDF it serves, which was rendered from the grade at that time.
+  const securityNotice = report.sections.includes("security")
+    ? incompleteGradeNotice(report.security_incomplete)
+    : null;
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-2xl px-4 py-12 sm:px-6">
@@ -74,6 +80,12 @@ export default async function SharedReportPage({
         ))}
       </ul>
 
+      {securityNotice && (
+        <p className="mt-6 rounded-lg border border-hairline bg-surface-alt px-4 py-3 text-body text-ink">
+          {securityNotice}
+        </p>
+      )}
+
       <a
         href={`/r/${token}/file`}
         target="_blank"
@@ -86,6 +98,8 @@ export default async function SharedReportPage({
 
       <p className="mt-12 border-t border-hairline pt-4 text-caption tracking-normal text-mid-gray">
         This link was shared with you by OCS and can be revoked at any time.
+        {report.share_expires_at &&
+          ` It stops working on ${new Date(report.share_expires_at).toLocaleDateString()}.`}
       </p>
     </main>
   );

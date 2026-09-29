@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { generateReport } from "@/services/reports/generate";
 import { supabaseReportsRepo, supabaseReportStorage } from "@/services/reports/repo";
 import { parseSections } from "@/services/reports/types";
+import { createShareLink } from "@/services/reports/share";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
@@ -91,6 +92,38 @@ export async function revokeReportAction(
     return { ok: false, error: friendlySiteError(e) || "Could not revoke the link" };
   }
   await logActivity(db, user.id, siteId, "site.report_revoke", { report_id: reportId });
+  revalidatePath(`/sites/${siteId}/reports`);
+  return { ok: true };
+}
+
+/**
+ * Creates a fresh share link for an existing report: the on-demand path for
+ * monthly reports (which are filed without one) and for a link that expired
+ * or was revoked. Always a NEW token -- an old link never comes back to life.
+ *
+ * Gated like generating a report, because generating one is the other way a
+ * link gets minted: whoever may produce a shareable report may share one.
+ * The token is never logged or returned; the page re-renders to show it.
+ */
+export async function createShareLinkAction(
+  siteId: string,
+  reportId: string,
+  _prevState?: { ok: boolean; error?: string } | null,
+  _formData?: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  const gate = await checkPermission("reports.generate");
+  if (isDenied(gate)) return gate;
+  const site = await checkSiteAccess(siteId);
+  if (isDenied(site)) return site;
+  const db = createServiceSupabase();
+  let expiresAt: string;
+  try {
+    ({ expiresAt } = await createShareLink(supabaseReportsRepo(db), reportId, siteId));
+  } catch (e) {
+    return { ok: false, error: friendlySiteError(e) || "Could not create the link" };
+  }
+  await logActivity(db, user.id, siteId, "site.report_share", { report_id: reportId, expires_at: expiresAt });
   revalidatePath(`/sites/${siteId}/reports`);
   return { ok: true };
 }

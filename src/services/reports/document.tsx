@@ -1,6 +1,7 @@
 import React from "react";
 import { Document, Page, Text, View, StyleSheet, type DocumentProps } from "@react-pdf/renderer";
 import type { ReportData } from "./types";
+import { incompleteGradeNotice } from "@/services/security/types";
 
 const c = {
   ink: "#0f172a", muted: "#64748b", line: "#e2e8f0",
@@ -26,6 +27,7 @@ const s = StyleSheet.create({
   li: { flexDirection: "row", paddingVertical: 2 },
   bullet: { width: 10, color: c.muted },
   empty: { color: c.muted, fontStyle: "italic", paddingVertical: 4 },
+  notice: { borderWidth: 1, borderColor: c.warn, borderRadius: 4, padding: 6, marginBottom: 8 },
   footer: { position: "absolute", bottom: 24, left: 44, right: 44, flexDirection: "row",
     justifyContent: "space-between", borderTopWidth: 1, borderTopColor: c.line,
     paddingTop: 6, fontSize: 8, color: c.muted },
@@ -124,6 +126,9 @@ export function ReportDocument(data: ReportData): React.ReactElement<DocumentPro
               <Tile value={String(security.openVulns)} label="Known vulnerabilities" />
               <Tile value={security.uptime24h === null ? "—" : `${security.uptime24h}%`} label="Uptime (24h)" />
             </View>
+            {incompleteGradeNotice(security.incomplete) && (
+              <Text style={s.notice}>{incompleteGradeNotice(security.incomplete)}</Text>
+            )}
             <Row label="Critical vulnerabilities" value={String(security.criticalVulns)} />
             <Row label="SSL certificate expires in" value={security.sslDays === null ? "—" : `${security.sslDays} days`} />
             <Row label="Last scan" value={fmtDate(security.scannedAt)} />

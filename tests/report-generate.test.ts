@@ -44,6 +44,7 @@ function fakes() {
     async getByToken() { return null; },
     async getById() { return null; },
     async revoke() {},
+    async setShareLink() {},
     async autoExistsSince() { return false; },
   };
   const storage: ReportStorage = {

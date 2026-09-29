@@ -172,6 +172,13 @@ that role holds. Seeded once by `0006_rbac_schema.sql`:
 | `queue.process` | yes | yes | no | no |
 | `users.manage` | yes | no | no | no |
 
+Report share links: generating a report mints a 30-day link, and "Create
+share link" on an existing report (`createShareLinkAction`) mints a fresh one
+— both need `reports.generate` plus access to the site, because producing a
+shareable report and sharing one are the same authority. Revoking needs
+`reports.manage`. Neither changes RLS: both actions write through the service
+client after the server-side checks (see migration 0024 for the columns).
+
 `client` holds only `reports.generate`. It has no `sites.view_all`, so a
 client sees nothing by role — every site it can see comes from an explicit
 row in `user_site_access` (see below). `sites.view_all` is what makes a role

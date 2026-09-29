@@ -60,6 +60,8 @@ interface Row {
   /** Hardening fixes the latest scan calls for. */
   hardenFixes: ReturnType<typeof hardeningPlan>;
   grade?: string;
+  /** The scan behind `grade` could not check everything; see scanCoverage. */
+  gradeIncomplete: boolean;
   seo?: number;
 }
 
@@ -76,9 +78,9 @@ interface Row {
  * would drift the moment a metric is added.
  */
 function MetricBadges({
-  updates, grade, seo, gsc,
+  updates, grade, gradeIncomplete, seo, gsc,
 }: {
-  updates?: number; grade?: string; seo?: number;
+  updates?: number; grade?: string; gradeIncomplete?: boolean; seo?: number;
   gsc?: ReturnType<typeof gscStatus>;
 }) {
   return (
@@ -96,14 +98,20 @@ function MetricBadges({
           {updates}&nbsp;update{updates === 1 ? "" : "s"}
         </StatusBadge>
       )}
-      {grade && <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>Security&nbsp;{grade}</StatusBadge>}
+      {/* A partial grade says so where the grade is shown: the letter alone
+          would read as a verdict on checks that never ran. */}
+      {grade && (
+        <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>
+          Security&nbsp;{grade}{gradeIncomplete && <>&nbsp;·&nbsp;incomplete</>}
+        </StatusBadge>
+      )}
       {seo !== undefined && <StatusBadge tone={seoTone(seo)}>SEO&nbsp;{seo}</StatusBadge>}
     </>
   );
 }
 
 function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
-  const { site, staging, severity, reasons, updates, grade, seo, gsc } = row;
+  const { site, staging, severity, reasons, updates, grade, gradeIncomplete, seo, gsc } = row;
   return (
     <li className="border-b border-hairline last:border-0">
       <Link
@@ -174,7 +182,7 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
               keys on input device rather than width for exactly this reason. */}
           {!showReasons && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:hidden">
-              <MetricBadges updates={updates} grade={grade} seo={seo} gsc={gsc} />
+              <MetricBadges updates={updates} grade={grade} gradeIncomplete={gradeIncomplete} seo={seo} gsc={gsc} />
             </div>
           )}
         </div>
@@ -186,7 +194,7 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
             problems to state, so the metrics are what there is to show. */}
         {!showReasons && (
           <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-            <MetricBadges updates={updates} grade={grade} seo={seo} gsc={gsc} />
+            <MetricBadges updates={updates} grade={grade} gradeIncomplete={gradeIncomplete} seo={seo} gsc={gsc} />
           </div>
         )}
 
@@ -338,6 +346,7 @@ export default async function DashboardPage({
         gsc,
         hardenFixes: latestChecks ? hardeningPlan(latestChecks.checks) : [],
         grade,
+        gradeIncomplete: (g?.incomplete?.length ?? 0) > 0,
         seo: score ?? undefined,
       };
     }),
