@@ -5,7 +5,11 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
-import { APP_ROLES, type AppPermission, type AppRole, type SiteAccessLevel } from "@/lib/authz/types";
+import {
+  APP_PERMISSIONS, APP_ROLES, SITE_ACCESS_LEVELS,
+  type AppPermission, type AppRole, type SiteAccessLevel,
+} from "@/lib/authz/types";
+import { isUuidShaped } from "@/lib/uuid";
 import { getOptionalEnv } from "@/lib/env";
 import { supabaseUsersRepo } from "@/services/users/repo";
 import {
@@ -26,6 +30,16 @@ const inviteSchema = z.object({
   role: z.enum(APP_ROLES),
   siteIds: z.array(z.string()).default([]),
 });
+
+// Runtime shapes for the positional arguments of the actions below. A
+// server action is a public endpoint, so its TypeScript signature is a
+// promise about the UI, not about what arrives: validate before anything
+// reaches the service or the database.
+const uuid = z.string().refine(isUuidShaped);
+const roleArgs = z.tuple([uuid, z.enum(APP_ROLES)]);
+const grantArgs = z.tuple([uuid, uuid, z.enum(SITE_ACCESS_LEVELS)]);
+const rolePermissionArgs = z.tuple([z.enum(APP_ROLES), z.enum(APP_PERMISSIONS), z.boolean()]);
+const INVALID: ActionResult = { ok: false, error: "Invalid request." };
 
 function repo() {
   return supabaseUsersRepo(createServiceSupabase());
@@ -126,11 +140,14 @@ export async function setUserRoleAction(
   const gate = await checkPermission("users.manage");
   if (isDenied(gate)) return gate;
 
+  if (!roleArgs.safeParse([userId, role]).success) return INVALID;
+
   let result: ActionResult;
   try {
     result = await changeUserRole(repo(), user.id, userId, role);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not change the role" };
+  } catch {
+    // Never echo database/auth-admin error text to the browser.
+    return { ok: false, error: "Could not change the role." };
   }
   // A guard refusal means nothing was written — only revalidate on an
   // actual change, so a lockout refusal doesn't churn the cache for no
@@ -190,11 +207,13 @@ export async function grantSiteAction(
   const gate = await checkPermission("users.manage");
   if (isDenied(gate)) return gate;
 
+  if (!grantArgs.safeParse([userId, siteId, level]).success) return INVALID;
+
   let result: ActionResult;
   try {
     result = await grantSiteAccess(repo(), userId, siteId, level, user.id);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not grant site access" };
+  } catch {
+    return { ok: false, error: "Could not grant site access." };
   }
   if (result.ok) {
     revalidatePath("/users");
@@ -234,11 +253,13 @@ export async function setRolePermissionAction(
   const gate = await checkPermission("users.manage");
   if (isDenied(gate)) return gate;
 
+  if (!rolePermissionArgs.safeParse([role, permission, enabled]).success) return INVALID;
+
   let result: ActionResult;
   try {
     result = await setRolePermissionChecked(repo(), role, permission, enabled);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not update the permission matrix" };
+  } catch {
+    return { ok: false, error: "Could not update the permission matrix." };
   }
   if (result.ok) revalidatePath("/users");
   return result;

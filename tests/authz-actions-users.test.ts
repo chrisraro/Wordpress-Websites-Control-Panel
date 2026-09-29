@@ -85,6 +85,10 @@ const managedUser = (id: string, role: ManagedUser["role"]): ManagedUser => ({
   siteGrants: 0,
 });
 
+const U2 = "22222222-2222-4222-8222-222222222222";
+const A1 = "11111111-1111-4111-8111-111111111111";
+const SITE_ID = "33333333-3333-4333-8333-333333333333";
+
 /** A UsersRepo fake whose methods throw unless overridden — see file header. */
 function fakeRepo(overrides: Partial<{ [K in keyof UsersRepo]: UsersRepo[K] }> = {}): UsersRepo {
   const notCalled = <K extends keyof UsersRepo>(name: K) =>
@@ -159,10 +163,10 @@ describe("lockout guards reach the caller as denials, not throws", () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     const setRole = vi.fn(async () => {});
     currentRepo = fakeRepo({
-      listUsers: async () => [managedUser("a1", "admin")],
+      listUsers: async () => [managedUser(A1, "admin")],
       setRole,
     });
-    const result = await setUserRoleAction("a1", "developer");
+    const result = await setUserRoleAction(A1, "developer");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/last admin/i);
     expect(setRole).not.toHaveBeenCalled();
@@ -200,10 +204,10 @@ describe("grantSiteAction — site-grant guard", () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     const grantSite = vi.fn(async () => {});
     currentRepo = fakeRepo({
-      getUser: async () => managedUser("u2", "client"),
+      getUser: async () => managedUser(U2, "client"),
       grantSite,
     });
-    const result = await grantSiteAction("u2", "site-1", "manage");
+    const result = await grantSiteAction(U2, SITE_ID, "manage");
     expect(result.ok).toBe(false);
     expect(grantSite).not.toHaveBeenCalled();
   });
@@ -212,24 +216,24 @@ describe("grantSiteAction — site-grant guard", () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     const grantSite = vi.fn(async () => {});
     currentRepo = fakeRepo({
-      getUser: async () => managedUser("u2", "client"),
+      getUser: async () => managedUser(U2, "client"),
       grantSite,
     });
-    const result = await grantSiteAction("u2", "site-1", "read");
+    const result = await grantSiteAction(U2, SITE_ID, "read");
     expect(result.ok).toBe(true);
-    expect(grantSite).toHaveBeenCalledWith("u2", "site-1", "read", "actor-1");
+    expect(grantSite).toHaveBeenCalledWith(U2, SITE_ID, "read", "actor-1");
   });
 
   it("allows granting manage access to a staff role", async () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     const grantSite = vi.fn(async () => {});
     currentRepo = fakeRepo({
-      getUser: async () => managedUser("u2", "developer"),
+      getUser: async () => managedUser(U2, "developer"),
       grantSite,
     });
-    const result = await grantSiteAction("u2", "site-1", "manage");
+    const result = await grantSiteAction(U2, SITE_ID, "manage");
     expect(result.ok).toBe(true);
-    expect(grantSite).toHaveBeenCalledWith("u2", "site-1", "manage", "actor-1");
+    expect(grantSite).toHaveBeenCalledWith(U2, SITE_ID, "manage", "actor-1");
   });
 });
 
@@ -300,6 +304,8 @@ describe("inviteUserAction — invite rules", () => {
       // read triggered. Only the invited account is present, making it the
       // sole admin the moment its role becomes "admin".
       listUsers: async () => [managedUser("new-user-id", targetRole)],
+      // Only an admin may assign "admin"; the actor's role is read fresh.
+      getUser: async (id: string) => (id === "actor-1" ? managedUser("actor-1", "admin") : null),
       setRole,
       grantSite,
       deleteUser,
@@ -316,5 +322,55 @@ describe("inviteUserAction — invite rules", () => {
     // returned {ok:false} rather than throwing, so the `.catch(() => {})`
     // around it swallowed nothing and deleteUser was never called.
     expect(deleteUser).toHaveBeenCalledWith("new-user-id");
+  });
+});
+
+// Security finding: these actions are public endpoints and took their
+// arguments on trust (a role/permission/level string straight into the
+// database), and echoed raw database error text back to the browser.
+describe("runtime argument validation and generic errors", () => {
+  const INVALID = { ok: false, error: "Invalid request." };
+
+  it.each([
+    ["setUserRoleAction non-uuid id", () => setUserRoleAction("u2", "developer")],
+    ["setUserRoleAction unknown role", () => setUserRoleAction(U2, "superuser" as never)],
+    ["grantSiteAction non-uuid user", () => grantSiteAction("u2", SITE_ID, "read")],
+    ["grantSiteAction non-uuid site", () => grantSiteAction(U2, "site-1", "read")],
+    ["grantSiteAction unknown level", () => grantSiteAction(U2, SITE_ID, "owner" as never)],
+    ["setRolePermissionAction unknown role", () => setRolePermissionAction("root" as never, "seo.run", true)],
+    ["setRolePermissionAction unknown permission", () => setRolePermissionAction("developer", "db.drop" as never, true)],
+    ["setRolePermissionAction non-boolean", () => setRolePermissionAction("developer", "seo.run", "yes" as never)],
+  ])("%s is refused before touching the repo", async (_name, call) => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    expect(await call()).toEqual(INVALID);
+  });
+
+  it("setUserRoleAction hides raw database error text", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    currentRepo = fakeRepo({
+      listUsers: async () => [managedUser("actor-1", "admin"), managedUser(U2, "developer")],
+      setRole: async () => { throw new Error('duplicate key value violates unique constraint "user_roles_pkey"'); },
+    });
+    const result = await setUserRoleAction(U2, "content_writer");
+    expect(result).toEqual({ ok: false, error: "Could not change the role." });
+  });
+
+  it("grantSiteAction hides raw database error text", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    currentRepo = fakeRepo({
+      getUser: async () => managedUser(U2, "developer"),
+      grantSite: async () => { throw new Error("insert or update on table violates foreign key constraint"); },
+    });
+    const result = await grantSiteAction(U2, SITE_ID, "read");
+    expect(result).toEqual({ ok: false, error: "Could not grant site access." });
+  });
+
+  it("setRolePermissionAction hides raw database error text", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    currentRepo = fakeRepo({
+      setRolePermission: async () => { throw new Error("permission denied for table role_permissions"); },
+    });
+    const result = await setRolePermissionAction("developer", "seo.run", false);
+    expect(result).toEqual({ ok: false, error: "Could not update the permission matrix." });
   });
 });
