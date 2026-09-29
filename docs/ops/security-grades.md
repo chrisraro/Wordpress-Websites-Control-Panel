@@ -37,6 +37,22 @@ Grade rows written before this change have no `incomplete` field and are
 shown unmarked — they are neither claimed complete nor incomplete. The next
 nightly scan replaces them.
 
+## Failed scans and `degraded`
+
+Three consecutive *counted* scan failures move a connected site to
+`degraded` (`recordScanResult`, `src/services/sites/repo.ts`). Only a
+terminal failure counts:
+
+- `securityScan(deps, siteId, { recordFailure })` records a failure only when
+  `recordFailure` is true (the default, for one-shot callers such as the scan
+  button and the rescan after hardening).
+- The `security_scan` job must pass
+  `{ recordFailure: isFinalScanAttempt(job.attempts) }`, so the first two rungs
+  of the retry ladder (retried after 1 and 5 minutes) do not count. Until the
+  handler passes it, every attempt still counts, as before.
+- A successful scan whose success write fails is logged and still reported as
+  a success; it never counts as a failure.
+
 ## Fixing a partial grade
 
 | Gap | Remedy |
