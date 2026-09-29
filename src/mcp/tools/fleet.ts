@@ -67,7 +67,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           `Would queue plugin updates for ${plan.eligible.length} site(s): ${names}.` +
           (skips.length > 0 ? ` Skipping ${skips.join(" and ")}.` : "");
 
-        const gate = gateConfirm(ctx.auth, args, summary, {
+        const gate = gateConfirm(ctx.auth, "update_all_plugins_fleet", args, summary, {
           sites: plan.eligible.map(siteSummary),
           skipped_already_queued: plan.alreadyQueued.length,
           skipped_no_updates: plan.noUpdates.length,

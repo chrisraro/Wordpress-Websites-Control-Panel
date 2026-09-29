@@ -7,7 +7,7 @@ import { siteSummary, NOT_FOUND } from "./sites";
 import type { ToolCtx } from "../context";
 import { getSite } from "@/services/sites/service";
 import { siteEnvironment } from "@/services/sites/portfolio";
-import { friendlySiteError } from "@/lib/mcp/errors";
+import { friendlySiteError, siteText } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
 import type { AppPermission } from "@/lib/authz/types";
 import type { ManageAction } from "@/services/manage/types";
@@ -33,6 +33,19 @@ export const DESTRUCTIVE_TOOLS = [
 ] as const;
 
 const PERMISSION = "wp_toolkit.manage" as const;
+
+/** Site errors are capped at this length in tool output (siteText). */
+const SITE_ERROR_MAX = 200;
+/** Site-produced action output is longer by nature but still bounded. */
+const SITE_OUTPUT_MAX = 1000;
+
+/**
+ * The site writes `output` and `error`; the model reading this tool's result
+ * must not receive them as unbounded markup (audit 2026-09-29, open 5).
+ */
+function siteOutput(output: string | undefined): string | undefined {
+  return output === undefined ? undefined : siteText(output, SITE_OUTPUT_MAX);
+}
 
 /**
  * Runs the guard order every destructive single-site tool shares --
@@ -117,14 +130,14 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         ? `Would update the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}).`
         : `Would update every plugin with an update available on ${site.name} (${siteEnvironment(site)}).`;
 
-      const gate = gateConfirm(ctx.auth, args, summary, { site: siteSummary(site), plugin_file });
+      const gate = gateConfirm(ctx.auth, "update_plugins", args, summary, { site: siteSummary(site), plugin_file });
       if (!gate.proceed) return gate.result;
 
       try {
         const result = await perform(ctx, "update_plugins", site_id, action, gate.reason, args);
         return result.ok
-          ? ok({ site: siteSummary(site), output: result.output })
-          : fail(result.error ?? "The site rejected the update.");
+          ? ok({ site: siteSummary(site), output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the update.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -156,7 +169,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "update_themes", args,
         `Would update the theme ${slug} on ${site.name} (${siteEnvironment(site)}).`,
         { site: siteSummary(site), slug },
       );
@@ -167,8 +180,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "update_themes", site_id, { kind: "update_theme", slug }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), slug, output: result.output })
-          : fail(result.error ?? "The site rejected the theme update.");
+          ? ok({ site: siteSummary(site), slug, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the theme update.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -191,7 +204,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "update_core", args,
         `Would update WordPress core on ${site.name} (${siteEnvironment(site)}), including its database upgrade.`,
         { site: siteSummary(site) },
       );
@@ -200,8 +213,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       try {
         const result = await perform(ctx, "update_core", site_id, { kind: "update_core" }, gate.reason, args);
         return result.ok
-          ? ok({ site: siteSummary(site), output: result.output })
-          : fail(result.error ?? "The site rejected the core update.");
+          ? ok({ site: siteSummary(site), output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the core update.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -228,7 +241,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "activate_plugin", args,
         `Would activate the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}).`,
         { site: siteSummary(site), plugin_file },
       );
@@ -239,8 +252,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "activate_plugin", site_id, { kind: "activate_plugin", file: plugin_file }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), plugin_file, output: result.output })
-          : fail(result.error ?? "The site rejected the activation.");
+          ? ok({ site: siteSummary(site), plugin_file, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the activation.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -267,7 +280,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "deactivate_plugin", args,
         `Would deactivate the plugin ${plugin_file} on ${site.name} (${siteEnvironment(site)}).`,
         { site: siteSummary(site), plugin_file },
       );
@@ -278,8 +291,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "deactivate_plugin", site_id, { kind: "deactivate_plugin", file: plugin_file }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), plugin_file, output: result.output })
-          : fail(result.error ?? "The site rejected the deactivation.");
+          ? ok({ site: siteSummary(site), plugin_file, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the deactivation.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -313,7 +326,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "delete_plugin", args,
         `Would permanently delete the plugin ${plugin_file} from ${site.name} ` +
         `(${siteEnvironment(site)}). Its files are removed and cannot be restored from the panel.`,
         { site: siteSummary(site), plugin_file },
@@ -325,8 +338,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "delete_plugin", site_id, { kind: "delete_plugin", file: plugin_file }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), plugin_file, output: result.output })
-          : fail(result.error ?? "The site rejected the deletion.");
+          ? ok({ site: siteSummary(site), plugin_file, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the deletion.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -350,7 +363,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "activate_theme", args,
         `Would activate the theme ${slug} on ${site.name} (${siteEnvironment(site)}).`,
         { site: siteSummary(site), slug },
       );
@@ -361,8 +374,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "activate_theme", site_id, { kind: "activate_theme", slug }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), slug, output: result.output })
-          : fail(result.error ?? "The site rejected the activation.");
+          ? ok({ site: siteSummary(site), slug, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the activation.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -388,7 +401,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "delete_theme", args,
         `Would permanently delete the theme ${slug} from ${site.name} (${siteEnvironment(site)}). ` +
         "Its files are removed and cannot be restored from the panel.",
         { site: siteSummary(site), slug },
@@ -400,8 +413,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "delete_theme", site_id, { kind: "delete_theme", slug }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), slug, output: result.output })
-          : fail(result.error ?? "The site rejected the deletion.");
+          ? ok({ site: siteSummary(site), slug, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the deletion.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -432,7 +445,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         : `Would disable maintenance mode on ${site.name} (${siteEnvironment(site)}), ` +
           "restoring normal access for visitors.";
 
-      const gate = gateConfirm(ctx.auth, args, summary, { site: siteSummary(site), enable });
+      const gate = gateConfirm(ctx.auth, "set_maintenance", args, summary, { site: siteSummary(site), enable });
       if (!gate.proceed) return gate.result;
 
       try {
@@ -440,8 +453,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "set_maintenance", site_id, { kind: "maintenance", enable }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), enable, output: result.output })
-          : fail(result.error ?? "The site rejected the request.");
+          ? ok({ site: siteSummary(site), enable, output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the request.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -467,7 +480,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "flush_cache", args,
         `Would flush the object cache on ${site.name} (${siteEnvironment(site)}). ` +
         "Low-risk: the cache simply repopulates on the next request.",
         { site: siteSummary(site) },
@@ -477,8 +490,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       try {
         const result = await perform(ctx, "flush_cache", site_id, { kind: "flush_cache" }, gate.reason, args);
         return result.ok
-          ? ok({ site: siteSummary(site), output: result.output })
-          : fail(result.error ?? "The site rejected the request.");
+          ? ok({ site: siteSummary(site), output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the request.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }
@@ -504,7 +517,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "flush_permalinks", args,
         `Would flush the rewrite rules (permalinks) on ${site.name} (${siteEnvironment(site)}). ` +
         "Low-risk: WordPress regenerates them from the current settings.",
         { site: siteSummary(site) },
@@ -516,8 +529,8 @@ export function register(server: McpServer, ctx: ToolCtx): void {
           ctx, "flush_permalinks", site_id, { kind: "flush_permalinks" }, gate.reason, args,
         );
         return result.ok
-          ? ok({ site: siteSummary(site), output: result.output })
-          : fail(result.error ?? "The site rejected the request.");
+          ? ok({ site: siteSummary(site), output: siteOutput(result.output) })
+          : fail(siteText(result.error ?? "The site rejected the request.", SITE_ERROR_MAX));
       } catch (e) {
         return fail(friendlySiteError(e));
       }

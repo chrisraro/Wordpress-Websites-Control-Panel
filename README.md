@@ -138,5 +138,9 @@ sidebar, under **API tokens**, then:
 A token inherits exactly its owner's role, permissions and site grants — it can
 never do more than the person who created it. Read-only tokens can inspect
 everything they can see and change nothing. Destructive tools are dry-run by
-default and need `confirm: true` plus a `reason`, which is recorded in the
-activity log.
+default. The dry run returns a `confirm_code`, and the real call needs
+`confirm: true`, a `reason` (recorded in the activity log) and that exact
+code. The code is valid for 10 minutes, for the same token, user, tool and
+arguments only, so text a site controls cannot talk the model into a
+destructive call in one step. Strings the site controls (its error messages,
+plugin and theme titles) are stripped of markup and capped in tool output.

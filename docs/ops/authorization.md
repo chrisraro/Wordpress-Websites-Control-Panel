@@ -331,6 +331,7 @@ how you end up in the SQL editor on a Friday:
 | Delete your own account | **Refused.** Ask another admin. |
 | Change your own role (promote or demote) | **Refused.** Ask another administrator. |
 | Assign the `admin` role when you are not an `admin` | **Refused**, checked against your role as read at the moment of the write. |
+| Edit the permission matrix when you are not an `admin` | **Refused**, checked against your role as read at the moment of the write (`setRolePermissionChecked`). Non-admins holding `users.manage` see `/users/roles` read-only, with the reason. |
 
 Every guard is enforced in the **server action**
 (`src/app/(dashboard)/users/actions.ts`, via `src/services/users/guards.ts`),
@@ -343,13 +344,40 @@ these actions is reachable directly regardless of what any page renders.
 (`isSoleAdmin` counts distinct admin ids currently in the table), not against
 whatever the page had rendered when the operator loaded it.
 
-**`users.manage` is still close to self-elevating.** Its holder can no longer
-change their own role or mint new admins through the role form, but the
-permission matrix editor still lets them grant any permission (including
-`users.manage`) to any role, their own included. This permission
-*is* the authority to change every other authorization fact in the system,
-including who holds it — treat it with the same care as direct database
-access, because it is functionally equivalent to it.
+**The matrix is admin-only.** A `users.manage` holder who is not an `admin`
+used to be able to grant their own role any permission through the matrix
+(audit 2026-09-29, open 9). Matrix edits now require the `admin` role, read
+fresh at the write, so `users.manage` alone can invite people, set non-admin
+roles on others and manage site grants, but cannot change its own role, mint
+admins, or change what any role may do. It is still a powerful permission --
+site grants and invitations are authorization facts -- so give it only to
+people you would trust with those.
+
+**Open gap -- needs a migration.** The app enforces this; the database does
+not yet. `0008_rls_scoped.sql`'s `role_permissions_manage` policy still
+allows any authenticated session holding `users.manage` to write
+`role_permissions` directly over PostgREST (with the public anon key and
+their own JWT), bypassing the server action. Until a new migration narrows
+that policy to admins (e.g. `using`/`with check` on
+`exists (select 1 from user_roles where user_id = auth.uid() and role = 'admin')`),
+the admin-only rule holds for the UI and server actions only. The app itself
+never writes this table from a user session, so the narrower policy breaks
+nothing.
+
+## Queued jobs re-check the actor when they run
+
+`plugin_install`, `bulk_manage`, `update_all_plugins` and `harden` jobs carry
+the id of the user who queued them (`payload.actor`). Their handlers
+(`src/services/jobs/handlers.ts`, `assertActorAuthorized`) reload that user's
+viewer immediately before touching the live site and require what every
+enqueuing path required: `wp_toolkit.manage` plus a `manage`-level grant on
+the job's site (or `sites.view_all`). If the permission or grant has been
+revoked since the job was queued -- or the user no longer has a role -- the
+job fails with "actor no longer authorized …" and is **not** retried.
+
+So revoking someone's access also stops their queued work. System jobs that
+carry no actor (nightly `snapshot_refresh`, `security_scan`, `seo_scan`,
+`vuln_feed_refresh`, reports, GeoGrid runs) are unaffected.
 
 ## Per-user overrides stay SQL-only
 

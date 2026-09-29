@@ -5,8 +5,34 @@ import { siteSummary, NOT_FOUND } from "./sites";
 import type { ToolCtx } from "../context";
 import { getSite } from "@/services/sites/service";
 import { enqueueJob } from "@/services/jobs/service";
-import { friendlySiteError } from "@/lib/mcp/errors";
+import { friendlySiteError, siteText } from "@/lib/mcp/errors";
 import { canAccessSite } from "@/lib/authz/decide";
+import type { InventoryPayload } from "@/services/inventory/types";
+
+/** Plugin/theme titles are chosen by whoever wrote the plugin. */
+const TITLE_MAX = 120;
+
+type Snapshot = { payload: InventoryPayload; taken_at: string };
+
+/**
+ * Plugin and theme titles are free text from the plugin's own header -- any
+ * author can put markup or instructions aimed at the model reading this
+ * output there. Stripped and capped (audit 2026-09-29, open 5); identifiers
+ * (file, slug, versions) are left as collected.
+ */
+function boundTitles(snapshot: Snapshot): Snapshot {
+  const bound = <T extends { title?: string }>(item: T): T =>
+    item.title === undefined ? item : { ...item, title: siteText(item.title, TITLE_MAX) };
+  const payload = snapshot.payload;
+  return {
+    ...snapshot,
+    payload: {
+      ...payload,
+      plugins: Array.isArray(payload.plugins) ? payload.plugins.map(bound) : payload.plugins,
+      themes: Array.isArray(payload.themes) ? payload.themes.map(bound) : payload.themes,
+    },
+  };
+}
 
 export function register(server: McpServer, ctx: ToolCtx): void {
   server.registerTool(
@@ -26,7 +52,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
         const snapshot = await ctx.inventory.latestSnapshot(site_id);
         return ok({
           site: siteSummary(site),
-          snapshot: snapshot ?? null,
+          snapshot: snapshot ? boundTitles(snapshot) : null,
           note: snapshot
             ? undefined
             : "No inventory has been collected yet. Use refresh_inventory to collect it.",

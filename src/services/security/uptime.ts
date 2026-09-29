@@ -1,4 +1,5 @@
 import tls from "node:tls";
+import { guardedFetch, publicOnlyLookup } from "@/lib/net-guard";
 import type { UptimeRow } from "./types";
 
 /**
@@ -13,7 +14,12 @@ import type { UptimeRow } from "./types";
 export function sslDaysRemaining(hostname: string): Promise<number | null> {
   return new Promise((resolve) => {
     const socket = tls.connect(
-      { host: hostname, port: 443, servername: hostname, timeout: 10_000, rejectUnauthorized: false },
+      {
+        host: hostname, port: 443, servername: hostname, timeout: 10_000, rejectUnauthorized: false,
+        // Same connect-time guard as the HTTP probes: a name that now
+        // resolves privately is refused at the socket (resolves to null).
+        lookup: publicOnlyLookup() as never,
+      },
       () => {
         const cert = socket.getPeerCertificate();
         socket.end();
@@ -28,13 +34,15 @@ export function sslDaysRemaining(hostname: string): Promise<number | null> {
 }
 
 export async function checkSite(
-  url: string, fetchImpl: typeof fetch = fetch,
+  url: string, fetchImpl: typeof fetch = guardedFetch,
 ): Promise<Omit<UptimeRow, "site_id">> {
   const started = Date.now();
   let status: number | null = null;
   try {
     const res = await fetchImpl(url, {
-      redirect: "follow",
+      // Followed hop by hop by guardedFetch, each hop re-checked; a
+      // redirect into private space counts as down.
+      redirect: "manual",
       signal: AbortSignal.timeout(15_000),
       headers: { "user-agent": "wp-control-panel-uptime/1.0" },
     });

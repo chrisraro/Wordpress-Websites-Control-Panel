@@ -38,6 +38,27 @@ export function mapConnectError(e: unknown): McpError {
 }
 
 /**
+ * Makes a string the site controls safe to show: markup stripped (script and
+ * style bodies included), whitespace collapsed, capped at `max` characters.
+ *
+ * Site-controlled text -- error messages, plugin and theme titles -- reaches
+ * both people and the model reading this panel's MCP output. Unbounded, it is
+ * room for instructions aimed at that model; stripped and capped, it is a
+ * label. Not an HTML sanitiser for rendering: angle brackets are dropped
+ * outright, since nothing legitimate here needs them.
+ */
+export function siteText(raw: unknown, max: number): string {
+  const s = String(raw ?? "")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<\/?[a-z!][^>]*>/gi, " ")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s.length > max ? `${s.slice(0, max).trimEnd()}…` : s;
+}
+
+/**
  * Turns a raw transport failure into something a person can act on.
  *
  * The motivating case: when Cloudflare challenges a request, the MCP
@@ -85,6 +106,5 @@ export function friendlySiteError(raw: unknown): string {
     return "The site returned a web page instead of a response, so the request did not reach WordPress.";
   }
 
-  const oneLine = msg.replace(/\s+/g, " ").trim();
-  return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine || "Something went wrong.";
+  return siteText(msg, 200) || "Something went wrong.";
 }

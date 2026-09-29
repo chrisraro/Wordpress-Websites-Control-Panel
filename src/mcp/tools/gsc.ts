@@ -51,7 +51,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "install_gsc_verification", args,
         `Would install the verification file ${file_name} on ${site.name} (${siteEnvironment(site)}), ` +
         "replacing any existing file of that name, then fetch it back to check it is reachable.",
         { site: siteSummary(site), file_name },
@@ -102,7 +102,7 @@ export function register(server: McpServer, ctx: ToolCtx): void {
       const { site } = loaded;
 
       const gate = gateConfirm(
-        ctx.auth, args,
+        ctx.auth, "remove_gsc_verification", args,
         `Would remove the verification file ${file_name} from ${site.name} (${siteEnvironment(site)}). ` +
         "This cannot be undone from the panel.",
         { site: siteSummary(site), file_name },

@@ -21,6 +21,8 @@
  * exists the caller can say what WAS found instead of echoing a 404.
  */
 
+import { guardedFetch } from "@/lib/net-guard";
+
 /** OAuth-only servers: this panel authenticates with application passwords. */
 const OAUTH_ROUTE = /-oauth$|^mcp-oauth/i;
 
@@ -68,13 +70,15 @@ const base = (url: string) => url.replace(/\/+$/, "");
  * away.
  */
 export async function discoverMcpEndpoint(
-  url: string, fetchImpl: typeof fetch = fetch,
+  url: string, fetchImpl: typeof fetch = guardedFetch,
 ): Promise<McpDiscovery> {
   const index = `${base(url)}/wp-json/`;
   let res: Response;
   try {
     res = await fetchImpl(index, {
-      headers: { Accept: "application/json" }, redirect: "follow",
+      headers: { Accept: "application/json" },
+      // guardedFetch follows redirects itself, re-checking each hop.
+      redirect: "manual",
       signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {

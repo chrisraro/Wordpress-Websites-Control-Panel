@@ -187,9 +187,24 @@ describe("lockout guards reach the caller as denials, not throws", () => {
   it("refuses unchecking users.manage for admin", async () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     const setRolePermission = vi.fn(async () => {});
-    currentRepo = fakeRepo({ setRolePermission });
+    currentRepo = fakeRepo({ getUser: async () => managedUser("actor-1", "admin"), setRolePermission });
     const result = await setRolePermissionAction("admin", "users.manage", false);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/must keep Manage users/);
+    expect(setRolePermission).not.toHaveBeenCalled();
+  });
+
+  // Audit 2026-09-29, open 9: users.manage without the admin role could
+  // grant its own role anything through the matrix.
+  it("refuses a matrix edit by a users.manage holder who is not an admin", async () => {
+    checkPermissionMock.mockResolvedValue({ ...FAKE_VIEWER, role: "developer" });
+    const getUser = vi.fn(async () => managedUser("actor-1", "developer"));
+    const setRolePermission = vi.fn(async () => {});
+    currentRepo = fakeRepo({ getUser, setRolePermission });
+    const result = await setRolePermissionAction("developer", "sites.manage", true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/only an administrator/i);
+    expect(getUser).toHaveBeenCalledWith("actor-1");
     expect(setRolePermission).not.toHaveBeenCalled();
   });
 });
@@ -391,6 +406,7 @@ describe("runtime argument validation and generic errors", () => {
   it("setRolePermissionAction hides raw database error text", async () => {
     checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
     currentRepo = fakeRepo({
+      getUser: async () => managedUser("actor-1", "admin"),
       setRolePermission: async () => { throw new Error("permission denied for table role_permissions"); },
     });
     const result = await setRolePermissionAction("developer", "seo.run", false);

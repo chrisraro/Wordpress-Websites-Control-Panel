@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function RolesPage() {
   // Gated exactly like /users and /users/[id]: users.manage or a 404.
-  await requirePermission("users.manage");
+  const viewer = await requirePermission("users.manage");
 
   const db = createServiceSupabase();
   const usersRepo = supabaseUsersRepo(db);
@@ -29,7 +29,10 @@ export default async function RolesPage() {
         subtitle="What each role may do. Ten permissions, four roles."
       />
 
-      <PermissionMatrix rolePermissions={rolePermissions} />
+      {/* Editing is admin-only (setRolePermissionChecked re-checks the
+          role at write time); anyone else with users.manage sees it
+          read-only. viewer.role is read per request, not from the JWT. */}
+      <PermissionMatrix rolePermissions={rolePermissions} canEdit={viewer.role === "admin"} />
     </main>
   );
 }

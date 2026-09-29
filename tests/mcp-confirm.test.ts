@@ -3,7 +3,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   gateConfirm, redactArgs, ok, fail, preview, ENVIRONMENT_NOTE,
-  requirePermission, requireWritableToken, CONFIRM_SHAPE,
+  requirePermission, requireWritableToken, CONFIRM_SHAPE, mintConfirmCode,
 } from "@/mcp/confirm";
 import { z } from "@/mcp/schema";
 import type { TokenAuth } from "@/lib/authz/token";
@@ -23,9 +23,14 @@ function auth(opts: { readOnly?: boolean; permissions?: AppPermission[] } = {}):
 
 const REASON = "Applying the September security patch";
 
+// A real call needs the code its dry run mints (tests/mcp-confirm-code.test.ts
+// covers the code itself); these tests are about the other gates.
+process.env.APP_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
+const CODE = () => mintConfirmCode(auth(), "t", {});
+
 describe("gateConfirm", () => {
   it("returns a preview and does not proceed when confirm is absent", () => {
-    const g = gateConfirm(auth(), {}, "Would update 3 plugins", { count: 3 });
+    const g = gateConfirm(auth(), "t", {}, "Would update 3 plugins", { count: 3 });
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBeFalsy();
@@ -33,11 +38,11 @@ describe("gateConfirm", () => {
   });
 
   it("returns a preview when confirm is explicitly false", () => {
-    expect(gateConfirm(auth(), { confirm: false }, "Would do it", {}).proceed).toBe(false);
+    expect(gateConfirm(auth(), "t", { confirm: false }, "Would do it", {}).proceed).toBe(false);
   });
 
   it("errors when confirm is true but no reason is given", () => {
-    const g = gateConfirm(auth(), { confirm: true }, "s", {});
+    const g = gateConfirm(auth(), "t", { confirm: true }, "s", {});
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBe(true);
@@ -45,21 +50,21 @@ describe("gateConfirm", () => {
   });
 
   it("errors when the reason is shorter than 10 characters", () => {
-    const g = gateConfirm(auth(), { confirm: true, reason: "too short" }, "s", {});
+    const g = gateConfirm(auth(), "t", { confirm: true, reason: "too short" }, "s", {});
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBe(true);
   });
 
   it("proceeds with a valid confirm and reason", () => {
-    const g = gateConfirm(auth(), { confirm: true, reason: REASON }, "s", {});
+    const g = gateConfirm(auth(), "t", { confirm: true, reason: REASON, confirm_code: CODE() }, "s", {});
     expect(g.proceed).toBe(true);
     if (!g.proceed) throw new Error("unreachable");
     expect(g.reason).toBe(REASON);
   });
 
   it("blames the TOKEN, not a permission, when the token is read-only", () => {
-    const g = gateConfirm(auth({ readOnly: true }), { confirm: true, reason: REASON }, "s", {});
+    const g = gateConfirm(auth({ readOnly: true }), "t", { confirm: true, reason: REASON, confirm_code: CODE() }, "s", {});
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBe(true);
@@ -72,7 +77,7 @@ describe("gateConfirm", () => {
   });
 
   it("previews rather than erroring for a read-only token that did not confirm", () => {
-    const g = gateConfirm(auth({ readOnly: true }), {}, "Would update 3 plugins", {});
+    const g = gateConfirm(auth({ readOnly: true }), "t", {}, "Would update 3 plugins", {});
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBeFalsy();
@@ -80,28 +85,28 @@ describe("gateConfirm", () => {
 
   describe("reason length boundaries", () => {
     it("errors at exactly 9 characters (one below the minimum)", () => {
-      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(9) }, "s", {});
+      const g = gateConfirm(auth(), "t", { confirm: true, reason: "x".repeat(9) }, "s", {});
       expect(g.proceed).toBe(false);
       if (g.proceed) throw new Error("unreachable");
       expect(g.result.isError).toBe(true);
     });
 
     it("proceeds at exactly 10 characters (the minimum)", () => {
-      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(10) }, "s", {});
+      const g = gateConfirm(auth(), "t", { confirm: true, reason: "x".repeat(10), confirm_code: CODE() }, "s", {});
       expect(g.proceed).toBe(true);
       if (!g.proceed) throw new Error("unreachable");
       expect(g.reason).toBe("x".repeat(10));
     });
 
     it("proceeds at exactly 500 characters (the maximum)", () => {
-      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(500) }, "s", {});
+      const g = gateConfirm(auth(), "t", { confirm: true, reason: "x".repeat(500), confirm_code: CODE() }, "s", {});
       expect(g.proceed).toBe(true);
       if (!g.proceed) throw new Error("unreachable");
       expect(g.reason).toBe("x".repeat(500));
     });
 
     it("errors at exactly 501 characters (one above the maximum)", () => {
-      const g = gateConfirm(auth(), { confirm: true, reason: "x".repeat(501) }, "s", {});
+      const g = gateConfirm(auth(), "t", { confirm: true, reason: "x".repeat(501) }, "s", {});
       expect(g.proceed).toBe(false);
       if (g.proceed) throw new Error("unreachable");
       expect(g.result.isError).toBe(true);
@@ -130,7 +135,7 @@ describe("CONFIRM_SHAPE", () => {
 
   it("feeds the parsed default result into gateConfirm to produce a preview", () => {
     const parsed = schema.parse({});
-    const g = gateConfirm(auth(), parsed, "Would update 3 plugins", { count: 3 });
+    const g = gateConfirm(auth(), "t", parsed, "Would update 3 plugins", { count: 3 });
     expect(g.proceed).toBe(false);
     if (g.proceed) throw new Error("unreachable");
     expect(g.result.isError).toBeFalsy();

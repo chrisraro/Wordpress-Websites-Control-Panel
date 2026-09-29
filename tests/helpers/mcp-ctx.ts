@@ -15,6 +15,10 @@ import { APP_PERMISSIONS, type AppPermission } from "@/lib/authz/types";
  * run. Moving the shared fixture here removes that double-run.
  */
 
+// Destructive tools MAC their dry-run confirm codes with a key derived from
+// APP_ENCRYPTION_KEY (src/mcp/confirm.ts); any fixed 32-byte value will do.
+process.env.APP_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
+
 export const SITE_ID = "1b6e3d4f-5c7e-4a92-8d3b-6f4c2a9e7b51";
 export const SITE = {
   id: SITE_ID, name: "Alpha", url: "https://alpha.test",

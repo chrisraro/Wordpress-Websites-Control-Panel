@@ -641,18 +641,48 @@ describe("deleteManagedUser", () => {
 });
 
 describe("setRolePermissionChecked", () => {
+  const person = (id: string, role: ManagedUser["role"]): ManagedUser => ({
+    id, email: `${id}@example.com`, role, lastSignInAt: null, invitedNotAccepted: false, siteGrants: 0,
+  });
+  const ADMIN = person("admin-1", "admin");
+
   it("refuses stripping users.manage from admin", async () => {
-    const { repo, setRolePermissionCalls } = memoryUsersRepo([]);
-    const result = await setRolePermissionChecked(repo, "admin", "users.manage", false);
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([ADMIN]);
+    const result = await setRolePermissionChecked(repo, ADMIN.id, "admin", "users.manage", false);
     expect(result.ok).toBe(false);
     expect(setRolePermissionCalls).toHaveLength(0);
   });
 
-  it("writes when the guard allows it", async () => {
-    const { repo, setRolePermissionCalls } = memoryUsersRepo([]);
-    const result = await setRolePermissionChecked(repo, "developer", "seo.run", false);
+  it("writes when the actor is an admin and the guard allows it", async () => {
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([ADMIN]);
+    const result = await setRolePermissionChecked(repo, ADMIN.id, "developer", "seo.run", false);
     expect(result).toEqual({ ok: true });
     expect(setRolePermissionCalls).toEqual([{ role: "developer", permission: "seo.run", enabled: false }]);
+  });
+
+  // Security finding (audit 2026-09-29, open 9): a users.manage holder who
+  // is not an admin could grant their own role any permission through the
+  // matrix. Editing it is now admin-only, read fresh at the write.
+  it("refuses a non-admin actor even when they hold users.manage", async () => {
+    const dev = person("dev-1", "developer");
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([ADMIN, dev]);
+    for (const [role, permission, enabled] of [
+      ["developer", "sites.manage", true], ["developer", "seo.run", false], ["client", "reports.generate", false],
+    ] as const) {
+      const result = await setRolePermissionChecked(repo, dev.id, role, permission, enabled);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/only an administrator/i);
+    }
+    expect(setRolePermissionCalls).toHaveLength(0);
+  });
+
+  it("refuses an actor whose account or role is gone", async () => {
+    const { repo, setRolePermissionCalls } = memoryUsersRepo([ADMIN, person("roleless", null)]);
+    for (const id of ["roleless", "missing"]) {
+      const result = await setRolePermissionChecked(repo, id, "developer", "seo.run", true);
+      expect(result.ok).toBe(false);
+    }
+    expect(setRolePermissionCalls).toHaveLength(0);
   });
 });
 

@@ -1,5 +1,6 @@
 import { runPhp } from "@/lib/wpphp";
 import type { SiteMcpClient } from "@/lib/mcp/client";
+import { guardedFetch } from "@/lib/net-guard";
 import type { CheckResult, SecurityCheck } from "./types";
 
 export const HARDENING_PHP = `
@@ -41,7 +42,10 @@ async function probe(
   fetchImpl: typeof fetch, url: string,
 ): Promise<{ status: number; body: string; headers: Headers } | null> {
   try {
-    const res = await fetchImpl(url, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
+    // Redirects are followed hop by hop by guardedFetch, each re-checked
+    // against private address space (a public site must not be able to
+    // bounce a probe into the panel's own network).
+    const res = await fetchImpl(url, { redirect: "manual", signal: AbortSignal.timeout(15_000) });
     const body = (await res.text()).slice(0, 4096);
     return { status: res.status, body, headers: res.headers };
   } catch {
@@ -50,7 +54,7 @@ async function probe(
 }
 
 export async function runHttpHardening(
-  siteUrl: string, fetchImpl: typeof fetch = fetch,
+  siteUrl: string, fetchImpl: typeof fetch = guardedFetch,
 ): Promise<SecurityCheck[]> {
   const base = siteUrl.replace(/\/+$/, "");
   const [xmlrpc, uploads, home] = await Promise.all([
