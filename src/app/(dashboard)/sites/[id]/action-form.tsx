@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "@/components/ui/styles";
 import { IconSpinner } from "@/components/ui/icons";
 import { TimingChoice } from "@/components/ui/timing-choice";
+import { BackupChoice } from "@/components/ui/backup-choice";
 
 export type ManageResult = {
   ok: boolean;
@@ -48,7 +49,7 @@ export interface ConfirmSpec {
  */
 export function ManageForm({
   action, label, pendingLabel, confirm, success, variant = "outline", size = "md",
-  icon, className, buttonClassName, showInlineError = true, timingChoice,
+  icon, className, buttonClassName, showInlineError = true, timingChoice, backupChoice,
 }: {
   action: ManageFormAction;
   label: string;
@@ -60,6 +61,12 @@ export function ManageForm({
    * `confirm`; omit it when no target site has a window.
    */
   timingChoice?: { windowLabel: string; windowHint: string };
+  /**
+   * Offers "Update without a backup" inside the confirmation, posted as the
+   * `backup` form field (`skip` when ticked). For actions that queue updates;
+   * only meaningful with `confirm`.
+   */
+  backupChoice?: boolean;
   /** Toast title on success. Defaults to the button's own label. */
   success?: string;
   variant?: ButtonVariant;
@@ -128,8 +135,13 @@ export function ManageForm({
             formRef.current?.requestSubmit();
           }}
         >
-          {timingChoice && (
-            <TimingChoice windowLabel={timingChoice.windowLabel} windowHint={timingChoice.windowHint} />
+          {(timingChoice || backupChoice) && (
+            <div className="space-y-4">
+              {timingChoice && (
+                <TimingChoice windowLabel={timingChoice.windowLabel} windowHint={timingChoice.windowHint} />
+              )}
+              {backupChoice && <BackupChoice />}
+            </div>
           )}
         </ConfirmDialog>
       )}

@@ -471,6 +471,7 @@ export default async function DashboardPage({
                 <ManageForm
                   action={updateAllPluginsAction.bind(null, activeEnv)}
                   timingChoice={timingChoiceFor(updateTargets)}
+                  backupChoice
                   label={`Update plugins on ${updateTargets.length} site${updateTargets.length === 1 ? "" : "s"}`}
                   pendingLabel="Queuing…"
                   variant="outline"

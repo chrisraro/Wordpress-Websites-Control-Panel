@@ -148,3 +148,35 @@ describe("enqueueBulk", () => {
     ]);
   });
 });
+
+describe("enqueueBulk backup choice", () => {
+  function deps() {
+    const inserted: Array<{ payload?: Record<string, unknown> }> = [];
+    const activity: Array<Record<string, unknown>> = [];
+    const d: BulkDeps = {
+      jobs: { async insert(j: Record<string, unknown>) { inserted.push(j); return { id: "j" }; } } as unknown as JobsRepo,
+      sites: { async insertActivity(e: Record<string, unknown>) { activity.push(e); } } as unknown as SitesRepo,
+    };
+    return { d, inserted, activity };
+  }
+
+  it("carries no backup field by default, so the gate requires one", async () => {
+    const f = deps();
+    await enqueueBulk(f.d, "site-1", "user-1", "update", pluginScope(), ["a/a.php"]);
+    expect(f.inserted[0].payload).not.toHaveProperty("backup");
+    expect(f.activity[0].detail).not.toHaveProperty("backup");
+  });
+
+  it("marks every job backup: skip, and logs it, when the operator chose no backup", async () => {
+    const f = deps();
+    await enqueueBulk(f.d, "site-1", "user-1", "update", pluginScope(), ["a/a.php"], { backup: "skip" });
+    expect(f.inserted[0].payload).toMatchObject({ kind: "update", backup: "skip" });
+    expect(f.activity[0].detail).toMatchObject({ backup: "skip" });
+  });
+
+  it("treats backup: required exactly like the default", async () => {
+    const f = deps();
+    await enqueueBulk(f.d, "site-1", "user-1", "update", pluginScope(), ["a/a.php"], { backup: "required" });
+    expect(f.inserted[0].payload).not.toHaveProperty("backup");
+  });
+});
