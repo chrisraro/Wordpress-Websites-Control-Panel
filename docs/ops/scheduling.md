@@ -56,6 +56,15 @@ older than 7 days, so SEO data refreshes weekly without a separate schedule.
 
 Inspect: `select * from cron.job;` — Unschedule: `select cron.unschedule('wp-panel-process');`
 
+**Retention** (`wp-panel-retention`, 03:17 nightly) is scheduled by migration
+0025 itself — it calls a database function, not the app, so it needs no URL or
+secret. It deletes uptime checks older than 90 days, finished or cancelled jobs
+older than 60 days, inventory snapshots older than 180 days, and security/SEO
+history older than a year, always keeping the newest row per site (and per SEO
+source). The activity log, reports and GeoGrid history are kept. Run it by hand
+with `select * from prune_history();`; stop it with
+`select cron.unschedule('wp-panel-retention');`.
+
 Local dev has no scheduler: hit the routes manually, e.g.
 `curl -H "x-cron-secret: <secret>" http://localhost:3000/api/cron/enqueue`
 then `.../api/cron/process`.
