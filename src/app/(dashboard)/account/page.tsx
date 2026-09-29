@@ -44,6 +44,7 @@ export default async function AccountPage() {
             mode="self"
             userId={viewer.id}
             tokens={tokenList.tokens}
+            renderedAt={Date.now()}
             tokensUnavailable={tokenList.unavailable}
           />
         </div>
