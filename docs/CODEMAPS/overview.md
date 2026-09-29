@@ -54,7 +54,7 @@ Supabase pg_cron + pg_net (docs/ops/scheduling.md; vercel.json declares no crons
 | Path | Responsibility | Key entry files |
 |---|---|---|
 | `src/app/login`, `src/app/page.tsx` | Sign-in, root redirect | `login/page.tsx`, `login/actions.ts` |
-| `src/app/(dashboard)/dashboard` | Fleet overview, system health | `dashboard/page.tsx`, `(dashboard)/queue-actions.ts` |
+| `src/app/(dashboard)/dashboard` | Overview band, needs-attention list, site directory card catalog (search/filter/sort/10 per page in the URL; live sandboxed homepage frames, screenshot fallback), system health | `dashboard/page.tsx`, `site-catalog.tsx`, `site-card.tsx`, `site-preview.tsx`; logic in `src/services/sites/{directory,overview,preview}.ts` |
 | `src/app/(dashboard)/sites` | Site list, connect (modal via `@modal/(.)sites/new`), per-site tabs | `sites/[id]/page.tsx`, `sites/[id]/tabs.tsx`, `sites/[id]/actions.ts` |
 | `src/app/(dashboard)/sites/[id]/{plugins,themes,security,seo,geogrid,reports}` | One page per site tab; actions live one level up as `*-actions.ts` | `seo/page.tsx`, `seo-actions.ts` |
 | `src/app/(dashboard)/marketplace` | wordpress.org search, bulk install, theme tab, batch progress | `marketplace/page.tsx`, `marketplace/batches/[id]/page.tsx` |

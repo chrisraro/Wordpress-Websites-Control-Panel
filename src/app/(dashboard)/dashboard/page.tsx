@@ -20,14 +20,21 @@ import { ClientHome } from "./client-home";
 import { loadClientEvidence } from "@/services/client/summary";
 import { clientEvidenceDeps } from "@/services/client/deps";
 import { LinkPending } from "@/components/shell/nav-progress";
-import { EnvTabs } from "./env-tabs";
+import { FleetOverviewBand } from "./fleet-overview";
+import { SiteCatalog } from "./site-catalog";
+import type { CatalogSite } from "./site-card";
+import {
+  parseDirectoryQuery, queryDirectory, type DirectoryEnv, type DirectoryFields,
+} from "@/services/sites/directory";
+import { fleetOverview, liveness } from "@/services/sites/overview";
+import { liveFrameUrl, sitePreviewUrl } from "@/services/sites/preview";
 import type { SiteRow } from "@/services/sites/types";
 import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
 import { vulnFeedStatus } from "@/services/security/scan";
-import { Card, EmptyState, PageHeader, StatusBadge, type StatusTone } from "@/components/ui/primitives";
+import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
 import {
-  IconAlert, IconCheck, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconShield, IconSites,
+  IconAlert, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconShield, IconSites,
 } from "@/components/ui/icons";
 import { ManageForm } from "../sites/[id]/action-form";
 import {
@@ -36,19 +43,6 @@ import {
 import { hardeningPlan, FIX_LABEL } from "@/services/security/harden";
 
 export const dynamic = "force-dynamic";
-
-const GRADE_TONE: Record<string, StatusTone> = {
-  A: "good", B: "good", C: "warn", D: "alert", F: "bad",
-};
-
-function seoTone(score: number): StatusTone {
-  return score >= 80 ? "good" : score >= 50 ? "warn" : "bad";
-}
-
-const SEVERITY_TONE: Record<Exclude<Severity, "ok">, StatusTone> = {
-  critical: "bad",
-  warn: "warn",
-};
 
 interface Row {
   site: SiteRow;
@@ -66,149 +60,62 @@ interface Row {
   /** The scan behind `grade` could not check everything; see scanCoverage. */
   gradeIncomplete: boolean;
   seo?: number;
+  /** Search, sort and summary fields, shared with the directory and overview. */
+  fields: DirectoryFields;
+  /** Latest uptime check's framing verdict (0029); null = unknown. */
+  frameable: boolean | null;
 }
 
 /**
- * One site, as a row rather than a card.
- *
- * A grid of same-size cards makes the reader scan every tile to find the one
- * that matters; rows in a single container scan in one pass down the left
- * edge, which is what a portfolio sweep actually needs.
+ * One site in the "Needs attention" list: a row stating its problems in
+ * words, worst first. The full per-site metrics live on the cards in the
+ * directory below; this list exists to say what needs doing.
  */
-/**
- * One definition, rendered twice: once stacked inside the text column below
- * `sm`, once as a right-hand cluster above it. Two copies of the badge list
- * would drift the moment a metric is added.
- */
-function MetricBadges({
-  updates, grade, gradeIncomplete, seo, gsc,
-}: {
-  updates?: number; grade?: string; gradeIncomplete?: boolean; seo?: number;
-  gsc?: ReturnType<typeof gscStatus>;
-}) {
-  return (
-    <>
-      {/* Only when something is wrong. A row carrying "Verification
-          installed" on all twelve sites spends the reader's attention to say
-          nothing, and this page exists to surface exceptions -- the per-site
-          SEO tab is where the full state lives either way. Deliberately says
-          nothing when gsc is null, which means "not measured since this
-          check existed", not "missing". */}
-      {gsc?.state === "none" && <StatusBadge tone="warn">No GSC</StatusBadge>}
-      {gsc?.state === "malformed" && <StatusBadge tone="bad">GSC broken</StatusBadge>}
-      {updates !== undefined && updates > 0 && (
-        <StatusBadge tone="warn">
-          {updates}&nbsp;update{updates === 1 ? "" : "s"}
-        </StatusBadge>
-      )}
-      {/* A partial grade says so where the grade is shown: the letter alone
-          would read as a verdict on checks that never ran. */}
-      {grade && (
-        <StatusBadge tone={GRADE_TONE[grade] ?? "idle"}>
-          Security&nbsp;{grade}{gradeIncomplete && <>&nbsp;·&nbsp;incomplete</>}
-        </StatusBadge>
-      )}
-      {seo !== undefined && <StatusBadge tone={seoTone(seo)}>SEO&nbsp;{seo}</StatusBadge>}
-    </>
-  );
-}
-
-function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
-  const { site, staging, severity, reasons, updates, grade, gradeIncomplete, seo, gsc } = row;
+function AttentionRow({ row }: { row: Row }) {
+  const { site, staging, severity, reasons } = row;
   return (
     <li className="border-b border-hairline last:border-0">
       <Link
         href={`/sites/${site.id}`}
         className="group flex items-start gap-3 px-5 py-4 transition-colors duration-150
           hover:bg-canvas focus-visible:bg-canvas focus-visible:outline-2
-          focus-visible:-outline-offset-2 focus-visible:outline-ink sm:items-center"
+          focus-visible:-outline-offset-2 focus-visible:outline-ink"
       >
         <span
           aria-hidden
-          className={`mt-1.5 size-2 shrink-0 rounded-full sm:mt-0 ${
-            severity === "critical"
-              ? "bg-status-bad"
-              : severity === "warn"
-                ? "bg-status-warn"
-                : site.status === "disabled"
-                  ? "bg-mid-gray"
-                  : "bg-status-good"
-          }`}
+          className={`mt-1.5 size-2 shrink-0 rounded-full ${
+            severity === "critical" ? "bg-status-bad" : "bg-status-warn"}`}
         />
-
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="truncate text-body font-medium text-ink">{site.name}</span>
-            {/* Environment is marked, never inferred as production.
-                Deliberately not a StatusBadge: status colour means health, and
-                an environment is a category, not a health state — so this is
-                the one solid chip on the page, which also makes it the loudest
-                thing in the row without spending a hue the design system
-                reserves for data. PRODUCT.md names acting on the wrong
-                environment as the expensive mistake this product can cause;
-                a quiet outline was legible but not unmissable. */}
-            {staging && (
-              <span className={badgeClass("solid", "uppercase tracking-[0.08em]")}>
-                Staging
-              </span>
-            )}
-            {site.status === "disabled" && <StatusBadge tone="idle">Disabled</StatusBadge>}
+            <span className={staging
+              ? badgeClass("solid", "uppercase tracking-[0.08em]")
+              : badgeClass("outline", "uppercase tracking-[0.08em]")}>
+              {staging ? "Staging" : "Live"}
+            </span>
           </div>
-
           <p className="truncate text-caption tracking-normal text-mid-gray">
             {site.url.replace(/^https?:\/\//, "")}
             {site.client_label && ` · ${site.client_label}`}
           </p>
-
-          {showReasons && reasons.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {reasons.map((r) => (
-                <li
-                  key={r}
-                  className={`text-caption tracking-normal ${
-                    severity === "critical" ? "text-status-bad" : "text-status-warn"
-                  }`}
-                >
-                  {r}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Below `sm` the metrics move onto their own line inside the text
-              column rather than disappearing. They used to be `hidden
-              sm:flex`, which meant a healthy row on a phone was a name, a URL
-              and a chevron -- and PRODUCT.md makes phone use a primary
-              target, with the portfolio sweep the job most likely to happen
-              there. That was a viewport escape hatch in a codebase which
-              otherwise refuses them: see `pointer-coarse` in styles.ts, which
-              keys on input device rather than width for exactly this reason. */}
-          {!showReasons && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:hidden">
-              <MetricBadges updates={updates} grade={grade} gradeIncomplete={gradeIncomplete} seo={seo} gsc={gsc} />
-            </div>
-          )}
+          <ul className="mt-2 space-y-1">
+            {reasons.map((r) => (
+              <li
+                key={r}
+                className={`text-caption tracking-normal ${
+                  severity === "critical" ? "text-status-bad" : "text-status-warn"}`}
+              >
+                {r}
+              </li>
+            ))}
+          </ul>
         </div>
-
-        {/* The two sections carry different information, so they show
-            different things. A row that needs attention states its problems in
-            words; repeating "2 updates" as a badge beside "2 updates pending"
-            says it twice and reads as two separate facts. A healthy row has no
-            problems to state, so the metrics are what there is to show. */}
-        {!showReasons && (
-          <div className="hidden shrink-0 items-center gap-1.5 sm:flex">
-            <MetricBadges updates={updates} grade={grade} gradeIncomplete={gradeIncomplete} seo={seo} gsc={gsc} />
-          </div>
-        )}
-
-        {/* The row's own answer to the click. Swapped in place of the
-            chevron rather than added beside it, so nothing reflows. */}
-        <span className="mt-0.5 flex shrink-0 items-center sm:mt-0">
+        <span className="mt-0.5 flex shrink-0 items-center">
           <LinkPending spinner>
             <IconChevronRight
               size={16}
-              className="text-mid-gray transition-transform duration-150
-                group-hover:translate-x-0.5"
+              className="text-mid-gray transition-transform duration-150 group-hover:translate-x-0.5"
             />
           </LinkPending>
         </span>
@@ -220,13 +127,14 @@ function SiteRowItem({ row, showReasons }: { row: Row; showReasons: boolean }) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ env?: string }>;
+  searchParams: Promise<{ q?: string; env?: string; sort?: string; page?: string }>;
 }) {
-  // Production is the default because it is what a client's visitors see:
-  // opening on staging would make the consequential half of the portfolio the
-  // one you have to go looking for.
-  const params = await searchParams;
-  const activeEnv: SiteEnvironment = params.env === "staging" ? "staging" : "production";
+  const query = parseDirectoryQuery(await searchParams);
+  // The fleet-wide writes (refresh, update, harden) still act on exactly one
+  // environment -- PRODUCT.md's wrong-environment mistake -- and name it in
+  // their labels. Live unless the directory is filtered to staging, because
+  // live is what clients' visitors see.
+  const activeEnv: SiteEnvironment = query.env === "staging" ? "staging" : "production";
   const viewer = await requireViewer();
   const db = await readDbFor(viewer);
   const jobsRepo = supabaseJobsRepo(db);
@@ -282,9 +190,8 @@ export default async function DashboardPage({
   // fan-out uses (src/app/api/cron/enqueue/route.ts), or the button renders
   // (or promises a count) the action would not actually honour.
   //
-  // Scoped to the visible environment, matching the action itself: the
-  // confirmation names a number of sites, and a number the reader cannot see
-  // on screen is a number they cannot check.
+  // Scoped to one environment (activeEnv), matching the action itself; the
+  // label and confirmation name it, so the count is always checkable.
   const refreshTargets = sites.filter(
     (s) =>
       s.status !== "disabled" &&
@@ -331,23 +238,28 @@ export default async function DashboardPage({
   const showSystemHealth =
     canSeeSystemHealth && (failureGroups.length > 0 || feedStatus.state !== "fresh");
 
-  // One pass per site, all in flight together. Deliberately the same four
-  // reads the previous version made: this page is the landing screen and has
-  // to stay fast on a phone, so the improvement here is what the data is
-  // arranged into, not how much more of it is fetched.
+  // One pass per site, all in flight together. Five bounded reads: the four
+  // the row list always made plus the 24h uptime summary (at most 288 rows at
+  // the 5-minute cadence), which the overview band and the cards' Up/Down
+  // need. This is the landing screen and has to stay fast on a phone.
   const rows: Row[] = await Promise.all(
     sites.map(async (site) => {
-      const [snap, g, score, latestChecks] = await Promise.all([
+      const [snap, g, score, latestChecks, uptime] = await Promise.all([
         snapshots.latestSnapshot(site.id),
         securityRepo.latestGrade(site.id),
         seoRepo.latestAuditScore(site.id),
         securityRepo.latestChecks(site.id),
+        // One failed read must not blank the dashboard: unknown uptime shows
+        // as "Not checked", never as down.
+        securityRepo.uptimeSummary(site.id).catch(() => null),
       ]);
       const updates = snap ? pendingUpdates(snap.payload) : undefined;
       const pluginUpdates = snap ? pendingPluginUpdates(snap.payload) : 0;
       const gsc = gscStatus(snap?.payload.gsc);
       const grade = g?.grade;
-      const { severity, reasons } = siteAttention({ status: site.status, updates, grade });
+      const live = site.status === "disabled" ? { up: null, unconfirmed: false } : liveness(uptime);
+      const up = live.up;
+      const { severity, reasons } = siteAttention({ status: site.status, updates, grade, up });
       return {
         site,
         staging: isStagingSite(site),
@@ -360,37 +272,55 @@ export default async function DashboardPage({
         grade,
         gradeIncomplete: (g?.incomplete?.length ?? 0) > 0,
         seo: score ?? undefined,
+        frameable: uptime?.frameable ?? null,
+        fields: {
+          name: site.name,
+          url: site.url,
+          clientLabel: site.client_label,
+          env: siteEnvironment(site),
+          status: site.status,
+          severity,
+          grade,
+          updates,
+          seo: score ?? undefined,
+          up,
+          downUnconfirmed: live.unconfirmed,
+          uptime24h: uptime?.uptime24h ?? null,
+          sslDays: uptime?.sslDays ?? null,
+        },
       };
     }),
   );
 
   const byName = (a: Row, b: Row) => a.site.name.localeCompare(b.site.name);
 
-  // Counts for BOTH tabs are computed before filtering, so the tab you are
-  // not looking at can still report what needs attention. Without this the
-  // split would hide exceptions rather than organise them.
-  const countsFor = (env: SiteEnvironment) => {
-    const inEnv = rows.filter((r) => siteEnvironment(r.site) === env);
-    return { total: inEnv.length, needsAttention: inEnv.filter((r) => r.severity !== "ok").length };
+  const overview = fleetOverview(rows.map((r) => r.fields));
+  const envCounts: Record<DirectoryEnv, number> = {
+    all: rows.length, live: overview.live, staging: overview.staging,
   };
-  const envCounts = { production: countsFor("production"), staging: countsFor("staging") };
+  const directory = queryDirectory(rows, (r) => r.fields, query);
+  const catalog: CatalogSite[] = directory.items.map((r) => ({
+    id: r.site.id,
+    fields: r.fields,
+    reasons: r.reasons,
+    gradeIncomplete: r.gradeIncomplete,
+    gscProblem: r.gsc?.state === "none" || r.gsc?.state === "malformed" ? r.gsc.state : null,
+    liveUrl: liveFrameUrl(r.site.url, r.frameable),
+    previewSrc: sitePreviewUrl(r.site.url, r.fields.env),
+  }));
 
-  const visible = rows.filter((r) => siteEnvironment(r.site) === activeEnv);
-  const needsAttention = visible
+  // The exception list stays a summary of the whole portfolio, independent
+  // of whatever the directory below is filtered to.
+  const needsAttention = rows
     .filter((r) => r.severity !== "ok")
     .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || byName(a, b));
-  const healthy = visible.filter((r) => r.severity === "ok").sort(byName);
 
-  // Scoped to the visible tab: a subtitle counting the whole fleet beside a
-  // list showing half of it is a subtitle nobody can reconcile.
-  const total = visible.length;
-  // ...but "is anything connected at all" is a question about the portfolio,
-  // not about the tab. Keeping the two apart is the whole of the fix for an
-  // empty Staging tab that used to announce "No sites connected yet" over a
-  // dozen healthy production sites, and hide "Connect site" while doing it.
+  // The fleet writes act on one environment; see activeEnv.
+  const visible = rows.filter((r) => siteEnvironment(r.site) === activeEnv);
+  const envWord = activeEnv === "production" ? "live" : "staging";
   const anyConnected = rows.length > 0;
 
-  // Sites in THIS tab with a plugin update waiting. Derived from the same
+  // Sites in the action's environment with a plugin update waiting. Derived from the same
   // snapshot numbers the rows display, so the button can never claim work the
   // page does not show — and gated on the same pair the action enforces.
   const updateTargets = visible.filter(
@@ -443,7 +373,7 @@ export default async function DashboardPage({
             `the ${targets.length - withWindow} without one run now.`,
     };
   };
-  const otherEnv: SiteEnvironment = activeEnv === "production" ? "staging" : "production";
+  const total = rows.length;
   const subtitle =
     total === 0
       ? undefined
@@ -454,7 +384,7 @@ export default async function DashboardPage({
   return (
     <main>
       <PageHeader
-        title="Sites"
+        title="Overview"
         subtitle={subtitle}
         actions={
           anyConnected && (
@@ -462,7 +392,7 @@ export default async function DashboardPage({
               {canRefreshAll && (
                 <ManageForm
                   action={refreshAllInventoryAction.bind(null, activeEnv)}
-                  label="Refresh all inventory"
+                  label={`Refresh ${envWord} inventory`}
                   pendingLabel="Queuing…"
                   variant="outline"
                   icon={<IconRefresh size={16} />}
@@ -483,7 +413,7 @@ export default async function DashboardPage({
                   action={updateAllPluginsAction.bind(null, activeEnv)}
                   timingChoice={timingChoiceFor(updateTargets)}
                   backupChoice
-                  label={`Update plugins on ${updateTargets.length} site${updateTargets.length === 1 ? "" : "s"}`}
+                  label={`Update plugins on ${updateTargets.length} ${envWord} site${updateTargets.length === 1 ? "" : "s"}`}
                   pendingLabel="Queuing…"
                   variant="outline"
                   icon={<IconPlugins size={16} />}
@@ -516,7 +446,7 @@ export default async function DashboardPage({
                 <ManageForm
                   action={hardenFleetAction.bind(null, activeEnv)}
                   timingChoice={timingChoiceFor(hardenTargets)}
-                  label={`Harden ${hardenTargets.length} site${hardenTargets.length === 1 ? "" : "s"}`}
+                  label={`Harden ${hardenTargets.length} ${envWord} site${hardenTargets.length === 1 ? "" : "s"}`}
                   pendingLabel="Queuing…"
                   variant="outline"
                   icon={<IconShield size={16} />}
@@ -549,15 +479,7 @@ export default async function DashboardPage({
         }
       />
 
-      {/* A pair of tabs reading "Production 0 / Staging 0" above "Connect
-          your first site" is furniture for a room with nothing in it. */}
-      {anyConnected && (
-        <EnvTabs
-          active={activeEnv}
-          production={envCounts.production}
-          staging={envCounts.staging}
-        />
-      )}
+      {anyConnected && <FleetOverviewBand o={overview} />}
 
       {/* Above "Needs attention" per the spec this implements: a jobs admin
           page nobody opens does not solve invisibility, this does. Rendered
@@ -624,31 +546,7 @@ export default async function DashboardPage({
         </section>
       )}
 
-      {total === 0 && anyConnected ? (
-        /* The tab is empty; the account is not. Saying "no sites connected"
-           here would be false, and the recovery it offered -- connect your
-           first site -- is not the one this reader needs. What they need is
-           the way back to where their sites actually are, with the count so
-           they can see it is worth taking. */
-        <Card>
-          <EmptyState
-            icon={<IconSites size={28} />}
-            title={activeEnv === "staging" ? "No staging sites" : "No production sites"}
-            action={
-              <Link
-                href={otherEnv === "production" ? "/dashboard" : "/dashboard?env=staging"}
-                className={`${buttonClass("outline")} mt-1`}
-              >
-                View {otherEnv} sites ({envCounts[otherEnv].total})
-              </Link>
-            }
-          >
-            {activeEnv === "staging"
-              ? "None of the connected sites are marked as staging copies. The marking lives on each site’s own page, under Connection."
-              : "Every connected site is marked as a staging copy."}
-          </EmptyState>
-        </Card>
-      ) : total === 0 ? (
+      {total === 0 ? (
         <Card>
           {canConnectSite ? (
             <EmptyState
@@ -671,7 +569,7 @@ export default async function DashboardPage({
           )}
         </Card>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-8">
           {needsAttention.length > 0 && (
             <section aria-labelledby="needs-attention">
               <h2
@@ -683,31 +581,13 @@ export default async function DashboardPage({
               </h2>
               <ul className={`${cardClass} overflow-hidden`}>
                 {needsAttention.map((row) => (
-                  <SiteRowItem key={row.site.id} row={row} showReasons />
+                  <AttentionRow key={row.site.id} row={row} />
                 ))}
               </ul>
             </section>
           )}
 
-          {/* Omitted entirely when every site is already listed above. A
-              section that renders only to announce it is empty is noise on the
-              screen someone opens to find what needs doing. */}
-          {healthy.length > 0 && (
-            <section aria-labelledby="all-sites">
-              <h2
-                id="all-sites"
-                className="mb-2 flex items-center gap-2 text-body font-medium text-ink"
-              >
-                {needsAttention.length === 0 && <IconCheck size={16} className="text-status-good" />}
-                {needsAttention.length > 0 ? "Everything else" : "All sites"}
-              </h2>
-              <ul className={`${cardClass} overflow-hidden`}>
-                {healthy.map((row) => (
-                  <SiteRowItem key={row.site.id} row={row} showReasons={false} />
-                ))}
-              </ul>
-            </section>
-          )}
+          <SiteCatalog query={query} result={{ ...directory, items: catalog }} counts={envCounts} />
         </div>
       )}
     </main>

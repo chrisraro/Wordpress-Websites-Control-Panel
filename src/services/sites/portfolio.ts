@@ -21,6 +21,11 @@ export interface AttentionInput {
   updates?: number;
   /** Latest security grade A–F; undefined when never scanned. */
   grade?: string;
+  /**
+   * Whether the latest uptime check succeeded. null/undefined = never
+   * checked, which is not a fault: only a check that ran and failed is.
+   */
+  up?: boolean | null;
 }
 
 export interface Attention {
@@ -59,6 +64,13 @@ export function siteAttention(input: AttentionInput): Attention {
   // in a list of things demanding action, or the list trains people to ignore
   // it.
   if (input.status === "disabled") return { severity: "ok", reasons: [] };
+
+  // First, so it leads the reasons: a site visitors cannot reach outranks
+  // every management problem.
+  if (input.up === false) {
+    reasons.push("Site is not responding — its latest uptime check failed");
+    raise("critical");
+  }
 
   if (input.status === "reconnect_needed") {
     reasons.push("Connection lost — this site can't be managed until it is reconnected");
