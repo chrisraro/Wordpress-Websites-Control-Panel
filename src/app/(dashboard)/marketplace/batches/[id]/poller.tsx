@@ -71,6 +71,16 @@ export function BatchPoller({ batchId }: { batchId: string }) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const { toast } = useToast();
   const announced = useRef(false);
+  // Polling stops once the batch reports done. A retry or cancel changes the
+  // batch after that point, so bumping this key re-runs the polling effect
+  // below instead of leaving the page frozen on the stale finished state.
+  const [pollKey, setPollKey] = useState(0);
+
+  const restartPolling = () => {
+    setDone(false);
+    announced.current = false;
+    setPollKey((k) => k + 1);
+  };
 
   useEffect(() => {
     let stop = false;
@@ -96,7 +106,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
       stop = true;
       clearTimeout(timer);
     };
-  }, [batchId]);
+  }, [batchId, pollKey]);
 
   // Announce completion once — the user may have looked away for minutes.
   useEffect(() => {
@@ -120,7 +130,14 @@ export function BatchPoller({ batchId }: { batchId: string }) {
 
   const processNow = () => {
     startTransition(async () => {
-      await processQueueNowAction();
+      const res = await processQueueNowAction();
+      if (!res.ok) {
+        toast({
+          tone: "error",
+          title: "Could not process the queue",
+          description: res.error ?? "Queue processing failed.",
+        });
+      }
     });
   };
 
@@ -136,6 +153,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
       // running could not be stopped, and claiming otherwise would be the
       // more dangerous lie on this particular screen.
       const n = res.cancelled ?? 0;
+      restartPolling();
       toast(
         n === 0
           ? {
@@ -161,6 +179,7 @@ export function BatchPoller({ batchId }: { batchId: string }) {
         return;
       }
       const n = res.retried ?? 0;
+      restartPolling();
       toast({
         tone: "success",
         title: `Requeued ${n} failed job${n === 1 ? "" : "s"}`,
