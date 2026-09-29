@@ -12,6 +12,7 @@ import { manageSite, type ManageDeps } from "@/services/manage/service";
 import { planFleetPluginUpdate } from "@/services/manage/fleet";
 import { installVerificationFile, removeVerificationFile, type GscDeps } from "@/services/gsc/service";
 import { enqueueBatch } from "@/services/jobs/service";
+import { backupReadyForInlineUpdate, type BackupGateDeps } from "@/services/backup/gate";
 import type { TokenAuth } from "@/lib/authz/token";
 import type { InventoryPayload } from "@/services/inventory/types";
 import type { Grade, SecurityCheck } from "@/services/security/types";
@@ -107,6 +108,14 @@ export interface ToolCtx {
    * scaffolding around `manageSite`'s single-site tools.
    */
   planFleetPluginUpdate: typeof planFleetPluginUpdate;
+  /**
+   * The seam `update_core` calls before an inline core update to ask whether
+   * the site has a fresh successful UpdraftPlus backup (a live read of the
+   * site, never a backup request). Injectable for the same reason as
+   * `manageSite`; `backup` carries its deps, as `gsc.deps` does.
+   */
+  backupReadyForInlineUpdate: typeof backupReadyForInlineUpdate;
+  backup: BackupGateDeps;
 }
 
 /**
@@ -144,6 +153,8 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     },
     enqueueBatch,
     planFleetPluginUpdate,
+    backupReadyForInlineUpdate,
+    backup: { sites: sitesRepo, mcp: createSiteMcpClient },
     async audit(action, siteId, detail) {
       await sitesRepo.insertActivity({
         actor: auth.viewer.id,

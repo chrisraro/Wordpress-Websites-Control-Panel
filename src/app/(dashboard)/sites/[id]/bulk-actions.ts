@@ -11,15 +11,20 @@ import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
 import { planTiming, type Timing } from "@/services/maintenance/schedule";
+import type { BackupPolicy } from "@/services/backup/updraft";
 
 /**
  * `opts.timing === "window"` holds the batch until this site's next
  * maintenance window (0027); a site with no window, or whose window is open
  * right now, runs now either way.
+ *
+ * `opts.backup === "skip"` is "Update without a backup" from the dialog;
+ * anything else (including omitted) keeps the pre-update backup. Only
+ * updates carry it -- the backup gate never runs for activate/delete.
  */
 export async function bulkAction(
   siteId: string, kind: BulkKind, target: BulkTarget, ids: string[],
-  opts: { timing?: Timing } = {},
+  opts: { timing?: Timing; backup?: BackupPolicy } = {},
 ): Promise<{
   ok: boolean; batchId?: string; queued?: number; skipped?: number; error?: string;
   /** Set when the batch waits for the maintenance window. */
@@ -49,10 +54,12 @@ export async function bulkAction(
       supabaseMaintenanceRepo(db), [siteId], timing, new Date(),
     );
     const at = scheduledFor.get(siteId);
+    // Same rule as parseBackupChoice: only the literal "skip" drops it.
+    const skipBackup = kind === "update" && opts.backup === "skip";
     const { batchId, split } = await enqueueBulk(
       { jobs: supabaseJobsRepo(db), sites: supabaseSitesRepo(db) },
       siteId, user.id, kind, scope, ids,
-      at ? { scheduledFor: at } : {},
+      { ...(at ? { scheduledFor: at } : {}), ...(skipBackup ? { backup: "skip" as const } : {}) },
     );
     revalidatePath(`/sites/${siteId}/${target === "plugin" ? "plugins" : "themes"}`);
     if (!batchId) {

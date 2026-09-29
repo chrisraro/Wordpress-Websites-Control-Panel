@@ -24,6 +24,8 @@ import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
 import { describeWindow, formatNextWindow } from "@/services/maintenance/window";
 import { ManageForm } from "./action-form";
 import { manageAction, refreshInventoryAction, setEnvironmentAction } from "./manage-actions";
+import { backupNowAction } from "./backup-actions";
+import { describeLastBackup } from "@/services/backup/summary";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardTitle, EmptyState, StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { buttonClass, cardClass } from "@/components/ui/styles";
@@ -145,6 +147,8 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
   const testConnection = testConnectionAction.bind(null, id);
   const refresh = refreshInventoryAction.bind(null, id);
   const updateCore = manageAction.bind(null, id, { kind: "update_core" as const });
+  const backupNow = backupNowAction.bind(null, id);
+  const lastBackup = describeLastBackup(inv?.backup);
   const maintenanceOn = manageAction.bind(null, id, { kind: "maintenance" as const, enable: true });
   const maintenanceOff = manageAction.bind(null, id, { kind: "maintenance" as const, enable: false });
   const flushCache = manageAction.bind(null, id, { kind: "flush_cache" as const });
@@ -300,10 +304,13 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               variant="primary"
               confirm={{
                 title: `Update WordPress core on ${site.name}${environmentSuffix(site)}?`,
-                description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. Take a backup first if you are unsure.`,
+                description: `${site.name} will be updated from ${inv.wp_version} to ${inv.core_update}. The site goes into maintenance mode during the update. It needs a successful UpdraftPlus backup from the last 6 hours; without one the update is refused, so use “Back up now” first, or update without a backup.`,
                 confirmLabel: "Update core",
               }}
-
+              // The core update runs inline and cannot wait for a backup, so
+              // the unbacked path is an explicit second button rather than a
+              // checkbox that is easy to leave ticked.
+              secondaryConfirm={{ label: "Update core without a backup", name: "backup", value: "skip" }}
             />
           )}
         </div>
@@ -343,6 +350,30 @@ export default async function SitePage({ params }: { params: Promise<{ id: strin
               </div>
             ))}
           </dl>
+
+          {/* Backup status from the latest snapshot. Nothing at all when the
+              snapshot predates the field (not measured is not "none"). The
+              button asks the site's own UpdraftPlus to run one, so it is only
+              offered where UpdraftPlus was found. */}
+          {lastBackup && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline px-5 py-3">
+              <div className="min-w-0">
+                <p className="text-body text-mid-gray">Last backup</p>
+                <p className={`text-body ${lastBackup.tone === "bad" ? "text-ember" : "text-ink"}`}>
+                  {lastBackup.text}
+                </p>
+              </div>
+              {canManageToolkit && inv?.backup && (
+                <ManageForm
+                  action={backupNow}
+                  size="sm"
+                  label="Back up now"
+                  pendingLabel="Starting…"
+                  success="Backup started"
+                />
+              )}
+            </div>
+          )}
 
           {/* Environment sits in the site's own record, beside the other
               facts about the connection, because that is what it is -- and

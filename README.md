@@ -69,6 +69,11 @@ Both Plugins and Themes tables support multi-select bulk actions (update,
 activate/deactivate, delete); each selected item runs as its own job sharing a
 batch id, so one failure doesn't block the rest — see `docs/ops/themes.md`.
 
+Bulk, fleet and core updates are preceded by a backup from the site's own
+UpdraftPlus: queued updates wait for it (up to 60 minutes), the core update needs one from
+the last 6 hours, and sites without UpdraftPlus fail unless "Update without a
+backup" is chosen — see `docs/ops/backups.md`.
+
 ## SEO & AEO
 
 The SEO tab shows the Rank Math site-audit score with a trend sparkline, failing

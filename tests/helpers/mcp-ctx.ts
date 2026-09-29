@@ -199,6 +199,17 @@ export function ctxFor(opts: {
       serviceCalls.push("enqueueBatch");
       return { batchId: "b1", count: 1 };
     },
+    // `update_core`'s backup check (a live read, like planFleetPluginUpdate,
+    // so never pushed to serviceCalls). Ready by default so the shared
+    // destructive-tool tests reach the gate; tests/mcp-backup.test.ts
+    // overrides it for the refusal paths.
+    async backupReadyForInlineUpdate() {
+      return { ready: true as const };
+    },
+    backup: {
+      sites: { getSiteCredentials: async () => ({ url: SITE.url }) },
+      mcp: () => { throw new Error("no network in tests"); },
+    },
     // `install_gsc_verification` / `remove_gsc_verification`'s seam. `deps`
     // is never touched by these default stubs -- only a test that swaps in
     // the real `installVerificationFile`/`removeVerificationFile` functions

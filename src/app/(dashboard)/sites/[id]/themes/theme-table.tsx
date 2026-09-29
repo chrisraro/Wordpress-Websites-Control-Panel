@@ -29,6 +29,7 @@ import { ManageForm } from "../action-form";
 import { manageAction } from "../manage-actions";
 import { bulkAction } from "../bulk-actions";
 import { TimingChoice, windowHint } from "@/components/ui/timing-choice";
+import { BackupChoice } from "@/components/ui/backup-choice";
 import type { Timing } from "@/services/maintenance/schedule";
 
 // The exact consequence, used verbatim in every delete confirmation — single
@@ -68,6 +69,9 @@ export function ThemeTable({
   const [pending, startTransition] = useTransition();
   const [confirmKind, setConfirmKind] = useState<ThemeBulkKind | null>(null);
   const [timing, setTiming] = useState<Timing>("now");
+  // "Update without a backup". Reset each time the dialog opens, so a
+  // choice made for one batch never carries over to the next.
+  const [skipBackup, setSkipBackup] = useState(false);
   // Only updates are offered the window; deletes run now.
   const offerWindow = confirmKind === "update" && nextWindow !== null;
 
@@ -83,7 +87,9 @@ export function ThemeTable({
     setConfirmKind(null);
     startTransition(async () => {
       const chosen: Timing = kind === "update" && nextWindow !== null ? timing : "now";
-      const result = await bulkAction(siteId, kind, "theme", selected, { timing: chosen });
+      const result = await bulkAction(siteId, kind, "theme", selected, {
+        timing: chosen, backup: kind === "update" && skipBackup ? "skip" : "required",
+      });
       if (result.ok && result.batchId) {
         const queued = result.queued ?? 0;
         toast({
@@ -121,7 +127,7 @@ export function ThemeTable({
         disabled && !pending
           ? `Nothing eligible — ${split.excluded[0]?.reason ?? "all items skipped"}`
           : undefined,
-      onClick: () => setConfirmKind(kind),
+      onClick: () => { setSkipBackup(false); setConfirmKind(kind); },
     };
   });
 
@@ -269,13 +275,18 @@ export function ThemeTable({
         onCancel={() => setConfirmKind(null)}
         onConfirm={() => confirmKind && runBulk(confirmKind)}
         children={
-          offerWindow ? (
-            <TimingChoice
-              value={timing}
-              onChange={setTiming}
-              windowLabel="In this site’s maintenance window"
-              windowHint={windowHint(nextWindow)}
-            />
+          confirmKind === "update" ? (
+            <div className="space-y-4">
+              {offerWindow && (
+                <TimingChoice
+                  value={timing}
+                  onChange={setTiming}
+                  windowLabel="In this site’s maintenance window"
+                  windowHint={windowHint(nextWindow)}
+                />
+              )}
+              <BackupChoice skip={skipBackup} onChange={setSkipBackup} />
+            </div>
           ) : undefined
         }
         description={

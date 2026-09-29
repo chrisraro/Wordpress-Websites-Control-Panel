@@ -19,6 +19,7 @@ import { friendlySiteError } from "@/lib/mcp/errors";
 import type { JobType } from "@/services/jobs/types";
 import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
 import { parseTiming, planTiming, timingNote } from "@/services/maintenance/schedule";
+import { backupPayload, parseBackupChoice } from "@/services/backup/choice";
 import type { ManageResult } from "../sites/[id]/action-form";
 
 /**
@@ -158,7 +159,9 @@ export async function dismissGlobalFailedJobsAction(
  *
  * The form's `timing` field chooses "now" (default) or "window": each site's
  * job is then held until its own maintenance window (0027); sites without a
- * window run now.
+ * window run now. The form's `backup` field is "skip" only when the operator
+ * ticked "Update without a backup"; otherwise each site is backed up with
+ * UpdraftPlus before its update runs (docs/ops/backups.md).
  */
 export async function updateAllPluginsAction(
   env: SiteEnvironment,
@@ -216,8 +219,12 @@ export async function updateAllPluginsAction(
   const { scheduledFor, windowed } = await planTiming(
     supabaseMaintenanceRepo(db), withUpdates, timing, new Date(),
   );
+  // Default: each job backs its site up first (gateOnBackup). Only the
+  // dialog's explicit "Update without a backup" puts backup: "skip" on them.
+  const backup = parseBackupChoice(formData);
   const { batchId, count } = await enqueueBatch(
-    jobs, "update_all_plugins", withUpdates, { actor: user.id }, ...scheduleArg(scheduledFor),
+    jobs, "update_all_plugins", withUpdates, { actor: user.id, ...backupPayload(backup) },
+    ...scheduleArg(scheduledFor),
   );
   revalidatePath("/dashboard");
   const siteWord = (n: number) => `${n} site${n === 1 ? "" : "s"}`;
@@ -226,7 +233,8 @@ export async function updateAllPluginsAction(
     // "Queued", never "updated": nothing has run yet.
     message: (alreadyQueued > 0
       ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
-      : `Queued plugin updates for ${siteWord(count)}.`) + timingNote(count, windowed, timing),
+      : `Queued plugin updates for ${siteWord(count)}.`) + timingNote(count, windowed, timing)
+      + (backup === "skip" ? " They will run without a backup." : ""),
     href: `/marketplace/batches/${batchId}`,
   };
 }

@@ -94,6 +94,7 @@ export function Modal({
  */
 export function ConfirmDialog({
   open, title, description, confirmLabel = "Confirm", tone = "default", onConfirm, onCancel, children,
+  secondary,
 }: {
   open: boolean;
   title: string;
@@ -104,6 +105,11 @@ export function ConfirmDialog({
   onCancel: () => void;
   /** Controls the decision needs (e.g. when to run), below the description. */
   children?: ReactNode;
+  /**
+   * A second, lower-emphasis way to go ahead (e.g. "Update core without a
+   * backup"), shown as an outline button between Cancel and the primary.
+   */
+  secondary?: { label: string; onClick: () => void };
 }) {
   return (
     <Modal
@@ -117,6 +123,11 @@ export function ConfirmDialog({
           <button type="button" onClick={onCancel} className={buttonClass("secondary")}>
             Cancel
           </button>
+          {secondary && (
+            <button type="button" onClick={secondary.onClick} className={buttonClass("outline")}>
+              {secondary.label}
+            </button>
+          )}
           <button
             type="button"
             onClick={onConfirm}

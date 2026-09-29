@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { buttonClass, type ButtonSize, type ButtonVariant } from "@/components/ui/styles";
 import { IconSpinner } from "@/components/ui/icons";
 import { TimingChoice } from "@/components/ui/timing-choice";
+import { BackupChoice } from "@/components/ui/backup-choice";
 
 export type ManageResult = {
   ok: boolean;
@@ -48,7 +49,8 @@ export interface ConfirmSpec {
  */
 export function ManageForm({
   action, label, pendingLabel, confirm, success, variant = "outline", size = "md",
-  icon, className, buttonClassName, showInlineError = true, timingChoice,
+  icon, className, buttonClassName, showInlineError = true, timingChoice, backupChoice,
+  secondaryConfirm,
 }: {
   action: ManageFormAction;
   label: string;
@@ -60,6 +62,19 @@ export function ManageForm({
    * `confirm`; omit it when no target site has a window.
    */
   timingChoice?: { windowLabel: string; windowHint: string };
+  /**
+   * Offers "Update without a backup" inside the confirmation, posted as the
+   * `backup` form field (`skip` when ticked). For actions that queue updates;
+   * only meaningful with `confirm`.
+   */
+  backupChoice?: boolean;
+  /**
+   * A second way to confirm, inside the same dialog, that submits the form
+   * with one extra field (`name=value`) -- e.g. "Update core without a
+   * backup" posting backup=skip. The field rides on a hidden submit button
+   * used as the submitter, so the primary confirm never sends it.
+   */
+  secondaryConfirm?: { label: string; name: string; value: string };
   /** Toast title on success. Defaults to the button's own label. */
   success?: string;
   variant?: ButtonVariant;
@@ -72,6 +87,7 @@ export function ManageForm({
   const [state, formAction, pending] = useActionState<ManageResult, FormData>(action, null);
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const secondaryRef = useRef<HTMLButtonElement>(null);
   const { toast } = useToast();
   const router = useRouter();
   // useActionState hands back a fresh object per run, so this fires once per
@@ -115,6 +131,20 @@ export function ManageForm({
         </p>
       )}
 
+      {secondaryConfirm && (
+        // Never shown or focusable: it exists only to be the submitter that
+        // carries the secondary choice's field into the FormData.
+        <button
+          ref={secondaryRef}
+          type="submit"
+          name={secondaryConfirm.name}
+          value={secondaryConfirm.value}
+          hidden
+          tabIndex={-1}
+          aria-hidden
+        />
+      )}
+
       {confirm && (
         <ConfirmDialog
           open={open}
@@ -127,9 +157,21 @@ export function ManageForm({
             setOpen(false);
             formRef.current?.requestSubmit();
           }}
+          secondary={secondaryConfirm && {
+            label: secondaryConfirm.label,
+            onClick: () => {
+              setOpen(false);
+              if (secondaryRef.current) formRef.current?.requestSubmit(secondaryRef.current);
+            },
+          }}
         >
-          {timingChoice && (
-            <TimingChoice windowLabel={timingChoice.windowLabel} windowHint={timingChoice.windowHint} />
+          {(timingChoice || backupChoice) && (
+            <div className="space-y-4">
+              {timingChoice && (
+                <TimingChoice windowLabel={timingChoice.windowLabel} windowHint={timingChoice.windowHint} />
+              )}
+              {backupChoice && <BackupChoice />}
+            </div>
           )}
         </ConfirmDialog>
       )}

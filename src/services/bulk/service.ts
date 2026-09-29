@@ -2,6 +2,8 @@ import type { ManageAction } from "@/services/manage/types";
 import { canDeleteTheme } from "@/services/themes/safety";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { SitesRepo } from "@/services/sites/repo";
+import { backupPayload } from "@/services/backup/choice";
+import type { BackupPolicy } from "@/services/backup/updraft";
 import type { BulkKind, BulkScope, BulkSplit, BulkTarget } from "./types";
 
 export function toManageAction(kind: BulkKind, target: BulkTarget, id: string): ManageAction {
@@ -84,16 +86,22 @@ export interface BulkDeps { jobs: JobsRepo; sites: SitesRepo }
  *
  * `opts.scheduledFor` (ISO) holds the whole batch until the site's next
  * maintenance window (src/services/maintenance/window.ts); omitted = now.
+ *
+ * `opts.backup === "skip"` is the operator's explicit "update without a
+ * backup": every job carries `backup: "skip"` and gateOnBackup lets it
+ * through unbacked. Omitted (or "required") leaves the field off, and the
+ * gate backs the site up first.
  */
 export async function enqueueBulk(
   deps: BulkDeps, siteId: string, actorId: string,
   kind: BulkKind, scope: BulkScope, ids: string[],
-  opts: { scheduledFor?: string } = {},
+  opts: { scheduledFor?: string; backup?: BackupPolicy } = {},
 ): Promise<{ batchId: string | null; split: BulkSplit }> {
   const target = scope.target;
   const split = splitEligible(kind, scope, ids);
   if (split.included.length === 0) return { batchId: null, split };
 
+  const backup = backupPayload(opts.backup);
   const batchId = crypto.randomUUID();
   for (const item of split.included) {
     // `actor` rides along in the payload (not part of the shared
@@ -102,7 +110,7 @@ export async function enqueueBulk(
     // batch, the same way plugin_install payload carries its own actor.
     await deps.jobs.insert({
       type: "bulk_manage", site_id: siteId, batch_id: batchId,
-      payload: { kind, target, id: item.id, label: item.label, actor: actorId },
+      payload: { kind, target, id: item.id, label: item.label, actor: actorId, ...backup },
       ...(opts.scheduledFor ? { scheduled_for: opts.scheduledFor } : {}),
     });
   }
@@ -111,6 +119,8 @@ export async function enqueueBulk(
     detail: {
       queued: split.included.length, skipped: split.excluded.length,
       ...(opts.scheduledFor ? { scheduled_for: opts.scheduledFor } : {}),
+      // Recorded so "who updated this site without a backup" has an answer.
+      ...backup,
     },
   });
   return { batchId, split };
