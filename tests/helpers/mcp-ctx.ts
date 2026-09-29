@@ -192,8 +192,14 @@ export function ctxFor(opts: {
       return {
         eligible: canManage ? [SITE] : [],
         alreadyQueued: [],
+        heldNotes: [],
         noUpdates: [],
       };
+    },
+    // Reads only (never in serviceCalls); nothing is held by default.
+    heldJobs: {
+      async liveJob() { return null; },
+      async getWindow() { return null; },
     },
     async enqueueBatch() {
       serviceCalls.push("enqueueBatch");

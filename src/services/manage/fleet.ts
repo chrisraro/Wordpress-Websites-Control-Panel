@@ -4,6 +4,7 @@ import { canAccessSite, type Viewer } from "@/lib/authz/decide";
 import { pendingPluginUpdates, type InventoryPayload } from "@/services/inventory/types";
 import type { JobsRepo } from "@/services/jobs/repo";
 import type { SiteEnvironment, SiteRow } from "@/services/sites/types";
+import { heldJobNote, type HeldJobNote, type HeldJobsDeps } from "./held-jobs";
 
 /**
  * The one read this needs off the snapshots repo. Deliberately narrower than
@@ -21,6 +22,8 @@ export interface FleetPlanDeps {
   sites: SitesDeps;
   snapshots: FleetSnapshotsDeps;
   jobs: JobsRepo;
+  /** Looks up an already-queued site's live run, to say when it runs. */
+  held: HeldJobsDeps;
 }
 
 export interface FleetPluginUpdatePlan {
@@ -29,6 +32,12 @@ export interface FleetPluginUpdatePlan {
   eligible: SiteRow[];
   /** Otherwise-eligible sites skipped because a run is already pending. */
   alreadyQueued: SiteRow[];
+  /**
+   * Per `alreadyQueued` site, in the same order: when its live run is
+   * scheduled (a maintenance-window hold can be days ahead) or that it is
+   * running, and its batch -- for the skip message (heldJobsMessage).
+   */
+  heldNotes: HeldJobNote[];
   /** Otherwise-eligible sites skipped because they have no plugin update
    * waiting (never inventoried counts as "nothing waiting"). */
   noUpdates: SiteRow[];
@@ -54,7 +63,7 @@ export interface FleetPluginUpdatePlan {
  * whether and when to act on the plan.
  */
 export async function planFleetPluginUpdate(
-  deps: FleetPlanDeps, viewer: Viewer, env: SiteEnvironment,
+  deps: FleetPlanDeps, viewer: Viewer, env: SiteEnvironment, now: Date = new Date(),
 ): Promise<FleetPluginUpdatePlan> {
   const sites = await listSitesForViewer(deps.sites, viewer);
   const candidates = sites.filter(
@@ -79,5 +88,9 @@ export async function planFleetPluginUpdate(
     }
     eligible.push(site);
   }
-  return { eligible, alreadyQueued, noUpdates };
+  const heldNotes: HeldJobNote[] = [];
+  for (const site of alreadyQueued) {
+    heldNotes.push(await heldJobNote(deps.held, "update_all_plugins", site, now));
+  }
+  return { eligible, alreadyQueued, heldNotes, noUpdates };
 }

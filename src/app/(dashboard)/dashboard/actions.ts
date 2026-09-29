@@ -20,6 +20,8 @@ import type { JobType } from "@/services/jobs/types";
 import { supabaseMaintenanceRepo } from "@/services/maintenance/repo";
 import { parseTiming, planTiming, timingNote } from "@/services/maintenance/schedule";
 import { backupPayload, parseBackupChoice } from "@/services/backup/choice";
+import { heldJobNote, heldJobsMessage, supabaseHeldJobsDeps } from "@/services/manage/held-jobs";
+import type { SiteRow } from "@/services/sites/types";
 import type { ManageResult } from "../sites/[id]/action-form";
 
 /**
@@ -30,6 +32,23 @@ function scheduleArg(
   scheduledFor: Map<string, string>,
 ): [] | [{ scheduledFor: Map<string, string> }] {
   return scheduledFor.size > 0 ? [{ scheduledFor }] : [];
+}
+
+/**
+ * Says, per skipped site, when its live job of `type` runs (or that it is
+ * running) and where to cancel it -- a job held for a maintenance window
+ * can be days ahead, and "pending from an earlier run" read like a stuck
+ * queue. Empty when nothing was skipped (and then nothing is looked up).
+ */
+async function heldNotes(
+  db: ReturnType<typeof createServiceSupabase>, type: JobType, skipped: SiteRow[],
+): Promise<string> {
+  if (skipped.length === 0) return "";
+  const deps = supabaseHeldJobsDeps(db);
+  const now = new Date();
+  const notes = [];
+  for (const site of skipped) notes.push(await heldJobNote(deps, type, site, now));
+  return heldJobsMessage(notes);
 }
 
 /**
@@ -192,25 +211,28 @@ export async function updateAllPluginsAction(
   // reports "Nothing to update" rather than failing.
   const snapshots = supabaseSnapshotsRepo(db);
   const withUpdates: string[] = [];
-  let alreadyQueued = 0;
+  const held: SiteRow[] = [];
   for (const site of candidates) {
     const snap = await snapshots.latestSnapshot(site.id);
     if (!snap || pendingPluginUpdates(snap.payload) === 0) continue;
-    // A second press while the first batch is still draining must not queue
-    // a second pass over the same site: two concurrent update runs on one
-    // WordPress install is how you corrupt a plugin directory.
+    // A second press while the first batch is still draining (or while an
+    // earlier run is held for a maintenance window) must not queue a second
+    // pass over the same site: two concurrent update runs on one WordPress
+    // install is how you corrupt a plugin directory.
     if (await jobs.pendingExists("update_all_plugins", site.id)) {
-      alreadyQueued++;
+      held.push(site);
       continue;
     }
     withUpdates.push(site.id);
   }
+  const alreadyQueued = held.length;
+  const heldText = await heldNotes(db, "update_all_plugins", held);
 
   if (withUpdates.length === 0) {
     return {
       ok: false,
       error: alreadyQueued > 0
-        ? "Already queued — those sites have plugin updates pending from an earlier run."
+        ? `Not queued — each site already has a plugin update run: ${heldText}.`
         : `No ${env} site has a plugin update waiting.`,
     };
   }
@@ -232,7 +254,7 @@ export async function updateAllPluginsAction(
     ok: true,
     // "Queued", never "updated": nothing has run yet.
     message: (alreadyQueued > 0
-      ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
+      ? `Queued plugin updates for ${siteWord(count)} (${alreadyQueued} already had a run pending: ${heldText}).`
       : `Queued plugin updates for ${siteWord(count)}.`) + timingNote(count, windowed, timing)
       + (backup === "skip" ? " They will run without a backup." : ""),
     href: `/marketplace/batches/${batchId}`,
@@ -274,19 +296,22 @@ export async function hardenFleetAction(
   );
 
   const targets: string[] = [];
-  let alreadyQueued = 0;
+  const held: SiteRow[] = [];
   for (const site of candidates) {
     const latest = await security.latestChecks(site.id);
     if (!latest || hardeningPlan(latest.checks).length === 0) continue;
-    if (await jobs.pendingExists("harden", site.id)) { alreadyQueued++; continue; }
+    // Same one-run-per-site rule as updateAllPluginsAction.
+    if (await jobs.pendingExists("harden", site.id)) { held.push(site); continue; }
     targets.push(site.id);
   }
+  const alreadyQueued = held.length;
+  const heldText = await heldNotes(db, "harden", held);
 
   if (targets.length === 0) {
     return {
       ok: false,
       error: alreadyQueued > 0
-        ? "Already queued — those sites have hardening pending from an earlier run."
+        ? `Not queued — each site already has a hardening run: ${heldText}.`
         : `No ${env} site has a hardening fix waiting.`,
     };
   }
@@ -304,7 +329,7 @@ export async function hardenFleetAction(
   return {
     ok: true,
     message: (alreadyQueued > 0
-      ? `Queued hardening for ${siteWord(count)} (${alreadyQueued} already had a run pending).`
+      ? `Queued hardening for ${siteWord(count)} (${alreadyQueued} already had a run pending: ${heldText}).`
       : `Queued hardening for ${siteWord(count)}.`) + timingNote(count, windowed, timing),
     href: `/marketplace/batches/${batchId}`,
   };

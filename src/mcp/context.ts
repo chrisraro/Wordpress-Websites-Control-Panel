@@ -10,6 +10,7 @@ import { supabaseReportsRepo, type ReportRow } from "@/services/reports/repo";
 import type { SitesDeps } from "@/services/sites/service";
 import { manageSite, type ManageDeps } from "@/services/manage/service";
 import { planFleetPluginUpdate } from "@/services/manage/fleet";
+import { supabaseHeldJobsDeps, type HeldJobsDeps } from "@/services/manage/held-jobs";
 import { installVerificationFile, removeVerificationFile, type GscDeps } from "@/services/gsc/service";
 import { enqueueBatch } from "@/services/jobs/service";
 import { backupReadyForInlineUpdate, type BackupGateDeps } from "@/services/backup/gate";
@@ -109,6 +110,11 @@ export interface ToolCtx {
    */
   planFleetPluginUpdate: typeof planFleetPluginUpdate;
   /**
+   * Reads a skipped site's live run (and its window zone) so the fleet
+   * tool can say when it is scheduled; passed to `planFleetPluginUpdate`.
+   */
+  heldJobs: HeldJobsDeps;
+  /**
    * The seam `update_core`, `update_plugins` and `update_themes` call before
    * an inline update to ask whether
    * the site has a fresh successful UpdraftPlus backup (a live read of the
@@ -154,6 +160,7 @@ export function buildToolCtx(auth: TokenAuth): ToolCtx {
     },
     enqueueBatch,
     planFleetPluginUpdate,
+    heldJobs: supabaseHeldJobsDeps(db),
     backupReadyForInlineUpdate,
     backup: { sites: sitesRepo, mcp: createSiteMcpClient },
     async audit(action, siteId, detail) {
