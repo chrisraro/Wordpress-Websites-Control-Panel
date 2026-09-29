@@ -89,7 +89,17 @@ function isLocked(role: AppRole, permission: AppPermission): boolean {
   return role === "admin" && permission === "users.manage";
 }
 
-export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePermissionCell[] }) {
+// Mirrors setRolePermissionChecked's refusal in src/services/users/service.ts.
+const READ_ONLY_REASON =
+  "Only an administrator can edit this matrix. You can view it because you hold Manage users.";
+
+interface PermissionMatrixProps {
+  rolePermissions: RolePermissionCell[];
+  /** Admins only; the server refuses everyone else regardless. */
+  canEdit: boolean;
+}
+
+export function PermissionMatrix({ rolePermissions, canEdit }: PermissionMatrixProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [enabled, setEnabled] = useState<Set<string>>(
@@ -100,7 +110,7 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
   const [, startTransition] = useTransition();
 
   function requestToggle(role: AppRole, permission: AppPermission) {
-    if (isLocked(role, permission)) return;
+    if (!canEdit || isLocked(role, permission)) return;
 
     const key = cellKey(role, permission);
     const wasEnabled = enabled.has(key);
@@ -188,10 +198,16 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
         </p>
         <p className="flex items-start gap-2 text-body text-ink">
           <IconInfo size={16} className="mt-0.5 shrink-0 text-mid-gray" />
-          Manage users is close to Admin. Holders cannot change their own role or make anyone
-          an Admin, but they can edit this matrix, including their own role&apos;s permissions.
-          Give it only to people you would trust with Admin.
+          Only administrators can edit this matrix. Manage users lets someone invite people
+          and set grants, but not change their own role, make anyone an Admin, or change
+          what a role may do.
         </p>
+        {!canEdit && (
+          <p id="matrix-read-only-note" className="flex items-start gap-2 text-body text-ink">
+            <IconInfo size={16} className="mt-0.5 shrink-0 text-mid-gray" />
+            {READ_ONLY_REASON}
+          </p>
+        )}
       </div>
 
       <div className={`${cardClass} overflow-hidden`}>
@@ -218,14 +234,14 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
                     const locked = isLocked(role, permission);
                     const key = cellKey(role, permission);
                     const checked = locked || enabled.has(key);
-                    const disabled = locked || pendingKeys.has(key);
+                    const disabled = !canEdit || locked || pendingKeys.has(key);
                     return (
                       <td key={role} className={`${tableCellClass} text-center`}>
                         <label
                           className={`inline-flex min-h-10 w-10 items-center justify-center pointer-coarse:min-h-11 pointer-coarse:w-11 ${
-                            locked ? "cursor-not-allowed" : "cursor-pointer"
+                            locked || !canEdit ? "cursor-not-allowed" : "cursor-pointer"
                           }`}
-                          title={locked ? ADMIN_USERS_MANAGE_REASON : undefined}
+                          title={locked ? ADMIN_USERS_MANAGE_REASON : !canEdit ? READ_ONLY_REASON : undefined}
                         >
                           <input
                             type="checkbox"
@@ -233,7 +249,9 @@ export function PermissionMatrix({ rolePermissions }: { rolePermissions: RolePer
                             disabled={disabled}
                             onChange={() => requestToggle(role, permission)}
                             aria-label={`${PERMISSION_LABEL[permission]} for ${ROLE_LABEL[role]}`}
-                            aria-describedby={locked ? "admin-users-manage-note" : undefined}
+                            aria-describedby={
+                              locked ? "admin-users-manage-note" : !canEdit ? "matrix-read-only-note" : undefined
+                            }
                             className="size-4 shrink-0 rounded-md accent-ink disabled:opacity-60"
                           />
                         </label>

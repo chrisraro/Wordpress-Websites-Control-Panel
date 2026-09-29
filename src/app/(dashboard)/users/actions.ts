@@ -257,7 +257,7 @@ export async function setRolePermissionAction(
   _prevState?: ActionResult,
   _formData?: FormData,
 ): Promise<ActionResult> {
-  await requireUser();
+  const user = await requireUser();
   const gate = await checkPermission("users.manage");
   if (isDenied(gate)) return gate;
 
@@ -265,7 +265,9 @@ export async function setRolePermissionAction(
 
   let result: ActionResult;
   try {
-    result = await setRolePermissionChecked(repo(), role, permission, enabled);
+    // Admin-only, checked against the actor's role read fresh inside the
+    // service (audit 2026-09-29, open 9).
+    result = await setRolePermissionChecked(repo(), user.id, role, permission, enabled);
   } catch {
     return { ok: false, error: "Could not update the permission matrix." };
   }

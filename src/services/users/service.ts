@@ -63,17 +63,25 @@ export async function deleteManagedUser(
 }
 
 /**
- * Flips one cell of the permission matrix. `canSetRolePermission` is a pure
- * function of (role, permission, enabled) rather than the user list, so
- * there is no stale-snapshot hazard here — but the guard still runs inside
- * the service, immediately before the write, so no caller can bypass it.
+ * Flips one cell of the permission matrix. Admin-only: the matrix is the
+ * authority to change every other authorization fact, so `users.manage`
+ * alone (which the matrix itself can hand to a non-admin role) must not be
+ * enough to edit it -- otherwise its holder grants their own role anything.
+ * The actor's role is read fresh here, at the moment of the write, like
+ * changeUserRole's admin check. `canSetRolePermission` then runs inside the
+ * service, immediately before the write, so no caller can bypass either.
  */
 export async function setRolePermissionChecked(
   repo: UsersRepo,
+  actorId: string,
   role: AppRole,
   permission: AppPermission,
   enabled: boolean,
 ): Promise<ActionResult> {
+  const actor = await repo.getUser(actorId);
+  if (actor?.role !== "admin") {
+    return { ok: false, error: "Only an administrator can edit the permission matrix." };
+  }
   const verdict = canSetRolePermission(role, permission, enabled);
   if (!verdict.allowed) return { ok: false, error: verdict.reason };
   await repo.setRolePermission(role, permission, enabled);
