@@ -32,24 +32,34 @@ import { StatusBadge, type StatusTone } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { buttonClass, hintClass, inputClass, labelClass } from "@/components/ui/styles";
 import { IconAlert, IconInfo, IconSpinner } from "@/components/ui/icons";
+import { LocalTime } from "@/components/ui/local-time";
 import type { ApiTokenRow } from "@/services/tokens/types";
 
 type CreateState = { ok: boolean; secret?: string; error?: string };
 
-function tokenStatus(t: ApiTokenRow): { label: string; tone: StatusTone } {
+/**
+ * `now` is the server's render time, passed in as a prop -- never the
+ * client's own clock read during render. This component is server-rendered and then hydrated, and a token that
+ * expires between the two renders would otherwise read "Active" in the HTML
+ * and "Expired" on the client: a hydration mismatch.
+ */
+export function tokenStatus(t: ApiTokenRow, now: number): { label: string; tone: StatusTone } {
   if (t.revoked_at) return { label: "Revoked", tone: "bad" };
-  if (t.expires_at && new Date(t.expires_at).getTime() < Date.now()) {
+  if (t.expires_at && new Date(t.expires_at).getTime() < now) {
     return { label: "Expired", tone: "bad" };
   }
   return { label: "Active", tone: "good" };
 }
 
 export function ApiTokensCard({
-  mode, userId, tokens, tokensUnavailable = false,
+  mode, userId, tokens, renderedAt, tokensUnavailable = false,
 }: {
   mode: "self" | "admin";
   userId: string;
   tokens: ApiTokenRow[];
+  /** Epoch ms at which the page rendered on the server; the reference point
+   * for "Expired" so the server HTML and the hydrating client agree. */
+  renderedAt: number;
   /** True when the page could not read api_tokens at all (migration 0021
    * has not been applied yet) -- see listTokensOrUnavailable. The list is
    * replaced by a one-line hint; nothing else on the page is affected. */
@@ -216,7 +226,7 @@ export function ApiTokensCard({
       ) : (
         <ul className="divide-y divide-hairline overflow-hidden rounded-3xl border border-hairline">
           {tokens.map((t) => {
-            const status = tokenStatus(t);
+            const status = tokenStatus(t, renderedAt);
             const revoking = revokePending && busyId === t.id;
             return (
               <li
@@ -227,8 +237,8 @@ export function ApiTokensCard({
                   <p className="truncate text-body font-medium text-ink">{t.name}</p>
                   <p className="mt-0.5 text-caption tracking-normal text-mid-gray">
                     <span className="font-mono">{t.token_prefix}…</span> · created{" "}
-                    {new Date(t.created_at).toLocaleDateString()} · last used{" "}
-                    {t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}
+                    <LocalTime iso={t.created_at} mode="date" /> · last used{" "}
+                    {t.last_used_at ? <LocalTime iso={t.last_used_at} /> : "never"}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <StatusBadge tone={status.tone}>{status.label}</StatusBadge>

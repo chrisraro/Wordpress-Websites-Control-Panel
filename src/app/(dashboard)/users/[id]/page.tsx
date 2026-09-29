@@ -172,6 +172,7 @@ export default async function UserDetailPage({ params }: { params: Promise<{ id:
               mode="admin"
               userId={id}
               tokens={tokenList.tokens}
+              renderedAt={Date.now()}
               tokensUnavailable={tokenList.unavailable}
             />
           </div>
