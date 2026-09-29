@@ -12,6 +12,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
+import { isPrivateAddress } from "@/lib/net-guard";
 import type { SiteEnvironment } from "@/services/sites/types";
 
 function revalidateSite(siteId: string) {
@@ -160,6 +161,11 @@ export async function setOriginAction(
   const isIpv6 = /^[0-9a-fA-F:]+$/.test(ip) && ip.includes(":");
   if (!isIpv4 && !isIpv6) {
     return { ok: false, error: `“${ip}” is not an IP address. This must be a literal address, not a hostname.` };
+  }
+  // The override pins the connection -- which carries the application
+  // password -- to this address, so it must not reach into private space.
+  if (isPrivateAddress(ip)) {
+    return { ok: false, error: `“${ip}” points at a private or local network address, which is not allowed.` };
   }
   if (!/^[a-zA-Z0-9.-]+$/.test(sni) || !sni.includes(".")) {
     return { ok: false, error: `“${sni}” is not a hostname. Use the name on the origin’s certificate.` };
