@@ -25,6 +25,7 @@ import { manageSite } from "@/services/manage/service";
 import { toManageAction } from "@/services/bulk/service";
 import type { BulkJobPayload } from "@/services/bulk/types";
 import { hardenSite, hardeningPlan } from "@/services/security/harden";
+import { gateOnBackup, type BackupJobFields } from "@/services/backup/gate";
 
 interface PluginInstallPayload {
   source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
@@ -232,6 +233,11 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
       }
       const action = toManageAction(p.kind, p.target, p.id);
       await assertActorAuthorized(loadActor, p.actor, job.site_id, "bulk_manage");
+      // Updates wait for a pre-update backup (or the operator's explicit
+      // "without a backup"); activate/deactivate/delete do not.
+      if (p.kind === "update") {
+        await gateOnBackup({ sites, mcp: createSiteMcpClient }, job.site_id, job.payload as BackupJobFields);
+      }
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor, action,
       );
@@ -277,6 +283,7 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
         throw new Error("update_all_plugins payload malformed");
       }
       await assertActorAuthorized(loadActor, p.actor, job.site_id, "update_all_plugins");
+      await gateOnBackup({ sites, mcp: createSiteMcpClient }, job.site_id, job.payload as BackupJobFields);
       const result = await manageSite(
         { sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor,
         { kind: "update_all_plugins" },

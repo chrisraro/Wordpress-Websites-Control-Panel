@@ -280,7 +280,7 @@ describe("bulk_manage handler", () => {
     manageSiteMock.mockResolvedValueOnce({ ok: false, error: "Plugin is not installed" });
     const handlers = buildJobHandlers(db, STILL_AUTHORIZED);
     const job = jobRow(
-      { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
+      { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1", backup: "skip" },
       { type: "bulk_manage" },
     );
     await expect(handlers.bulk_manage!({ job })).rejects.toThrow("Plugin is not installed");

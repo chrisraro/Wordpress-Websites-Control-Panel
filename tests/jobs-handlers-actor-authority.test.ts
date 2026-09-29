@@ -45,8 +45,9 @@ function viewer(perms: AppPermission[], grants: [string, "read" | "manage"][]): 
 
 const PAYLOADS: Record<string, Record<string, unknown>> = {
   plugin_install: { source: { kind: "wporg", slug: "akismet" }, activate: false, actor: "user-1" },
-  bulk_manage: { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1" },
-  update_all_plugins: { actor: "user-1" },
+  // backup: "skip" -- the pre-update backup gate is tested in backup-gate.test.ts.
+  bulk_manage: { kind: "update", target: "plugin", id: "akismet/akismet.php", actor: "user-1", backup: "skip" },
+  update_all_plugins: { actor: "user-1", backup: "skip" },
   harden: { actor: "user-1" },
 };
 
