@@ -4,6 +4,7 @@ import { enqueueJob } from "@/services/jobs/service";
 import { supabaseJobsRepo } from "@/services/jobs/repo";
 import { supabaseSitesRepo } from "@/services/sites/repo";
 import { supabaseSeoRepo } from "@/services/seo/repo";
+import { isSeoScanDue } from "@/services/seo/schedule";
 import { supabaseReportsRepo } from "@/services/reports/repo";
 import { REPORT_SECTIONS } from "@/services/reports/types";
 import { createServiceSupabase } from "@/lib/supabase/server";
@@ -26,9 +27,11 @@ async function run(req: Request) {
   // this route has a 60s budget, so sequential loops would not scale with the fleet.
   const active = sites.filter((s) => s.status !== "disabled");
   const seo = supabaseSeoRepo(db);
-  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const now = Date.now();
 
-  const perSite = await Promise.all(active.map(async (site) => {
+  // allSettled, not all: one site's error must not abort every other site's
+  // nightly work. Failures are logged and named in the response.
+  const settled = await Promise.allSettled(active.map(async (site) => {
     // snapshot_refresh must be inserted before security_scan: claim_jobs runs in
     // scheduled_for order, so the scan grades tonight's inventory, not yesterday's.
     const [snapshot, lastSeoRun] = await Promise.all([
@@ -36,7 +39,7 @@ async function run(req: Request) {
       seo.lastRunAt(site.id),
     ]);
     const scan = await enqueueJob(jobs, "security_scan", site.id, {}, { dedupe: true });
-    const seoDue = !lastSeoRun || new Date(lastSeoRun).getTime() <= weekAgo;
+    const seoDue = isSeoScanDue(lastSeoRun, now);
     const seoJob = seoDue
       ? await enqueueJob(jobs, "seo_scan", site.id, {}, { dedupe: true })
       : null;
@@ -55,12 +58,24 @@ async function run(req: Request) {
     return { snapshot: Boolean(snapshot), scan: Boolean(scan), seo: Boolean(seoJob), report: Boolean(reportJob) };
   }));
 
+  const perSite: Array<{ snapshot: boolean; scan: boolean; seo: boolean; report: boolean }> = [];
+  const failedSites: string[] = [];
+  settled.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      perSite.push(r.value);
+    } else {
+      failedSites.push(active[i].id);
+      console.error(`[cron/enqueue] site ${active[i].id} failed:`, r.reason);
+    }
+  });
+
   const enqueued = perSite.filter((r) => r.snapshot).length;
   const scans = perSite.filter((r) => r.scan).length;
   const seoScans = perSite.filter((r) => r.seo).length;
   const reports = perSite.filter((r) => r.report).length;
   return NextResponse.json({
-    ok: true, sites: sites.length, enqueued, scans, seo: seoScans, reports, feed: Boolean(feedJob),
+    ok: failedSites.length === 0, sites: sites.length, enqueued, scans, seo: seoScans, reports,
+    feed: Boolean(feedJob), failed: failedSites.length, failed_sites: failedSites,
   });
 }
 
