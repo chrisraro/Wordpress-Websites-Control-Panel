@@ -28,6 +28,19 @@ export async function changeUserRole(
   targetId: string,
   next: AppRole,
 ): Promise<ActionResult> {
+  // Privilege-escalation guards, checked before anything is read: holding
+  // users.manage (which the permission matrix can hand to a non-admin) must
+  // not let an actor raise their own role, or mint new admins.
+  if (actorId === targetId) {
+    return { ok: false, error: "You cannot change your own role. Ask another administrator." };
+  }
+  if (next === "admin") {
+    // Read fresh at write time, like everything else here.
+    const actor = await repo.getUser(actorId);
+    if (actor?.role !== "admin") {
+      return { ok: false, error: "Only an administrator can assign the admin role." };
+    }
+  }
   const users = await repo.listUsers();
   const targetGrants = next === "client" ? await repo.listGrants(targetId) : [];
   const verdict = canChangeRole(users, targetId, next, targetGrants);

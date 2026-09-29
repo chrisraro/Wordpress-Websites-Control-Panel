@@ -35,6 +35,13 @@ export async function createInstallBatchAction(input: {
   const siteChecks = await Promise.all(input.siteIds.map((id) => checkSiteAccess(id, "manage")));
   const firstDenial = siteChecks.find(isDenied);
   if (firstDenial) return firstDenial;
+  // Allow-list the source kind: a server action is a public endpoint, so a
+  // forged { kind: "url", url } must not slip past the two checks below and
+  // land in the job payload as an arbitrary remote download.
+  const kind = (input.source as { kind?: unknown } | null | undefined)?.kind;
+  if (kind !== "wporg" && kind !== "upload") {
+    return { ok: false, error: "Invalid install source" };
+  }
   if (input.source.kind === "wporg" && !SLUG_RE.test(input.source.slug)) {
     return { ok: false, error: "Invalid slug" };
   }

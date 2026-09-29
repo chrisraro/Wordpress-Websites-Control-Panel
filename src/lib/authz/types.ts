@@ -21,7 +21,8 @@ export const APP_PERMISSIONS = [
 ] as const;
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
 
-export type SiteAccessLevel = "read" | "manage";
+export const SITE_ACCESS_LEVELS = ["read", "manage"] as const;
+export type SiteAccessLevel = (typeof SITE_ACCESS_LEVELS)[number];
 export type OverrideEffect = "allow" | "deny";
 
 /** Seeded once; an admin edits role_permissions afterwards (Phase 9b). */

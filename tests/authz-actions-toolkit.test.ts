@@ -77,7 +77,9 @@ vi.mock("@/lib/adapters/wporg", () => ({
 // dependencies rather than the real Supabase/service modules.
 import { createSite } from "@/app/(dashboard)/sites/new/actions";
 import { runConnectionTest, testConnectionAction } from "@/app/(dashboard)/sites/[id]/actions";
-import { manageAction, refreshInventoryAction } from "@/app/(dashboard)/sites/[id]/manage-actions";
+import {
+  manageAction, refreshInventoryAction, setOriginAction,
+} from "@/app/(dashboard)/sites/[id]/manage-actions";
 import { bulkAction } from "@/app/(dashboard)/sites/[id]/bulk-actions";
 import { createChildThemeAction } from "@/app/(dashboard)/sites/[id]/child-theme-actions";
 import {
@@ -106,6 +108,41 @@ describe("createSite", () => {
     expect(result).toEqual(DENIED);
     expect(checkPermissionMock).toHaveBeenCalledWith("sites.manage");
   });
+});
+
+// Security finding: the site URL accepted any z.string().url() -- http://
+// (application password in cleartext) or a private/loopback host (SSRF) --
+// and the origin override accepted any IP literal. Both are refused before
+// anything reaches the database. Literal IPs keep these tests off real DNS.
+describe("createSite URL guard", () => {
+  const fields = { name: "Site", wpUsername: "admin", appPassword: "password1234", environment: "staging" };
+
+  it("refuses an http:// site URL", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    const result = await createSite(undefined, formData({ ...fields, url: "http://8.8.8.8" }));
+    expect(result).toEqual({ error: "The site URL must start with https://" });
+  });
+
+  it.each(["https://127.0.0.1", "https://169.254.169.254", "https://10.0.0.5", "https://localhost", "https://[::1]"])(
+    "refuses a private/loopback site URL %s",
+    async (url) => {
+      checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+      const result = await createSite(undefined, formData({ ...fields, url }));
+      expect(result).toMatchObject({ error: expect.stringMatching(/private or local/) });
+    },
+  );
+});
+
+describe("setOriginAction IP guard", () => {
+  it.each(["127.0.0.1", "10.0.0.5", "192.168.1.10", "169.254.169.254", "::1", "fd00::1", "100.64.1.1"])(
+    "refuses a private origin IP %s",
+    async (ip) => {
+      checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+      checkSiteAccessMock.mockResolvedValue(FAKE_VIEWER);
+      const result = await setOriginAction("site-1", null, formData({ origin_ip: ip, origin_sni: "example.com" }));
+      expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/private or local/) });
+    },
+  );
 });
 
 describe("runConnectionTest (exported helper)", () => {
@@ -314,6 +351,31 @@ describe("createInstallBatchAction", () => {
     })).rejects.toThrow("createServiceSupabase must not be called when a guard denies access");
 
     expect(checkSiteAccessMock).toHaveBeenCalledWith("site-1", "manage");
+  });
+});
+
+// Security finding: the source was only validated when its kind was
+// "wporg" or "upload", so a forged { kind: "url", url } from a client call
+// fell through both checks and was stored in the job payload, letting a
+// wp_toolkit.manage holder install an arbitrary remote zip.
+describe("createInstallBatchAction source kind", () => {
+  it("rejects a forged url source before anything is enqueued", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockResolvedValue(FAKE_VIEWER);
+    const result = await createInstallBatchAction({
+      source: { kind: "url", url: "https://evil.example/x.zip", path: "x" } as never,
+      siteIds: ["site-1"], activate: true,
+    });
+    expect(result).toEqual({ ok: false, error: "Invalid install source" });
+  });
+
+  it("rejects a missing source", async () => {
+    checkPermissionMock.mockResolvedValue(FAKE_VIEWER);
+    checkSiteAccessMock.mockResolvedValue(FAKE_VIEWER);
+    const result = await createInstallBatchAction({
+      source: null as never, siteIds: ["site-1"], activate: true,
+    });
+    expect(result).toEqual({ ok: false, error: "Invalid install source" });
   });
 });
 

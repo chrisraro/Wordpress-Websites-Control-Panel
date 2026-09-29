@@ -9,6 +9,7 @@ import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
+import { checkPublicHttpsUrl } from "@/lib/net-guard";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -39,6 +40,10 @@ export async function createSite(_prev: { error?: string } | undefined, formData
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
+  // https only (the connection carries the application password) and never
+  // a private/loopback host (the panel would become an SSRF proxy).
+  const urlCheck = await checkPublicHttpsUrl(parsed.data.url);
+  if (!urlCheck.ok) return { error: urlCheck.error };
 
   const db = createServiceSupabase();
   const repo = supabaseSitesRepo(db);

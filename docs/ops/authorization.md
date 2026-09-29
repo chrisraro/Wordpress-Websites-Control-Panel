@@ -322,7 +322,8 @@ how you end up in the SQL editor on a Friday:
 | Demote the last `admin` | **Refused.** |
 | Delete the last `admin` | **Refused.** |
 | Delete your own account | **Refused.** Ask another admin. |
-| Demote yourself while another admin exists | Allowed, with a confirmation naming the consequence. One-way door from your side. |
+| Change your own role (promote or demote) | **Refused.** Ask another administrator. |
+| Assign the `admin` role when you are not an `admin` | **Refused**, checked against your role as read at the moment of the write. |
 
 Every guard is enforced in the **server action**
 (`src/app/(dashboard)/users/actions.ts`, via `src/services/users/guards.ts`),
@@ -335,9 +336,10 @@ these actions is reachable directly regardless of what any page renders.
 (`isSoleAdmin` counts distinct admin ids currently in the table), not against
 whatever the page had rendered when the operator loaded it.
 
-**`users.manage` is self-elevating by design.** Nothing stops someone holding
-`users.manage` from granting themselves `admin`, or granting `users.manage`
-to any role they like through the permission matrix editor. This permission
+**`users.manage` is still close to self-elevating.** Its holder can no longer
+change their own role or mint new admins through the role form, but the
+permission matrix editor still lets them grant any permission (including
+`users.manage`) to any role, their own included. This permission
 *is* the authority to change every other authorization fact in the system,
 including who holds it — treat it with the same care as direct database
 access, because it is functionally equivalent to it.

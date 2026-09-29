@@ -471,9 +471,50 @@ const managedUser = (id: string, role: ManagedUser["role"]): ManagedUser => ({
 });
 
 describe("changeUserRole", () => {
+  // Security finding: an actor holding users.manage could change their own
+  // role -- including to admin -- and any users.manage holder could hand
+  // out admin. Self changes are refused, and only an admin may assign admin.
+  it("refuses changing your own role, and writes nothing", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"), managedUser("d1", "developer"),
+    ]);
+    const result = await changeUserRole(repo, "d1", "d1", "admin");
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/your own role/i) });
+    expect(setRoleCalls).toHaveLength(0);
+  });
+
+  it("refuses a non-admin actor assigning admin to someone else", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"), managedUser("d1", "developer"), managedUser("d2", "developer"),
+    ]);
+    const result = await changeUserRole(repo, "d1", "d2", "admin");
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/only an administrator/i) });
+    expect(setRoleCalls).toHaveLength(0);
+  });
+
+  it("allows an admin actor to assign admin", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"), managedUser("d2", "developer"),
+    ]);
+    const result = await changeUserRole(repo, "a1", "d2", "admin");
+    expect(result).toEqual({ ok: true });
+    expect(setRoleCalls).toHaveLength(1);
+  });
+
+  it("still lets a non-admin actor assign a non-admin role", async () => {
+    const { repo, setRoleCalls } = memoryUsersRepo([
+      managedUser("a1", "admin"), managedUser("d1", "developer"), managedUser("d2", "developer"),
+    ]);
+    const result = await changeUserRole(repo, "d1", "d2", "content_writer");
+    expect(result).toEqual({ ok: true });
+    expect(setRoleCalls).toHaveLength(1);
+  });
+
   it("applies the guard's refusal instead of writing when demoting the last admin", async () => {
+    // The actor is someone else holding users.manage: changing your own
+    // role is refused outright (see the self-change test below).
     const { repo, setRoleCalls } = memoryUsersRepo([managedUser("a1", "admin")]);
-    const result = await changeUserRole(repo, "a1", "a1", "developer");
+    const result = await changeUserRole(repo, "x1", "a1", "developer");
     expect(result).toEqual({ ok: false, error: expect.stringMatching(/last admin/i) });
     expect(setRoleCalls).toHaveLength(0);
   });

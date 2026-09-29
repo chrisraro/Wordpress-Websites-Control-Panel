@@ -145,6 +145,25 @@ describe("plugin_install handler dispatch", () => {
   });
 });
 
+// Security finding: the handler used to treat any non-upload source as
+// installable, so a url-kind payload (forged or legacy) reached the
+// installer with an attacker-chosen download URL.
+describe("plugin_install handler source allow-list", () => {
+  beforeEach(() => {
+    installPluginMock.mockClear();
+    installThemeMock.mockClear();
+  });
+
+  it("throws on a url-kind source and installs nothing", async () => {
+    const { db } = fakeDb();
+    const handlers = buildJobHandlers(db);
+    const job = jobRow({ source: { kind: "url", url: "https://evil.example/x.zip" }, activate: true, actor: "user-1" });
+    await expect(handlers.plugin_install!({ job })).rejects.toThrow("plugin_install source kind not allowed");
+    expect(installPluginMock).not.toHaveBeenCalled();
+    expect(installThemeMock).not.toHaveBeenCalled();
+  });
+});
+
 // The handler must never pass a "skip if recent" option again. The guard it
 // used to configure reported success on a partially-written feed (4,000 of
 // 43,060 rows, 0.4s, job marked done) and was removed; see refreshVulnFeed's
