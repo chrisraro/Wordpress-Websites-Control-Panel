@@ -73,7 +73,7 @@ export default async function SecurityPage({ params }: { params: Promise<{ id: s
   // -- not security.run, which only entitles someone to look. The list shown
   // is recomputed inside the action from the same checks, so what the dialog
   // names and what runs cannot drift apart.
-  const plan = hardeningPlan(checks);
+  const plan = hardeningPlan(checks, { frameable: uptime.frameable });
   const canHarden = plan.length > 0 && can(viewer, "wp_toolkit.manage") && canAccessSite(viewer, id, "manage");
   const hardenButton = canHarden ? (
     <ManageForm

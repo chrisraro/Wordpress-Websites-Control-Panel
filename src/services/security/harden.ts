@@ -44,7 +44,7 @@ const CHECK_FOR_FIX = Object.fromEntries(
 export const FIX_LABEL: Record<HardeningFix, string> = {
   xmlrpc: "Block XML-RPC (breaks Jetpack and the WordPress mobile app if they are in use)",
   file_edit: "Disable the plugin and theme code editors in WP Admin",
-  headers: "Send X-Frame-Options, X-Content-Type-Options and Referrer-Policy headers",
+  headers: "Send frame-protection (admitting only the site and this panel), X-Content-Type-Options and Referrer-Policy headers",
   uploads_index: "Stop the uploads folder from listing its files",
   wp_config_perms: "Remove world-read permission from wp-config.php",
 };
@@ -57,14 +57,47 @@ export const FIX_LABEL: Record<HardeningFix, string> = {
  * (which plugins to delete is a choice per plugin, and the Plugins tab already
  * offers it with selection).
  */
-export function hardeningPlan(checks: SecurityCheck[]): HardeningFix[] {
+export function hardeningPlan(
+  checks: SecurityCheck[],
+  opts: { frameable?: boolean | null; panelOrigin?: string } = {},
+): HardeningFix[] {
   const out: HardeningFix[] = [];
   for (const c of checks) {
     if (c.result === "pass") continue;
     const fix = FIX_FOR_CHECK[c.check_id];
     if (fix && !out.includes(fix)) out.push(fix);
   }
+  // A site whose frame protection also shuts out the panel (the old
+  // X-Frame-Options header, or a security plugin's) gets the panel's
+  // headers file: its frame-ancestors admits only the site and the panel,
+  // and browsers follow it over X-Frame-Options.
+  // Only when the panel knows its origin: otherwise the file it would write
+  // still blocks the panel, and the fix would be proposed forever.
+  const origin = "panelOrigin" in opts ? opts.panelOrigin : panelOrigin();
+  if (opts.frameable === false && origin !== undefined && !out.includes("headers")) out.push("headers");
   return out;
+}
+
+/**
+ * The panel's own origin, for frame-ancestors: a bare https origin, or
+ * undefined (the headers fix then falls back to X-Frame-Options SAMEORIGIN).
+ */
+export function panelOrigin(appUrl: string | undefined = process.env.APP_URL): string | undefined {
+  if (!appUrl) return undefined;
+  try {
+    const u = new URL(appUrl);
+    return u.protocol === "https:" ? u.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function assertBareHttpsOrigin(origin: string): void {
+  let u: URL | null = null;
+  try { u = new URL(origin); } catch { /* handled below */ }
+  if (!u || u.protocol !== "https:" || u.origin !== origin) {
+    throw new Error(`Not a bare https origin for frame-ancestors: ${JSON.stringify(origin)}`);
+  }
 }
 
 /*
@@ -110,7 +143,19 @@ if (!defined('DISALLOW_FILE_EDIT')) {
 }
 `;
 
-const MU_HEADERS = `<?php
+/**
+ * Frame protection: with the panel's origin known, CSP frame-ancestors
+ * admitting only the site itself and the panel (so the dashboard can show
+ * the live homepage; every other site stays blocked). The CSP header is
+ * added with replace=false, so a CSP the site already sends is kept. Without
+ * a known origin, the original X-Frame-Options: SAMEORIGIN.
+ */
+function muHeaders(origin: string | undefined): string {
+  if (origin !== undefined) assertBareHttpsOrigin(origin);
+  const frame = origin
+    ? `  header("Content-Security-Policy: frame-ancestors 'self' ${origin}", false);`
+    : "  header('X-Frame-Options: SAMEORIGIN');";
+  return `<?php
 /**
  * Plugin Name: OCS Hardening - Security Headers
  * Description: Conservative browser security headers on every response WordPress renders.
@@ -118,11 +163,12 @@ const MU_HEADERS = `<?php
 ${MARKER}
 add_action('send_headers', function () {
   if (headers_sent()) { return; }
-  header('X-Frame-Options: SAMEORIGIN');
+${frame}
   header('X-Content-Type-Options: nosniff');
   header('Referrer-Policy: strict-origin-when-cross-origin');
 });
 `;
+}
 
 const UPLOADS_INDEX = `<?php
 // Silence is golden.
@@ -132,7 +178,8 @@ interface FileFix { path: string; body: string }
 const FILE_FIXES: Record<Exclude<HardeningFix, "wp_config_perms">, FileFix> = {
   xmlrpc:        { path: "mu-plugins/ocs-disable-xmlrpc.php", body: MU_XMLRPC },
   file_edit:     { path: "mu-plugins/ocs-disable-file-edit.php", body: MU_FILE_EDIT },
-  headers:       { path: "mu-plugins/ocs-security-headers.php", body: MU_HEADERS },
+  // Body is built per call (it carries the panel origin); see muHeaders.
+  headers:       { path: "mu-plugins/ocs-security-headers.php", body: "" },
   uploads_index: { path: "uploads/index.php", body: UPLOADS_INDEX },
 };
 
@@ -150,13 +197,18 @@ export interface FixResult { fix: HardeningFix; outcome: FixOutcome; reason?: st
  * No backslashes anywhere in this string. The file bodies arrive base64'd via
  * phpString, so nothing here needs escaping -- and a test pins that.
  */
-export function buildHardenPhp(fixes: HardeningFix[], mode: "harden" | "unharden"): string {
+export function buildHardenPhp(
+  fixes: HardeningFix[], mode: "harden" | "unharden", origin: string | undefined = panelOrigin(),
+): string {
   for (const f of fixes) {
     if (!isHardeningFix(f)) throw new Error(`Unknown hardening fix: ${JSON.stringify(f)}`);
   }
   const fileOps = fixes
     .filter((f): f is Exclude<HardeningFix, "wp_config_perms"> => f !== "wp_config_perms")
-    .map((f) => `array(${phpString(f)}, ${phpString(FILE_FIXES[f].path)}, ${phpString(FILE_FIXES[f].body)})`)
+    .map((f) => {
+      const body = f === "headers" ? muHeaders(origin) : FILE_FIXES[f].body;
+      return `array(${phpString(f)}, ${phpString(FILE_FIXES[f].path)}, ${phpString(body)})`;
+    })
     .join(",\n  ");
   const wantPerms = fixes.includes("wp_config_perms");
 

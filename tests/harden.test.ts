@@ -123,3 +123,39 @@ describe("the files each fix writes", () => {
     for (const f of HARDENING_FIXES) expect(FIX_LABEL[f].length).toBeGreaterThan(20);
   });
 });
+
+describe("headers fix: frame protection that still admits the panel", () => {
+  const decode = (php: string) => [...php.matchAll(/base64_decode\('([A-Za-z0-9+/=]+)'\)/g)]
+    .map((m) => Buffer.from(m[1], "base64").toString("utf8"))
+    .find((b) => b.includes("send_headers"))!;
+
+  it("with the panel's origin: CSP frame-ancestors 'self' + panel, and no X-Frame-Options", () => {
+    const body = decode(buildHardenPhp(["headers"], "harden", "https://panel.example"));
+    expect(body).toContain("Content-Security-Policy: frame-ancestors 'self' https://panel.example");
+    expect(body).not.toContain("X-Frame-Options");
+    // Added alongside any CSP the site already sends, never replacing it.
+    expect(body).toContain(`header("Content-Security-Policy: frame-ancestors 'self' https://panel.example", false);`);
+    expect(body).toContain("X-Content-Type-Options: nosniff");
+  });
+
+  it("without a known panel origin: keeps X-Frame-Options SAMEORIGIN", () => {
+    expect(decode(buildHardenPhp(["headers"], "harden", undefined))).toContain("X-Frame-Options: SAMEORIGIN");
+  });
+
+  it("refuses anything but a bare https origin", () => {
+    for (const bad of ["http://panel.example", "https://panel.example/path", "https://a.example 'unsafe-inline'", "javascript:x"]) {
+      expect(() => buildHardenPhp(["headers"], "harden", bad)).toThrow(/origin/i);
+    }
+  });
+
+  it("the plan re-writes the headers file when the panel cannot frame the site", () => {
+    const passing = [c("security_headers", "pass")];
+    const panel = "https://panel.example";
+    expect(hardeningPlan(passing, { frameable: false, panelOrigin: panel })).toEqual(["headers"]);
+    expect(hardeningPlan(passing, { frameable: true, panelOrigin: panel })).toEqual([]);
+    expect(hardeningPlan(passing, { frameable: null, panelOrigin: panel })).toEqual([]);
+    expect(hardeningPlan(passing)).toEqual([]);
+    // Without a known panel origin the rewrite could not admit the panel: never proposed.
+    expect(hardeningPlan(passing, { frameable: false, panelOrigin: undefined })).toEqual([]);
+  });
+});

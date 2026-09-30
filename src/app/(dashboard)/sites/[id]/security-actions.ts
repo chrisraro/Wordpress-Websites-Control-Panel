@@ -10,6 +10,7 @@ import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
 import { checkPermission, checkSiteAccess, isDenied } from "@/lib/authz/server";
 import { friendlySiteError } from "@/lib/mcp/errors";
 import { hardenSite, hardeningPlan, summarizeHardening } from "@/services/security/harden";
+import { readFrameable } from "@/services/security/frameable";
 
 export async function runSecurityScanAction(
   siteId: string,
@@ -68,7 +69,8 @@ export async function hardenSiteAction(
   const security = supabaseSecurityRepo(db);
   const latest = await security.latestChecks(siteId);
   if (!latest) return { ok: false, error: "Run a security scan first, so there is something to act on." };
-  const plan = hardeningPlan(latest.checks);
+  const frameable = await readFrameable(security, siteId);
+  const plan = hardeningPlan(latest.checks, { frameable });
   if (plan.length === 0) return { ok: true, message: "Nothing to harden — every fixable check already passes." };
 
   const out = await hardenSite({ sites: supabaseSitesRepo(db), mcp: createSiteMcpClient }, siteId, user.id, plan);

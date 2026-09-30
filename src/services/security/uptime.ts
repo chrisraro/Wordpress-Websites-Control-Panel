@@ -34,18 +34,24 @@ export function sslDaysRemaining(hostname: string): Promise<number | null> {
 }
 
 /**
- * Whether a response lets the panel frame the page. Any X-Frame-Options
- * blocks us (ALLOW-FROM is obsolete and ignored by browsers), and so does a
- * CSP frame-ancestors that names neither `*` nor the panel's own origin.
+ * Whether a response lets the panel frame the page, by the browser's rule:
+ * when any CSP sets frame-ancestors, those decide and X-Frame-Options is
+ * ignored; each such policy must name `*` or the panel's origin. Without
+ * frame-ancestors, any X-Frame-Options blocks us (ALLOW-FROM is obsolete).
  */
 export function frameableFrom(headers: Headers, panelOrigin: string | undefined = appOrigin()): boolean {
-  if (headers.get("x-frame-options")) return false;
   const csp = headers.get("content-security-policy");
-  if (!csp) return true;
-  const directive = csp.split(";").map((d) => d.trim()).find((d) => /^frame-ancestors\b/i.test(d));
-  if (!directive) return true;
-  const sources = directive.split(/\s+/).slice(1);
-  return sources.includes("*") || (panelOrigin !== undefined && sources.includes(panelOrigin));
+  const ancestorLists = (csp ?? "")
+    // Several CSP headers arrive joined with ", "; each is its own policy.
+    .split(",")
+    .map((policy) => policy.split(";").map((d) => d.trim()).find((d) => /^frame-ancestors\b/i.test(d)))
+    .filter((d): d is string => d !== undefined)
+    .map((d) => d.split(/\s+/).slice(1));
+  if (ancestorLists.length > 0) {
+    return ancestorLists.every((sources) =>
+      sources.includes("*") || (panelOrigin !== undefined && sources.includes(panelOrigin)));
+  }
+  return !headers.get("x-frame-options");
 }
 
 function appOrigin(): string | undefined {

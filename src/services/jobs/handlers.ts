@@ -25,6 +25,7 @@ import { manageSite } from "@/services/manage/service";
 import { toManageAction } from "@/services/bulk/service";
 import type { BulkJobPayload } from "@/services/bulk/types";
 import { hardenSite, hardeningPlan } from "@/services/security/harden";
+import { readFrameable } from "@/services/security/frameable";
 import { backupPolicyOf, gateOnBackup, type BackupJobFields } from "@/services/backup/gate";
 import { BACKUP_TIMEOUT_MS } from "@/services/backup/updraft";
 import { setupUpdraft } from "@/services/backup/setup";
@@ -343,7 +344,8 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
       if (typeof p?.actor !== "string") throw new Error("harden payload malformed");
       await assertActorAuthorized(loadActor, p.actor, job.site_id, "harden");
       const latest = await security.latestChecks(job.site_id);
-      const plan = latest ? hardeningPlan(latest.checks) : [];
+      const frameable = await readFrameable(security, job.site_id);
+      const plan = latest ? hardeningPlan(latest.checks, { frameable }) : [];
       // A site with nothing to fix is a success, not a failure: the fleet
       // action filters these out, but a scan between queueing and running
       // can legitimately clear the list.

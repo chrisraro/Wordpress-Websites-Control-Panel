@@ -278,7 +278,7 @@ export default async function DashboardPage({
         updates,
         pluginUpdates,
         gsc,
-        hardenFixes: latestChecks ? hardeningPlan(latestChecks.checks) : [],
+        hardenFixes: latestChecks ? hardeningPlan(latestChecks.checks, { frameable: uptime?.frameable }) : [],
         grade,
         gradeIncomplete: (g?.incomplete?.length ?? 0) > 0,
         seo: score ?? undefined,

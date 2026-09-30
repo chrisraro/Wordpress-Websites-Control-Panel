@@ -8,6 +8,7 @@ import { supabaseSnapshotsRepo } from "@/services/inventory/repo";
 import { pendingPluginUpdates } from "@/services/inventory/types";
 import { supabaseSecurityRepo } from "@/services/security/repo";
 import { hardeningPlan } from "@/services/security/harden";
+import { readFrameable } from "@/services/security/frameable";
 import { enqueueJob, enqueueBatch } from "@/services/jobs/service";
 import { createSiteMcpClient } from "@/lib/mcp/client";
 import { createServiceSupabase, requireUser } from "@/lib/supabase/server";
@@ -299,7 +300,8 @@ export async function hardenFleetAction(
   const held: SiteRow[] = [];
   for (const site of candidates) {
     const latest = await security.latestChecks(site.id);
-    if (!latest || hardeningPlan(latest.checks).length === 0) continue;
+    const frameable = await readFrameable(security, site.id);
+    if (!latest || hardeningPlan(latest.checks, { frameable }).length === 0) continue;
     // Same one-run-per-site rule as updateAllPluginsAction.
     if (await jobs.pendingExists("harden", site.id)) { held.push(site); continue; }
     targets.push(site.id);

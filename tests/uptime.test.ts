@@ -54,3 +54,17 @@ describe("frameability (can the panel show the live homepage in a card?)", () =>
     expect((await checkSite("http://down.test", down)).frameable).toBeNull();
   });
 });
+
+describe("frameability follows the browser rule: CSP frame-ancestors overrides X-Frame-Options", () => {
+  const h = (init: Record<string, string>) => new Headers(init);
+  it("admits the panel when frame-ancestors names it, even alongside X-Frame-Options", () => {
+    expect(frameableFrom(h({
+      "x-frame-options": "SAMEORIGIN",
+      "content-security-policy": "frame-ancestors 'self' https://panel.example",
+    }), "https://panel.example")).toBe(true);
+  });
+  it("every policy that sets frame-ancestors must admit the panel", () => {
+    const both = "frame-ancestors 'self' https://panel.example, frame-ancestors 'self'";
+    expect(frameableFrom(h({ "content-security-policy": both }), "https://panel.example")).toBe(false);
+  });
+});
