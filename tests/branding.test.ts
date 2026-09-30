@@ -73,7 +73,7 @@ describe("public metadata routes", () => {
   // because the matcher's exclusion list covered svg/png/jpg/ico but not
   // webmanifest. Icon routes escaped only incidentally, by ending in .png.
   const middleware = readFileSync(
-    join(process.cwd(), "src", "middleware.ts"),
+    join(process.cwd(), "src", "proxy.ts"),
     "utf8",
   );
 

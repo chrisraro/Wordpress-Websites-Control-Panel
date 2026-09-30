@@ -451,7 +451,7 @@ worse failure mode than a few extra milliseconds.
 
 ## Why middleware holds no authorization checks
 
-`src/middleware.ts` refreshes the Supabase session and redirects anonymous
+`src/proxy.ts` (Next 16's name for middleware) refreshes the Supabase session and redirects anonymous
 visitors to `/login`. That is the entire extent of it — no role check, no
 permission check, no site-grant check. This is deliberate, not an oversight:
 Next.js CVE-2025-29927 let a crafted `x-middleware-subrequest` header convince
@@ -459,7 +459,7 @@ the framework that middleware had already run, skipping it entirely. Any app
 whose only gate lived in middleware was fully exposed by that bug. Every real
 check lives in the page, server action, or route handler itself — middleware
 is an optimization the framework is free to short-circuit, not a security
-boundary. If you touch `src/middleware.ts`, keep it that way: it may redirect
+boundary. If you touch `src/proxy.ts`, keep it that way: it may redirect
 based on session presence only, never on role or permission.
 
 ## RLS is the backstop, not the primary gate

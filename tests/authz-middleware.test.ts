@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
  * refactor that "helpfully" centralises a permission check here.
  * See docs/superpowers/specs/2026-08-29-phase9a-authorization-design.md §4.2.
  */
-const SRC = readFileSync(new URL("../src/middleware.ts", import.meta.url), "utf8");
+const SRC = readFileSync(new URL("../src/proxy.ts", import.meta.url), "utf8");
 
 describe("middleware performs no authorization", () => {
   it("does not import the authorization layer", () => {

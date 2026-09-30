@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// This middleware refreshes the Supabase session and redirects anonymous
+// This proxy (Next 16's name for middleware) refreshes the Supabase session and redirects anonymous
 // visitors. It performs NO authorization, and must never be given any.
 // Next.js CVE-2025-29927 let a crafted x-middleware-subrequest header convince
 // the framework middleware had already run, skipping it entirely — every app
@@ -15,7 +15,7 @@ const PUBLIC_EXACT = ["/login"];
 // a bearer API token for /api/mcp) and carry no Supabase session cookie.
 const PUBLIC_PREFIXES = ["/r/", "/api/cron/", "/api/webhooks/", "/api/mcp"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_EXACT.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 
