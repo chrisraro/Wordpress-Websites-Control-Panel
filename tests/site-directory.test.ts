@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  DIRECTORY_PAGE_SIZE, directoryHref, parseDirectoryQuery, queryDirectory, type DirectoryFields,
+  DIRECTORY_PAGE_SIZE, directoryHref, parseDirectoryQuery, queryDirectory, resolvePairs, type DirectoryFields,
 } from "@/services/sites/directory";
 import { fleetOverview, liveness } from "@/services/sites/overview";
 import { liveFrameUrl, sitePreviewUrl } from "@/services/sites/preview";
@@ -8,7 +8,7 @@ import { siteAttention } from "@/services/sites/portfolio";
 
 function entry(name: string, over: Partial<DirectoryFields> = {}): DirectoryFields {
   return {
-    name, url: `https://${name.toLowerCase().replace(/\s+/g, "")}.ph`, clientLabel: null,
+    id: name, name, url: `https://${name.toLowerCase().replace(/\s+/g, "")}.ph`, clientLabel: null,
     env: "production", severity: "ok", status: "connected", ...over,
   };
 }
@@ -17,7 +17,7 @@ const names = (r: { items: DirectoryFields[] }) => r.items.map((f) => f.name);
 
 describe("parseDirectoryQuery", () => {
   it("defaults to every site, attention-first, page 1", () => {
-    expect(parseDirectoryQuery({})).toEqual({ q: "", env: "all", sort: "attention", page: 1 });
+    expect(parseDirectoryQuery({})).toEqual({ q: "", env: "all", sort: "name", page: 1 });
   });
 
   it("accepts the old tab link (?env=staging) and 'production' as live", () => {
@@ -28,7 +28,7 @@ describe("parseDirectoryQuery", () => {
 
   it("falls back on unknown values instead of trusting the URL", () => {
     const q = parseDirectoryQuery({ env: "prod'--", sort: "__proto__", page: "-3" });
-    expect(q).toMatchObject({ env: "all", sort: "attention", page: 1 });
+    expect(q).toMatchObject({ env: "all", sort: "name", page: 1 });
   });
 
   it("trims and caps the search text", () => {
@@ -59,8 +59,8 @@ describe("queryDirectory", () => {
     expect(queryDirectory(rows, id, parseDirectoryQuery({ env: "live" })).total).toBe(4);
   });
 
-  it("sorts attention-first by default, then by name", () => {
-    expect(names(queryDirectory(rows, id, parseDirectoryQuery({})))).toEqual(
+  it("sorts attention-first on request, then by name", () => {
+    expect(names(queryDirectory(rows, id, parseDirectoryQuery({ sort: "attention" })))).toEqual(
       ["Graceland", "Naga City Guide", "Azalea Baguio", "Beach Bus", "Umahotel"],
     );
   });
@@ -79,20 +79,20 @@ describe("queryDirectory", () => {
       .toEqual(["Naga City Guide", "Beach Bus"]);
   });
 
-  it("pages ten at a time and clamps a page past the end", () => {
+  it("pages nine at a time and clamps a page past the end", () => {
     const many = Array.from({ length: 23 }, (_, i) => entry(`Site ${String(i).padStart(2, "0")}`));
     const p1 = queryDirectory(many, id, parseDirectoryQuery({ sort: "name" }));
     expect(p1.items).toHaveLength(DIRECTORY_PAGE_SIZE);
     expect(p1).toMatchObject({ page: 1, totalPages: 3, total: 23 });
     const last = queryDirectory(many, id, parseDirectoryQuery({ sort: "name", page: "9" }));
     expect(last.page).toBe(3);
-    expect(names(last)).toEqual(["Site 20", "Site 21", "Site 22"]);
+    expect(names(last)).toEqual(["Site 18", "Site 19", "Site 20", "Site 21", "Site 22"]);
   });
 });
 
 describe("directoryHref", () => {
   it("keeps the query, omits defaults and page 1, and lands on the directory", () => {
-    const q = parseDirectoryQuery({ q: "naga", env: "staging", sort: "attention", page: "2" });
+    const q = parseDirectoryQuery({ q: "naga", env: "staging", sort: "name", page: "2" });
     expect(directoryHref(q, {})).toBe("/dashboard?q=naga&env=staging&page=2#sites");
     expect(directoryHref(q, { page: 1 })).toBe("/dashboard?q=naga&env=staging#sites");
     expect(directoryHref(parseDirectoryQuery({}), {})).toBe("/dashboard#sites");
@@ -193,5 +193,42 @@ describe("liveFrameUrl (when a card shows the live site)", () => {
     // An http page in an https panel is blocked as mixed content anyway.
     expect(liveFrameUrl("http://upcatreviewplus.com/", true)).toBeNull();
     expect(liveFrameUrl("javascript:alert(1)", true)).toBeNull();
+  });
+});
+
+describe("staging copies sit beside their live site (default A–Z)", () => {
+  const live = (name: string, url: string, over: Partial<DirectoryFields> = {}) =>
+    entry(name, { id: name, url, ...over });
+  const rows = [
+    live("Umahotel", "https://umahotel.ph/"),
+    live("Graceland", "https://graceland.ph/"),
+    live("Zeta Staging Copy", "https://staging.graceland.ph/", { env: "staging" }),
+    live("Azalea Baguio", "https://azaleabaguio.com/"),
+    live("Acad1 Stage", "https://acad1.ph/stage", { env: "staging", pairOf: "Umahotel" }),
+    live("Beach Bus Staging", "https://beachbus-dev.example.com/", { env: "staging" }),
+    live("Beach Bus", "https://beachbus.ph/"),
+  ];
+
+  it("groups by the live site's name: explicit pair, then host, then name", () => {
+    expect(names(queryDirectory(rows, id, parseDirectoryQuery({})))).toEqual([
+      "Azalea Baguio",
+      "Beach Bus", "Beach Bus Staging", // by name ("Staging" stripped)
+      "Graceland", "Zeta Staging Copy", // by host (staging.graceland.ph)
+      "Umahotel", "Acad1 Stage", // explicit pair wins over its own name
+    ]);
+  });
+
+  it("falls back to its own name when its live site is filtered out", () => {
+    expect(names(queryDirectory(rows, id, parseDirectoryQuery({ env: "staging" })))).toEqual(
+      ["Acad1 Stage", "Beach Bus Staging", "Zeta Staging Copy"],
+    );
+  });
+
+  it("resolvePairs never pairs a live site, or a staging site with another staging site", () => {
+    const pairs = resolvePairs(rows);
+    expect(pairs.get("Zeta Staging Copy")).toBe("Graceland");
+    expect(pairs.get("Beach Bus Staging")).toBe("Beach Bus");
+    expect(pairs.get("Acad1 Stage")).toBe("Umahotel");
+    expect(pairs.has("Graceland")).toBe(false);
   });
 });

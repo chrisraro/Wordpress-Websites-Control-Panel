@@ -44,7 +44,7 @@ function Pager({ query, result }: { query: DirectoryQuery; result: DirectoryPage
 }
 
 /**
- * The site directory: every connected site as a card, ten to a page.
+ * The site directory: every connected site as a card, nine to a page.
  *
  * One list with an environment filter replaces the old Production/Staging
  * tabs; the environment is instead on every card, and the filter and sort
@@ -106,7 +106,7 @@ export function SiteCatalog({
           ))}
         </AutoSubmitSelect>
         <SearchSubmit label="Search" pendingLabel="Searching…" />
-        {(filtered || query.sort !== "attention") && (
+        {(filtered || query.sort !== "name") && (
           <Link href="/dashboard#sites" className={buttonClass("ghost")}>Clear</Link>
         )}
       </form>
@@ -123,7 +123,7 @@ export function SiteCatalog({
           </EmptyState>
         </Card>
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {result.items.map((site) => <SiteCard key={site.id} site={site} />)}
         </ul>
       )}

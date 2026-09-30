@@ -18,8 +18,8 @@ export default function DashboardLoading() {
         )}
       </div>
       <Skeleton className="mb-4 h-10 w-full" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <div key={i} className={`${cardClass} overflow-hidden`}>
             <Skeleton className="aspect-[16/10] w-full rounded-none" />
             <div className="space-y-2 p-4">

@@ -13,6 +13,8 @@ export interface PairingRepo {
   /** Staging copies that name `productionId` as their production site. */
   listStagingPairs(productionId: string): Promise<{ id: string; name: string }[]>;
   setProductionSiteId(siteId: string, productionId: string | null): Promise<void>;
+  /** Every staging copy's production site, for the dashboard's A-Z grouping. */
+  listAllPairs(): Promise<Map<string, string>>;
 }
 
 export function supabasePairingRepo(db: SupabaseClient): PairingRepo {
@@ -32,6 +34,14 @@ export function supabasePairingRepo(db: SupabaseClient): PairingRepo {
       return (data ?? [])
         .filter((r) => r.environment !== "production")
         .map((r) => ({ id: r.id as string, name: r.name as string }));
+    },
+    async listAllPairs() {
+      const { data, error } = await db.from("sites")
+        .select("id,production_site_id,environment").not("production_site_id", "is", null);
+      if (error) throw new Error(`listAllPairs failed: ${error.message}`, { cause: error });
+      return new Map((data ?? [])
+        .filter((r) => r.environment !== "production")
+        .map((r) => [r.id as string, r.production_site_id as string]));
     },
     async setProductionSiteId(siteId, productionId) {
       const { error } = await db.from("sites")

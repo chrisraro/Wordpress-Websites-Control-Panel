@@ -28,6 +28,7 @@ import {
 } from "@/services/sites/directory";
 import { fleetOverview, liveness } from "@/services/sites/overview";
 import { liveFrameUrl, sitePreviewUrl } from "@/services/sites/preview";
+import { supabasePairingRepo } from "@/services/sites/pairing-repo";
 import type { SiteRow } from "@/services/sites/types";
 import { JOB_TYPE_LABEL, type JobRow, type JobType } from "@/services/jobs/types";
 import { vulnFeedStatus } from "@/services/security/scan";
@@ -242,6 +243,14 @@ export default async function DashboardPage({
   // the row list always made plus the 24h uptime summary (at most 288 rows at
   // the 5-minute cadence), which the overview band and the cards' Up/Down
   // need. This is the landing screen and has to stay fast on a phone.
+  // Explicit staging -> production pairs (0026) for the A-Z grouping. The
+  // column is staff-only, read through the service-role `db` on the same
+  // sites.view_all gate as the other staff-only reads; without it the
+  // directory infers pairs from host and name instead.
+  const explicitPairs = can(viewer, "sites.view_all")
+    ? await supabasePairingRepo(db).listAllPairs().catch(() => new Map<string, string>())
+    : new Map<string, string>();
+
   const rows: Row[] = await Promise.all(
     sites.map(async (site) => {
       const [snap, g, score, latestChecks, uptime] = await Promise.all([
@@ -274,6 +283,8 @@ export default async function DashboardPage({
         seo: score ?? undefined,
         frameable: uptime?.frameable ?? null,
         fields: {
+          id: site.id,
+          pairOf: explicitPairs.get(site.id) ?? null,
           name: site.name,
           url: site.url,
           clientLabel: site.client_label,
@@ -570,6 +581,8 @@ export default async function DashboardPage({
         </Card>
       ) : (
         <div className="space-y-8">
+          <SiteCatalog query={query} result={{ ...directory, items: catalog }} counts={envCounts} />
+
           {needsAttention.length > 0 && (
             <section aria-labelledby="needs-attention">
               <h2
@@ -586,8 +599,6 @@ export default async function DashboardPage({
               </ul>
             </section>
           )}
-
-          <SiteCatalog query={query} result={{ ...directory, items: catalog }} counts={envCounts} />
         </div>
       )}
     </main>
