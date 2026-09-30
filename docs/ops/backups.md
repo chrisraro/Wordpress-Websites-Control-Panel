@@ -89,7 +89,10 @@ environment shown (src/services/backup/setup.ts). On each site it:
 1. installs and activates UpdraftPlus from wordpress.org if missing (or
    activates it if installed but inactive);
 2. adds Google Drive as a destination, keeping any existing ones;
-3. sets weekly file and database backups only where none are scheduled;
+3. sets weekly file and database backups only where no interval is set (a
+   deliberate "manual" is left alone); existing Google Drive settings are
+   never replaced, and an older flat-format Drive option is reported as
+   `legacyDriveFormat` for a person to check;
 4. re-registers the WP-Cron schedule. graceland.ph was found (2026-09-30)
    with a weekly schedule configured but no cron event, so no backup had
    run since 18 July; this step is what fixes that state.
