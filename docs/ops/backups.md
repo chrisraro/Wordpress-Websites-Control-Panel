@@ -80,3 +80,25 @@ backup failed" or "None yet". It is as fresh as the last inventory
 refresh. **Back up now** (staff with `wp_toolkit.manage` and a manage
 grant, shown where UpdraftPlus was found) starts a backup and logs
 `site.backup.request`; refresh the inventory later to see the result.
+
+## Setting up UpdraftPlus across the fleet
+
+Dashboard → **Set up backups** queues a `backup_setup` job per site in the
+environment shown (src/services/backup/setup.ts). On each site it:
+
+1. installs and activates UpdraftPlus from wordpress.org if missing (or
+   activates it if installed but inactive);
+2. adds Google Drive as a destination, keeping any existing ones;
+3. sets weekly file and database backups only where none are scheduled;
+4. re-registers the WP-Cron schedule. graceland.ph was found (2026-09-30)
+   with a weekly schedule configured but no cron event, so no backup had
+   run since 18 July; this step is what fixes that state.
+
+It is safe to re-run. The result of each site is in the activity log
+(`site.backup_setup`, including `driveAuthorized`).
+
+**The one manual step:** Google Drive must be authorized once per site, as
+teamocsph@gmail.com: wp-admin → Settings → UpdraftPlus Backups → Settings →
+Google Drive → *Sign in with Google*, then Save. Google's consent screen
+cannot be completed by the panel. Until it is done, backups still run but
+stay on the site's own server.

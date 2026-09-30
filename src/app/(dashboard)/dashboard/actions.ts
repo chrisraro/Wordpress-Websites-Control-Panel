@@ -334,3 +334,58 @@ export async function hardenFleetAction(
     href: `/marketplace/batches/${batchId}`,
   };
 }
+
+/**
+ * "Set up backups" across one environment: a backup_setup job per site
+ * (install UpdraftPlus if missing, add Google Drive, register a schedule).
+ * Enqueue-only; the Google Drive sign-in stays a per-site human step.
+ */
+export async function setupBackupsFleetAction(
+  env: SiteEnvironment,
+  _prevState?: unknown,
+  _formData?: FormData,
+): Promise<ManageResult> {
+  const user = await requireUser();
+  const gate = await checkPermission("wp_toolkit.manage");
+  if (isDenied(gate)) return gate;
+  const viewer = gate;
+
+  const db = createServiceSupabase();
+  const jobs = supabaseJobsRepo(db);
+  const sites = await listSitesForViewer(
+    { repo: supabaseSitesRepo(db), mcp: createSiteMcpClient, jobs },
+    viewer,
+  );
+  const candidates = sites.filter(
+    (s) =>
+      s.status !== "disabled" &&
+      siteEnvironment(s) === env &&
+      canAccessSite(viewer, s.id, "manage"),
+  );
+
+  const targets: string[] = [];
+  const held: SiteRow[] = [];
+  for (const site of candidates) {
+    if (await jobs.pendingExists("backup_setup", site.id)) { held.push(site); continue; }
+    targets.push(site.id);
+  }
+  if (targets.length === 0) {
+    return {
+      ok: false,
+      error: held.length > 0
+        ? `Not queued — each site already has a backup setup run: ${await heldNotes(db, "backup_setup", held)}.`
+        : `No ${env} site you can manage.`,
+    };
+  }
+
+  const { batchId, count } = await enqueueBatch(jobs, "backup_setup", targets, { actor: user.id });
+  revalidatePath("/dashboard");
+  return {
+    ok: true,
+    message:
+      `Queued backup setup for ${count} site${count === 1 ? "" : "s"}. Then, on each site, open ` +
+      "Settings → UpdraftPlus Backups → Settings → Google Drive and click Sign in with Google " +
+      "as teamocsph@gmail.com — Google requires that one click per site.",
+    href: `/marketplace/batches/${batchId}`,
+  };
+}

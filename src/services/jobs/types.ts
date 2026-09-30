@@ -15,7 +15,10 @@ export type JobType =
   // rescan. The plan is computed when the job RUNS, from the checks current
   // at that moment, so a fleet run queued against yesterday's scan still
   // applies exactly what the site needs today.
-  | "harden";
+  | "harden"
+  // Install UpdraftPlus if missing, add Google Drive, register a schedule
+  // (src/services/backup/setup.ts). Idempotent.
+  | "backup_setup";
 export type JobStatus = "pending" | "running" | "awaiting_callback" | "done" | "failed";
 
 export interface JobRow {
@@ -74,4 +77,5 @@ export const JOB_TYPE_LABEL: Record<JobType, string> = {
   bulk_manage: "Bulk action",
   update_all_plugins: "Plugin updates",
   harden: "Security hardening",
+  backup_setup: "Backup setup",
 };

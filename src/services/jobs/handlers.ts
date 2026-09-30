@@ -27,6 +27,7 @@ import type { BulkJobPayload } from "@/services/bulk/types";
 import { hardenSite, hardeningPlan } from "@/services/security/harden";
 import { backupPolicyOf, gateOnBackup, type BackupJobFields } from "@/services/backup/gate";
 import { BACKUP_TIMEOUT_MS } from "@/services/backup/updraft";
+import { setupUpdraft } from "@/services/backup/setup";
 
 interface PluginInstallPayload {
   source: { kind: "wporg"; slug: string } | { kind: "upload"; path: string };
@@ -325,6 +326,16 @@ export function buildJobHandlers(db: SupabaseClient, opts: JobHandlerOptions = {
       // "Nothing to update" is a success in the PHP (see manage/service.ts):
       // a site that raced ahead of the inventory is not a failed job.
       if (!result.ok) throw new Error(result.error ?? "Plugin updates failed");
+    },
+    backup_setup: async ({ job }) => {
+      if (!job.site_id) throw new Error("backup_setup requires a site_id");
+      const p = job.payload as { actor?: unknown };
+      if (typeof p?.actor !== "string") throw new Error("backup_setup payload malformed");
+      await assertActorAuthorized(loadActor, p.actor, job.site_id, "backup_setup");
+      // Succeeds with Drive still unauthorized: the plugin, destination and
+      // schedule are in place, and the Google sign-in is a person's step
+      // (recorded in the activity log as driveAuthorized: false).
+      await setupUpdraft({ sites, jobs, mcp: createSiteMcpClient }, job.site_id, p.actor);
     },
     harden: async ({ job }) => {
       if (!job.site_id) throw new Error("harden requires a site_id");

@@ -35,11 +35,12 @@ import { vulnFeedStatus } from "@/services/security/scan";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui/primitives";
 import { badgeClass, buttonClass, cardClass } from "@/components/ui/styles";
 import {
-  IconAlert, IconChevronRight, IconPlugins, IconPlus, IconRefresh, IconShield, IconSites,
+  IconAlert, IconChevronRight, IconUpload, IconPlugins, IconPlus, IconRefresh, IconShield, IconSites,
 } from "@/components/ui/icons";
 import { ManageForm } from "../sites/[id]/action-form";
 import {
   refreshAllInventoryAction, dismissGlobalFailedJobsAction, updateAllPluginsAction, hardenFleetAction,
+  setupBackupsFleetAction,
 } from "./actions";
 import { hardeningPlan, FIX_LABEL } from "@/services/security/harden";
 
@@ -475,6 +476,26 @@ export default async function DashboardPage({
                         "Queued and run in the background; you'll be taken to the progress page.",
                     ].join(String.fromCharCode(10)),
                     confirmLabel: "Queue hardening",
+                    tone: activeEnv === "production" ? "danger" : "default",
+                  }}
+                />
+              )}
+              {canRefreshAll && (
+                <ManageForm
+                  action={setupBackupsFleetAction.bind(null, activeEnv)}
+                  label={`Set up backups (${refreshTargets.length} ${envWord})`}
+                  pendingLabel="Queuing…"
+                  variant="outline"
+                  icon={<IconUpload size={16} />}
+                  confirm={{
+                    title: `Set up UpdraftPlus backups on ${refreshTargets.length} ${activeEnv} site${refreshTargets.length === 1 ? "" : "s"}?`,
+                    description:
+                      "On each site: installs and activates UpdraftPlus from wordpress.org if it is missing, adds " +
+                      "Google Drive as a backup destination (existing destinations are kept), sets weekly file and " +
+                      "database backups where none are scheduled, and re-registers the schedule. Sites already set " +
+                      "up are left as they are. Afterwards, Google Drive still needs one \"Sign in with Google\" per " +
+                      "site as teamocsph@gmail.com, in Settings → UpdraftPlus Backups → Settings.",
+                    confirmLabel: "Queue setup",
                     tone: activeEnv === "production" ? "danger" : "default",
                   }}
                 />
