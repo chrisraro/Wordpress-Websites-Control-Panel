@@ -135,12 +135,13 @@ describe("setupUpdraft", () => {
     expect(JSON.stringify(activity.at(-1)).length).toBeLessThan(3000);
   });
 
-  it("never overwrites an existing Drive option, and leaves a manual schedule manual", () => {
+  it("never overwrites an existing Drive option, and schedules without a fixed literal match", () => {
     // Only creates the option when absent; a legacy flat option is reported, not replaced.
     expect(SETUP_UPDRAFT_PHP).toMatch(/\$gd === false \|\| \$gd === '' \|\| \$gd === array\(\)/);
     expect(SETUP_UPDRAFT_PHP).toMatch(/legacy_drive_format/);
-    // A deliberate 'manual' is a choice: only an unset interval becomes weekly.
-    expect(SETUP_UPDRAFT_PHP).not.toMatch(/=== 'manual'/);
+    // Interval policy is an allowlist (fortnightly, monthly kept); behaviour
+    // is pinned in tests/backup-setup-php.test.ts.
+    expect(SETUP_UPDRAFT_PHP).toMatch(/\$keep = array\('fortnightly', 'monthly'\)/);
     // Schedule repair clears before re-registering, so it never doubles up.
     expect(SETUP_UPDRAFT_PHP).toMatch(/wp_clear_scheduled_hook\('updraft_backup'\)/);
   });

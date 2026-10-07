@@ -89,16 +89,23 @@ environment shown (src/services/backup/setup.ts). On each site it:
 1. installs and activates UpdraftPlus from wordpress.org if missing (or
    activates it if installed but inactive);
 2. adds Google Drive as a destination, keeping any existing ones;
-3. sets weekly file and database backups only where no interval is set (a
-   deliberate "manual" is left alone); existing Google Drive settings are
-   never replaced, and an older flat-format Drive option is reported as
+3. schedules file and database backups **every 2 weeks** (OCS policy,
+   2026-10-07): hourly, twice-daily, daily, weekly, manual or unset become
+   fortnightly; monthly is kept. Existing Google Drive settings are never
+   replaced, and an older flat-format Drive option is reported as
    `legacyDriveFormat` for a person to check;
-4. re-registers the WP-Cron schedule. graceland.ph was found (2026-09-30)
+4. re-registers the WP-Cron schedule, starting two weeks after the site's
+   last backup (within the hour if it never backed up or is overdue). graceland.ph was found (2026-09-30)
    with a weekly schedule configured but no cron event, so no backup had
    run since 18 July; this step is what fixes that state.
 
 It is safe to re-run. The result of each site is in the activity log
-(`site.backup_setup`, including `driveAuthorized`).
+(`site.backup_setup`, including `driveAuthorized`, which counts UpdraftPlus's
+relay sign-in: a `user_id` on the site, the Google token kept at UpdraftPlus).
+
+Large sites: Naga City Guide's full backup is about 7.6 GB (Sep 2026), so the
+default retention of 4 copies needs ~30 GB of Drive. Check the account's
+storage before relying on retention, or lower files retention on that site.
 
 **The one manual step:** Google Drive must be authorized once per site, as
 teamocsph@gmail.com: wp-admin → Settings → UpdraftPlus Backups → Settings →

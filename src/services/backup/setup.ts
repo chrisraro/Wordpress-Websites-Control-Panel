@@ -9,10 +9,19 @@ import { installPlugin, type InstallDeps } from "@/services/marketplace/install"
  *
  * Idempotent and conservative. It adds Google Drive but never removes a
  * destination the site already uses, and never replaces existing Drive
- * settings; it sets a weekly schedule only where none is set, and leaves an
- * existing cadence (including a deliberate "manual") alone. It then
- * re-registers the schedule with WP-Cron, because a configured-but-missing
- * cron event (found live on graceland.ph) means no backup ever runs.
+ * settings.
+ *
+ * Schedule policy (set by OCS, 2026-10-07): scheduled backups run every two
+ * weeks -- never hourly or daily, and not weekly either. Anything more
+ * frequent than fortnightly, and "manual" or unset, becomes fortnightly;
+ * monthly is already at least two weeks apart and is kept. The cron events
+ * are then re-registered, starting two weeks after the site's last backup
+ * (or within the hour if it never backed up or is overdue), because a
+ * configured-but-missing event (found live on graceland.ph) means no backup
+ * ever runs, and an immediate start would duplicate a fresh backup.
+ *
+ * Drive counts as authorized with either a stored token or a user_id: the
+ * UpdraftPlus sign-in relay keeps the Google token on its own server.
  *
  * What it cannot do is authorize Google Drive: that is a Google consent
  * screen someone must click through once per site, signed in as the
@@ -57,28 +66,33 @@ if ($gd === false || $gd === '' || $gd === array()) {
   // An older flat format (may hold live credentials): never replaced.
   $legacy = true;
 }
+$keep = array('fortnightly', 'monthly');
 foreach (array('updraft_interval' => 'Files', 'updraft_interval_database' => 'Database') as $opt => $label) {
   $v = get_option($opt);
-  if ($v === false || $v === '') { update_option($opt, 'weekly'); $changed[] = $label . ' backups set to weekly'; }
+  if (!in_array($v, $keep, true)) {
+    update_option($opt, 'fortnightly');
+    $changed[] = $label . ' backups set to every 2 weeks' . (is_string($v) && $v !== '' ? ' (was ' . $v . ')' : '');
+  }
 }
-$fi = get_option('updraft_interval');
-$di = get_option('updraft_interval_database');
+$schedules = wp_get_schedules();
+$lb = get_option('updraft_last_backup');
+$last = (is_array($lb) && !empty($lb['backup_time'])) ? (int) $lb['backup_time'] : 0;
+$start = max($last + 14 * DAY_IN_SECONDS, time() + HOUR_IN_SECONDS);
 wp_clear_scheduled_hook('updraft_backup');
 wp_clear_scheduled_hook('updraft_backup_database');
-global $updraftplus;
-if (is_object($updraftplus) && method_exists($updraftplus, 'schedule_backup')) {
-  $updraftplus->schedule_backup($fi);
-  $updraftplus->schedule_backup_database($di);
-} else {
-  if ($fi !== 'manual') { wp_schedule_event(time() + 600, $fi, 'updraft_backup'); }
-  if ($di !== 'manual') { wp_schedule_event(time() + 600, $di, 'updraft_backup_database'); }
+$offset = 0;
+foreach (array('updraft_backup' => 'updraft_interval', 'updraft_backup_database' => 'updraft_interval_database') as $hook => $opt) {
+  $iv = get_option($opt);
+  if (!isset($schedules[$iv])) { return json_encode(array('state' => 'error', 'error' => 'UpdraftPlus schedules are not registered')); }
+  wp_schedule_event($start + $offset, $iv, $hook);
+  $offset += 300;
 }
 $authorized = false;
 $gd = get_option('updraft_googledrive');
-if (is_array($gd) && isset($gd['settings']) && is_array($gd['settings'])) {
-  foreach ($gd['settings'] as $c) { if (is_array($c) && !empty($c['token'])) { $authorized = true; } }
-} elseif (is_array($gd) && !empty($gd['token'])) {
-  $authorized = true;
+$instances = (is_array($gd) && isset($gd['settings']) && is_array($gd['settings'])) ? $gd['settings'] : (is_array($gd) ? array($gd) : array());
+foreach ($instances as $c) {
+  // Relay sign-ins keep the Google token at UpdraftPlus and store a user_id here.
+  if (is_array($c) && (!empty($c['token']) || !empty($c['user_id']))) { $authorized = true; }
 }
 $next = wp_next_scheduled('updraft_backup');
 return json_encode(array(
@@ -91,6 +105,7 @@ return json_encode(array(
 const SetupResultSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("not_installed") }),
   z.object({ state: z.literal("inactive") }),
+  z.object({ state: z.literal("error"), error: z.string() }),
   z.object({
     state: z.literal("configured"),
     changed: z.array(z.string()),
@@ -154,6 +169,8 @@ export async function setupUpdraft(
     activated = true;
     res = await configure(deps, siteId);
   }
+  // The site's own error text stays out of the message (it can carry paths).
+  if (res.state === "error") throw new Error("UpdraftPlus could not schedule backups on the site");
   if (res.state !== "configured") throw new Error("UpdraftPlus is still not installed and active");
 
   const result: BackupSetupResult = {

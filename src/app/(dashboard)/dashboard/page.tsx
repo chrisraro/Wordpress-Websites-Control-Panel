@@ -491,9 +491,9 @@ export default async function DashboardPage({
                     title: `Set up UpdraftPlus backups on ${refreshTargets.length} ${activeEnv} site${refreshTargets.length === 1 ? "" : "s"}?`,
                     description:
                       "On each site: installs and activates UpdraftPlus from wordpress.org if it is missing, adds " +
-                      "Google Drive as a backup destination (existing destinations are kept), sets weekly file and " +
-                      "database backups where none are scheduled, and re-registers the schedule. Sites already set " +
-                      "up are left as they are. Afterwards, Google Drive still needs one \"Sign in with Google\" per " +
+                      "Google Drive as a backup destination (existing destinations are kept), and schedules file and " +
+                      "database backups every 2 weeks (anything more frequent, or manual, becomes every 2 weeks; " +
+                      "monthly is kept), starting two weeks after the site's last backup. Afterwards, Google Drive still needs one \"Sign in with Google\" per " +
                       "site as teamocsph@gmail.com, in Settings → UpdraftPlus Backups → Settings.",
                     confirmLabel: "Queue setup",
                     tone: activeEnv === "production" ? "danger" : "default",
